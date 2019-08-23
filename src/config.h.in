@@ -1,0 +1,2 @@
+#define VERSION_MAJOR @rantanplan_VERSION_MAJOR@
+#define VERSION_MINOR @rantanplan_VERSION_MINOR@
