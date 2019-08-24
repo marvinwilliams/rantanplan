@@ -1,74 +1,76 @@
-#include "parser/lexer.hpp"
-#include "parser/location.hpp"
-#include "parser/rules.hpp"
+#include "config.hpp"
+#include "lexer/lexer.hpp"
+#include "lexer/matcher.hpp"
+
 #include <cctype>
 #include <iostream>
 #include <string>
 #include <variant>
 
 struct DetectNumber {
-  using token_type = int;
-  bool matches(const std::vector<char> &current, char c) {
-    std::cout << "Check number for " << c << '\n';
+  using TokenType = int;
+  static bool matches(const std::vector<char> &current, char c) {
+    /* std::cout << "Check number for " << c << '\n'; */
     if (std::isdigit(c) || (current.size() == 0 && (c == '+' || c == '-'))) {
       return true;
     }
     return false;
   }
-  token_type get_token(const std::vector<char> &current,
-                       lexer::Location location) {
+  static TokenType get_token(const std::vector<char> &current) {
     return std::atoi(std::string(current.begin(), current.end()).c_str());
   }
 };
 
 struct TokenString {
-  TokenString(std::string input, lexer::Location location)
-      : input{input}, location{location} {}
+  TokenString(std::string input) : input{input} {}
   std::string input;
-  lexer::Location location;
 };
 
 std::ostream &operator<<(std::ostream &out, const TokenString &ts) {
-  out << "There is '" << ts.input << "' written at ";
-  out << ts.location;
+  out << ts.input;
   return out;
 }
 
 struct DetectString {
-  using token_type = TokenString;
-  bool matches(const std::vector<char> &current, char c) {
-    std::cout << "Check string for " << c << '\n';
+  using TokenType = TokenString;
+  static bool matches(const std::vector<char> &, char c) {
+    /* std::cout << "Check string for " << c << '\n'; */
     return std::isalpha(c);
   }
-  token_type get_token(const std::vector<char> &current,
-                       lexer::Location location) {
-    return token_type(std::string(current.begin(), current.end()), location);
+  static TokenType get_token(const std::vector<char> &current) {
+    return TokenType(std::string(current.begin(), current.end()));
   }
 };
 
 struct DetectAs {
-  using token_type = char;
-  bool matches(const std::vector<char> &current, char c) {
-    std::cout << "Check As for " << c << '\n';
+  using TokenType = char;
+  static bool matches(const std::vector<char> &, char c) {
+    /* std::cout << "Check As for " << c << '\n'; */
     return c == 'a';
   }
-  token_type get_token(const std::vector<char> &s, lexer::Location location) {
-    return s[0];
-  }
+  static TokenType get_token(const std::vector<char> &s) { return s[0]; }
 };
 
+std::ostream &operator<<(std::ostream &out, lexer::ErrorToken) {
+  out << "This should never happen" << '\n';
+  return out;
+}
+
 int main(int argc, char *argv[]) {
-  std::string input = "\
-This1b1is+1a-test+aaa10-10aaab0baaa-abab+b";
+  std::cout << "Rantanplan v" << VERSION_MAJOR << '.' << VERSION_MINOR << '\n';
+  std::string input = " This  1b\n 1is +1a-test  _[  +a{aa10 \n-10a\naab  "
+                      "\n0ba  \n  aa-abab+b";
   std::cout << input << '\n';
-  lexer::Lexer<lexer::Rules<DetectAs, DetectString, DetectNumber>> lexer;
+  lexer::Lexer<lexer::Matcher<DetectAs, DetectString, DetectNumber>> lexer;
+  std::string name = "test";
+  auto tokens = lexer.lex(name, input.begin(), input.end());
   try {
-    std::string name = "test";
-    auto vector = lexer.lex(name, input.begin(), input.end());
-    std::cout << "Lexing complete!" << std::endl;
-    for (auto x : vector) {
-      std::visit([](auto t) { std::cout << t << '\n'; }, x);
+    while (!tokens.end()) {
+      std::cout << tokens.location() << ": ";
+      std::visit([](auto t) { std::cout << t << '\n'; }, *tokens);
+      tokens++;
     }
+    std::cout << "Lexing complete!" << std::endl;
   } catch (const lexer::LexerException &e) {
     if (e.location()) {
       std::cerr << *e.location();

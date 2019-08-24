@@ -6,13 +6,15 @@
 #include <string_view>
 
 namespace lexer {
+
+// A position represents one point in a file
 class Position {
 public:
-  explicit Position(std::string_view filename = "", unsigned int line = 1u,
+  explicit Position() : Position(std::string_view{}) {}
+
+  explicit Position(std::string_view filename, unsigned int line = 1u,
                     unsigned int column = 1u)
       : filename_{filename}, line_{line}, column_{column} {}
-
-  Position(const Position &position) = default;
 
   std::string_view filename() const { return filename_; }
 
@@ -20,18 +22,14 @@ public:
 
   unsigned int column() const { return column_; }
 
-  void advance_line(int count = 1) {
-    line_ =
-        static_cast<unsigned int>(std::max(static_cast<int>(line_) + count, 1));
+  void advance_line(unsigned int count = 1) {
     if (count != 0) {
+      line_ += count;
       column_ = 1u;
     }
   }
 
-  void advance_column(int count = 1) {
-    column_ = static_cast<unsigned int>(
-        std::max(static_cast<int>(column_) + count, 1));
-  }
+  void advance_column(unsigned int count = 1) { column_ += count; }
 
 private:
   std::string_view filename_;
@@ -39,22 +37,13 @@ private:
   unsigned int column_;
 };
 
-inline Position &operator+=(Position &position, int count) {
+inline Position &operator+=(Position &position, unsigned int count) {
   position.advance_column(count);
   return position;
 }
 
-inline Position &operator-=(Position &position, int count) {
-  position.advance_column(-count);
-  return position;
-}
-
-inline Position operator+(Position position, int count) {
+inline Position operator+(Position position, unsigned int count) {
   return position += count;
-}
-
-inline Position operator-(Position position, int count) {
-  return position -= count;
 }
 
 inline bool operator==(const Position &first, const Position &second) {
@@ -70,6 +59,7 @@ std::ostream &operator<<(std::ostream &out, const Position &position) {
   return out;
 }
 
+// A location is a sequence between a begin and an end position
 class Location {
 public:
   explicit Location(const Position &begin, const Position &end)
@@ -77,8 +67,7 @@ public:
 
   explicit Location(const Position &begin) : begin_{begin}, end_{begin} {}
 
-  explicit Location(const std::string &name)
-      : begin_{Position{name}}, end_{Position{name}} {}
+  explicit Location(const std::string &name) : Location{Position{name}} {}
 
   const Position &begin() const { return begin_; }
 
@@ -86,43 +75,22 @@ public:
 
   void step() { begin_ = end_; }
 
-  void advance_line(int count = 1) { end_.advance_line(count); }
+  void advance_line(unsigned int count = 1) { end_.advance_line(count); }
 
-  void advance_column(int count = 1) { end_.advance_column(count); }
-
-  void set_end(const Position &end) { end_ = end; }
+  void advance_column(unsigned int count = 1) { end_.advance_column(count); }
 
 private:
   Position begin_;
   Position end_;
 };
 
-inline Location &operator+=(Location &location, int count) {
+inline Location &operator+=(Location &location, unsigned int count) {
   location.advance_column(count);
   return location;
 }
 
-inline Location &operator-=(Location &location, int count) {
-  location.advance_column(-count);
-  return location;
-}
-
-inline Location operator+(Location location, int count) {
+inline Location operator+(Location location, unsigned int count) {
   return location += count;
-}
-
-inline Location operator-(Location location, int count) {
-  return location -= count;
-}
-
-inline Location &operator+=(Location &location, const Location &end) {
-  location.set_end(end.end());
-  return location;
-}
-
-inline Location operator+(Location location, const Location &end) {
-  location.set_end(end.end());
-  return location;
 }
 
 inline bool operator==(const Location &first, const Location &second) {
@@ -136,8 +104,8 @@ std::ostream &operator<<(std::ostream &out, const Location &location) {
         << ':' << location.end().column();
   } else if (location.begin().line() != location.end().line()) {
     out << '-' << location.end().line() << ':' << location.end().column();
-  } else if (location.begin().column() != location.end().column()) {
-    out << '-' << location.end().column();
+  } else if (location.begin().column() != location.end().column() - 1) {
+    out << '-' << location.end().column() - 1;
   }
   return out;
 }

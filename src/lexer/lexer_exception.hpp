@@ -1,13 +1,14 @@
 #ifndef LEXER_EXCEPTION_HPP
 #define LEXER_EXCEPTION_HPP
 
-#include "location.hpp"
+#include "lexer/location.hpp"
+
 #include <exception>
 #include <optional>
-#include <sstream>
 #include <string>
 
 namespace lexer {
+
 class LexerException : public std::exception {
 public:
   explicit LexerException(const Location &location, const std::string &message)
@@ -16,13 +17,9 @@ public:
       : LexerException(location, "unknown error") {}
   explicit LexerException(const std::string &message) : message_{message} {}
 
-  const char *what() const noexcept override {
-    return message_.c_str();
-  }
+  const char *what() const noexcept override { return message_.c_str(); }
 
-  std::optional<Location> location() const noexcept {
-    return location_;
-  }
+  std::optional<Location> location() const noexcept { return location_; }
 
 private:
   std::optional<Location> location_;

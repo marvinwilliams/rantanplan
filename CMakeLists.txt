@@ -4,7 +4,6 @@ set(rantanplan_VERSION_MAJOR 0)
 set(rantanplan_VERSION_MINOR 1)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "-std=c++17 -g")
 
 add_compile_options(
   -Wall
@@ -20,8 +19,8 @@ add_compile_options(
   )
 
 configure_file(
-  "src/config.h.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/config.h"
+  "src/config.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/config.hpp"
   )
 
 add_executable(rantanplan
@@ -29,5 +28,6 @@ add_executable(rantanplan
   )
 
 target_include_directories(rantanplan PRIVATE "src/")
+target_include_directories(rantanplan PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 install(TARGETS rantanplan DESTINATION "${PROJECT_SOURCE_DIR}/bin")
