@@ -85,7 +85,7 @@ public:
 private:
   template <typename CharIterator>
   void get_next_token(TokenIterator<CharIterator> &token_iterator) const {
-    // Skip whitespace
+    // Skip blanks
     while (token_iterator.to_ != token_iterator.end_) {
       CharT current_char = *token_iterator.to_;
       if (Traits::is_blank(current_char)) {
@@ -112,7 +112,11 @@ private:
     // Read the next char until it cannot be part of any token
     while (token_iterator.to_ != token_iterator.end_) {
       CharT current_char = *token_iterator.to_;
-      if (Traits::is_newline(current_char) || Traits::is_blank(current_char)) {
+      if (Traits::end_at_newline && Traits::is_newline(current_char)) {
+        matcher.end();
+        break;
+      }
+      if (Traits::end_at_blank && Traits::is_blank(current_char)) {
         matcher.end();
         break;
       }
@@ -122,6 +126,9 @@ private:
       }
       current_string.push_back(current_char);
       token_iterator.location_.advance_column();
+      if (!Traits::end_at_newline && Traits::is_newline(current_char)) {
+        token_iterator.location_.advance_line();
+      }
       token_iterator.to_++;
     }
     // The char cannot be part of any token

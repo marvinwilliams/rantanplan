@@ -101,9 +101,9 @@ std::ostream &operator<<(std::ostream &out, const Location &location) {
   out << location.begin();
   if (location.begin().filename() != location.end().filename()) {
     out << '-' << location.end().filename() << ':' << location.end().line()
-        << ':' << location.end().column();
+        << ':' << location.end().column() - 1;
   } else if (location.begin().line() != location.end().line()) {
-    out << '-' << location.end().line() << ':' << location.end().column();
+    out << '-' << location.end().line() << ':' << location.end().column() - 1;
   } else if (location.begin().column() != location.end().column() - 1) {
     out << '-' << location.end().column() - 1;
   }
