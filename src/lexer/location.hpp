@@ -10,10 +10,10 @@ namespace lexer {
 // A position represents one point in a file
 class Position {
 public:
-  explicit Position() : Position(std::string_view{}) {}
+  Position() : Position(std::string_view{}) {}
 
-  explicit Position(std::string_view filename, unsigned int line = 1u,
-                    unsigned int column = 1u)
+  Position(std::string_view filename, unsigned int line = 1u,
+           unsigned int column = 1u)
       : filename_{filename}, line_{line}, column_{column} {}
 
   std::string_view filename() const { return filename_; }
@@ -62,12 +62,18 @@ std::ostream &operator<<(std::ostream &out, const Position &position) {
 // A location is a sequence between a begin and an end position
 class Location {
 public:
-  explicit Location(const Position &begin, const Position &end)
+  Location(const Position &begin, const Position &end)
       : begin_{begin}, end_{end} {}
 
-  explicit Location(const Position &begin) : begin_{begin}, end_{begin} {}
+  Location(const Position &begin) : begin_{begin}, end_{begin} {}
 
-  explicit Location(const std::string &name) : Location{Position{name}} {}
+  Location(const std::string &name) : Location{Position{name}} {}
+
+  Location(const Location &other) : begin_{other.begin_}, end_{other.end_} {}
+
+  Location() : Location{Position{}} {}
+
+  Location &operator=(const Location &) = default;
 
   const Position &begin() const { return begin_; }
 
@@ -89,7 +95,9 @@ inline Location &operator+=(Location &location, unsigned int count) {
   return location;
 }
 
-inline Location operator+(Location location, unsigned int count) {
+inline Location operator+(Location location2, unsigned int count) {
+  Location location;
+  location = location2;
   return location += count;
 }
 

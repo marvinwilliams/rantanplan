@@ -11,11 +11,11 @@ namespace lexer {
 
 class LexerException : public std::exception {
 public:
-  explicit LexerException(const Location &location, const std::string &message)
-      : location_{location}, message_{message} {}
-  explicit LexerException(const Location &location)
+  LexerException(const Location &location, const std::string &message)
+      : location_(location), message_{message} {}
+  LexerException(const Location &location)
       : LexerException(location, "unknown error") {}
-  explicit LexerException(const std::string &message) : message_{message} {}
+  LexerException(const std::string &message) : message_{message} {}
 
   const char *what() const noexcept override { return message_.c_str(); }
 
