@@ -85,6 +85,8 @@ public:
 
   void advance_column(unsigned int count = 1) { end_.advance_column(count); }
 
+  friend Location &operator+=(Location &, const Location &);
+
 private:
   Position begin_;
   Position end_;
@@ -95,10 +97,17 @@ inline Location &operator+=(Location &location, unsigned int count) {
   return location;
 }
 
-inline Location operator+(Location location2, unsigned int count) {
-  Location location;
-  location = location2;
+inline Location operator+(Location location, unsigned int count) {
   return location += count;
+}
+
+inline Location &operator+=(Location &begin, const Location &end) {
+  begin.end_ = end.begin_;
+  return begin;
+}
+
+inline Location operator+(Location begin, const Location &end) {
+  return begin += end;
 }
 
 inline bool operator==(const Location &first, const Location &second) {

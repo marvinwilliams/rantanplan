@@ -47,7 +47,9 @@ template <typename Rule> struct Wrapper {
 
 using detail::Wrapper;
 // Used for default initialization and represents an invalid token.
-struct ErrorToken {};
+struct ErrorToken {
+  static constexpr auto printable_name = "";
+};
 
 
 // This class manages the given rules
