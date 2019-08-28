@@ -28,6 +28,7 @@ add_executable(rantanplan
   )
 
 target_include_directories(rantanplan PRIVATE "src/")
+target_include_directories(rantanplan PRIVATE "lib/lexer/include/")
 target_include_directories(rantanplan PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 option(DEBUG "DEBUG test" OFF)

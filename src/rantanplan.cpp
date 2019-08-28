@@ -1,6 +1,7 @@
 #include "config.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
+#include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/parser_exception.hpp"
 /* #include "parser/parser.hpp" */
@@ -20,8 +21,10 @@ int main(int, char *argv[]) {
     std::cout << "Rantanplan v" << VERSION_MAJOR << '.' << VERSION_MINOR
               << '\n';
   }
-  std::ifstream input(argv[1]);
-  std::string filename(argv[1]);
+  std::ifstream domain(argv[1]);
+  std::ifstream problem(argv[2]);
+  std::string domain_file(argv[1]);
+  std::string problem_file(argv[2]);
 
   using Rules =
       lexer::RuleSet<parser::rules::Primitive<parser::tokens::LParen>,
@@ -37,17 +40,28 @@ int main(int, char *argv[]) {
                      parser::rules::Section, parser::rules::Identifier,
                      parser::rules::Variable, parser::rules::Comment>;
   lexer::Lexer<Rules> lexer;
-  auto tokens = lexer.lex(filename, std::istreambuf_iterator<char>(input),
-                          std::istreambuf_iterator<char>());
-  parser::Parser parser(tokens);
+  parser::ast::AST ast;
   try {
-    parser.parse();
+    auto domain_tokens =
+        lexer.lex(domain_file, std::istreambuf_iterator<char>(domain),
+                  std::istreambuf_iterator<char>());
+    parser::parse_domain(domain_tokens, ast);
+    auto problem_tokens =
+        lexer.lex(problem_file, std::istreambuf_iterator<char>(problem),
+                  std::istreambuf_iterator<char>());
+
+    parser::parse_problem(problem_tokens, ast);
   } catch (const parser::ParserException &e) {
     if (e.location()) {
       std::cerr << *e.location();
       std::cerr << ": ";
     }
     std::cerr << e.what() << std::endl;
+  } catch (const lexer::LexerException &e) {
+    if (e.location()) {
+      std::cerr << *e.location();
+      std::cerr << ": ";
+    }
   }
   //clang-format off
   /* while (!tokens.end()) { */
