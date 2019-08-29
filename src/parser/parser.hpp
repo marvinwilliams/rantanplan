@@ -114,7 +114,7 @@ parse_argument_list(TokenIterator &token_iterator) {
           ast::Name{token_iterator.location(), name});
       arguments->push_back(std::move(argument));
     }
-    token_iterator++
+    token_iterator++;
   }
   return std::make_unique<ast::ArgumentList>(begin + token_iterator.location(),
                                              std::move(arguments));
@@ -123,7 +123,6 @@ parse_argument_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::TypedNameList>
 parse_typed_name_list(TokenIterator &token_iterator) {
-  skip_comments(token_iterator);
   auto begin = token_iterator.location();
   auto lists = std::make_unique<
       std::vector<std::unique_ptr<ast::SingleTypedNameList>>>();
@@ -150,7 +149,6 @@ parse_typed_name_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::TypedVariableList>
 parse_typed_variable_list(TokenIterator &token_iterator) {
-  skip_comments(token_iterator);
   auto begin = token_iterator.location();
   auto lists = std::make_unique<
       std::vector<std::unique_ptr<ast::SingleTypedVariableList>>>();
@@ -177,7 +175,6 @@ parse_typed_variable_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::RequirementList>
 parse_requirement_list(TokenIterator &token_iterator) {
-  skip_comments(token_iterator);
   auto begin = token_iterator.location();
   auto requirements =
       std::make_unique<std::vector<std::unique_ptr<ast::Requirement>>>();
@@ -196,7 +193,7 @@ template <typename TokenIterator>
 std::unique_ptr<ast::Element>
 parse_requirements(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
-  token_iterator++;
+  advance(token_iterator);
   auto requirement_list = parse_requirement_list(token_iterator);
   return std::make_unique<ast::Element>(ast::RequirementsDef{
       begin + token_iterator.location(), std::move(requirement_list)});
@@ -205,7 +202,7 @@ parse_requirements(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::Element> parse_types(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
-  token_iterator++;
+  advance(token_iterator);
   auto type_list = parse_typed_name_list(token_iterator);
   return std::make_unique<ast::Element>(
       ast::TypesDef{begin + token_iterator.location(), std::move(type_list)});
@@ -214,7 +211,7 @@ std::unique_ptr<ast::Element> parse_types(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::Element> parse_constants(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
-  token_iterator++;
+  advance(token_iterator);
   auto constant_list = parse_typed_name_list(token_iterator);
   return std::make_unique<ast::Element>(ast::ConstantsDef{
       begin + token_iterator.location(), std::move(constant_list)});
@@ -223,7 +220,6 @@ std::unique_ptr<ast::Element> parse_constants(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::PredicateList>
 parse_predicate_list(TokenIterator &token_iterator) {
-  skip_comments();
   auto begin = token_iterator.location();
   auto predicates =
       std::make_unique<std::vector<std::unique_ptr<ast::Predicate>>>();
@@ -268,40 +264,50 @@ std::unique_ptr<ast::Condition> parse_condition(TokenIterator &token_iterator) {
                                  std::move(name), std::move(argument_list)});
   } else if (is_precondition && skip_if<tokens::Equality>(token_iterator)) {
     auto name = std::make_unique<ast::Name>(token_iterator.location(), "=");
+    skip_comments(token_iterator);
     auto argument_list = parse_argument_list(token_iterator);
     return std::make_unique<ast::Condition>(
         ast::PredicateEvaluation{begin + token_iterator.location(),
                                  std::move(name), std::move(argument_list)});
   } else if (skip_if<tokens::And>(token_iterator)) {
+    skip_comments(token_iterator);
     auto inner_begin = token_iterator.location();
     auto conditions =
         std::make_unique<std::vector<std::unique_ptr<ast::Condition>>>();
     while (skip_if<tokens::LParen>(token_iterator)) {
+      skip_comments(token_iterator);
       auto condition = parse_condition<is_precondition>(token_iterator);
       conditions->push_back(std::move(condition));
       skip<tokens::RParen>(token_iterator);
+      skip_comments(token_iterator);
     }
     auto condition_list = std::make_unique<ast::ConditionList>(
         inner_begin + token_iterator.location(), std::move(conditions));
     return std::make_unique<ast::Condition>(ast::Conjunction{
         begin + token_iterator.location(), std::move(condition_list)});
   } else if (is_precondition && skip_if<tokens::Or>(token_iterator)) {
+    skip_comments(token_iterator);
     auto inner_begin = token_iterator.location();
     auto conditions =
         std::make_unique<std::vector<std::unique_ptr<ast::Condition>>>();
     while (skip_if<tokens::LParen>(token_iterator)) {
+      skip_comments(token_iterator);
       auto condition = parse_condition<is_precondition>(token_iterator);
       conditions->push_back(std::move(condition));
       skip<tokens::RParen>(token_iterator);
+      skip_comments(token_iterator);
     }
     auto condition_list = std::make_unique<ast::ConditionList>(
         inner_begin + token_iterator.location(), std::move(conditions));
     return std::make_unique<ast::Condition>(ast::Conjunction{
         begin + token_iterator.location(), std::move(condition_list)});
   } else if (skip_if<tokens::Not>(token_iterator)) {
+    skip_comments(token_iterator);
     skip<tokens::LParen>(token_iterator);
+    skip_comments(token_iterator);
     auto condition = parse_condition<is_precondition>(token_iterator);
     skip<tokens::RParen>(token_iterator);
+    skip_comments(token_iterator);
     return std::make_unique<ast::Condition>(
         ast::Negation{begin + token_iterator.location(), std::move(condition)});
   }
@@ -311,14 +317,17 @@ std::unique_ptr<ast::Condition> parse_condition(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::Element> parse_action(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
-  advance(token_iterator);
+  token_iterator++;
   auto name = std::make_unique<ast::Name>(
       token_iterator.location(), get<tokens::Identifier>(token_iterator).name);
   advance(token_iterator);
   skip<tokens::Section>(token_iterator);
+  skip_comments(token_iterator);
   skip<tokens::LParen>(token_iterator);
+  skip_comments(token_iterator);
   auto parameters = parse_typed_variable_list(token_iterator);
   skip<tokens::RParen>(token_iterator);
+  skip_comments(token_iterator);
   std::optional<std::unique_ptr<ast::Precondition>> precondition;
   if (has_type<tokens::Section>(token_iterator)) {
     auto section = get<tokens::Section>(token_iterator);
@@ -326,8 +335,10 @@ std::unique_ptr<ast::Element> parse_action(TokenIterator &token_iterator) {
       auto inner_begin = token_iterator.location();
       advance(token_iterator);
       skip<tokens::LParen>(token_iterator);
+      skip_comments(token_iterator);
       auto condition = parse_condition<true>(token_iterator);
       skip<tokens::RParen>(token_iterator);
+      skip_comments(token_iterator);
       precondition = std::make_unique<ast::Precondition>(
           inner_begin + token_iterator.location(), std::move(condition));
     }
@@ -339,8 +350,10 @@ std::unique_ptr<ast::Element> parse_action(TokenIterator &token_iterator) {
       auto inner_begin = token_iterator.location();
       advance(token_iterator);
       skip<tokens::LParen>(token_iterator);
+      skip_comments(token_iterator);
       auto condition = parse_condition<false>(token_iterator);
       skip<tokens::RParen>(token_iterator);
+      skip_comments(token_iterator);
       effect = std::make_unique<ast::Effect>(
           inner_begin + token_iterator.location(), std::move(condition));
     }
@@ -378,6 +391,7 @@ std::unique_ptr<ast::InitList> parse_init_list(TokenIterator &token_iterator) {
   auto init_conditions =
       std::make_unique<std::vector<std::unique_ptr<ast::InitCondition>>>();
   while (skip_if<tokens::LParen>(token_iterator)) {
+    skip_comments(token_iterator);
     if (has_type<tokens::Identifier>(token_iterator)) {
       auto init_condition = parse_init_condition(token_iterator);
       init_conditions->push_back(std::move(init_condition));
@@ -385,8 +399,10 @@ std::unique_ptr<ast::InitList> parse_init_list(TokenIterator &token_iterator) {
       auto inner_begin = token_iterator.location();
       advance(token_iterator);
       skip<tokens::LParen>(token_iterator);
+      skip_comments(token_iterator);
       auto init_condition = parse_init_condition(token_iterator);
       skip<tokens::RParen>(token_iterator);
+      skip_comments(token_iterator);
       auto init_negation = std::make_unique<ast::InitCondition>(
           ast::InitNegation{inner_begin + token_iterator.location(),
                             std::move(init_condition)});
@@ -412,6 +428,7 @@ std::unique_ptr<ast::Element> parse_goal(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
   advance(token_iterator);
   skip<tokens::LParen>(token_iterator);
+  skip_comments(token_iterator);
   auto goal_conditions = parse_condition<true>(token_iterator);
   skip<tokens::RParen>(token_iterator);
   return std::make_unique<ast::Element>(ast::GoalDef{
@@ -450,8 +467,10 @@ parse_elements(TokenIterator &token_iterator) {
   auto elements =
       std::make_unique<std::vector<std::unique_ptr<ast::Element>>>();
   while (skip_if<tokens::LParen>(token_iterator)) {
+    skip_comments(token_iterator);
     elements->push_back(parse_element<is_domain>(token_iterator));
     skip<tokens::RParen>(token_iterator);
+    skip_comments(token_iterator);
   }
   return std::make_unique<ast::ElementList>(begin + token_iterator.location(),
                                             std::move(elements));
@@ -459,6 +478,7 @@ parse_elements(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::Domain> parse_domain(TokenIterator &token_iterator) {
+  skip_comments(token_iterator);
   lexer::Location begin = token_iterator.location();
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Define>(token_iterator);
@@ -467,8 +487,9 @@ std::unique_ptr<ast::Domain> parse_domain(TokenIterator &token_iterator) {
   auto name = get<tokens::Identifier>(token_iterator).name;
   auto domain_name =
       std::make_unique<ast::Name>(token_iterator.location(), name);
-  advance(token_iterator);
+  token_iterator++;
   skip<tokens::RParen>(token_iterator);
+  skip_comments(token_iterator);
   auto domain_body = parse_elements<true>(token_iterator);
   skip<tokens::RParen>(token_iterator);
   return std::make_unique<ast::Domain>(begin + token_iterator.location(),
@@ -478,6 +499,7 @@ std::unique_ptr<ast::Domain> parse_domain(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::Problem> parse_problem(TokenIterator &token_iterator) {
+  skip_comments(token_iterator);
   lexer::Location begin = token_iterator.location();
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Define>(token_iterator);
@@ -486,15 +508,16 @@ std::unique_ptr<ast::Problem> parse_problem(TokenIterator &token_iterator) {
   auto name = get<tokens::Identifier>(token_iterator).name;
   auto problem_name =
       std::make_unique<ast::Name>(token_iterator.location(), name);
-  advance(token_iterator);
+  token_iterator++;
   skip<tokens::RParen>(token_iterator);
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Section>(token_iterator);
   auto domain_ref = get<tokens::Identifier>(token_iterator).name;
   auto domain_ref_name =
       std::make_unique<ast::Name>(token_iterator.location(), domain_ref);
-  advance(token_iterator);
+  token_iterator++;
   skip<tokens::RParen>(token_iterator);
+  skip_comments(token_iterator);
   auto problem_body = parse_elements<false>(token_iterator);
   skip<tokens::RParen>(token_iterator);
   return std::make_unique<ast::Problem>(
