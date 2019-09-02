@@ -1,10 +1,11 @@
 #include "config.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
+#include "model/model.hpp"
 #include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/parser_exception.hpp"
-/* #include "parser/parser.hpp" */
+#include "parser/pddl_visitor.hpp"
 
 #include <cctype>
 #include <fstream>
@@ -51,61 +52,23 @@ int main(int, char *argv[]) {
                   std::istreambuf_iterator<char>());
 
     parser::parse_problem(problem_tokens, ast);
+    parser::PddlAstParser visitor;
+    visitor.parse(ast);
   } catch (const parser::ParserException &e) {
     if (e.location()) {
       std::cerr << *e.location();
       std::cerr << ": ";
     }
     std::cerr << e.what() << std::endl;
+    return 1;
   } catch (const lexer::LexerException &e) {
     if (e.location()) {
       std::cerr << *e.location();
       std::cerr << ": ";
     }
+    std::cerr << e.what() << std::endl;
+    return 1;
   }
-  //clang-format off
-  /* while (!tokens.end()) { */
-  /*     if (auto t = std::get_if<tokens::Comment>(&*tokens)) { */
-  /*       std::cout << tokens.location() << ": " << t->content << '\n'; */
-  /*     } else if (auto t = std::get_if<tokens::Section>(&*tokens)) { */
-  /*       std::cout << tokens.location() << ": Section " << t->name << '\n'; */
-  /*     } else if (auto t = std::get_if<tokens::Variable>(&*tokens)) { */
-  /*       std::cout << tokens.location() << ": Variable " << t->name << '\n';
-   */
-  /*     } else if (auto t = std::get_if<tokens::Identifier>(&*tokens)) { */
-  /*       std::cout << tokens.location() << ": Identifier " << t->name << '\n';
-   */
-  /*     } else if (std::get_if<tokens::LParen>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " LParen" << '\n'; */
-  /*     } else if (std::get_if<tokens::RParen>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " RParen" << '\n'; */
-  /*     } else if (std::get_if<tokens::Hyphen>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Hyphen" << '\n'; */
-  /*     } else if (std::get_if<tokens::Equality>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Equality" << '\n'; */
-  /*     } else if (std::get_if<tokens::And>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " And" << '\n'; */
-  /*     } else if (std::get_if<tokens::Or>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Or" << '\n'; */
-  /*     } else if (std::get_if<tokens::Not>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Not" << '\n'; */
-  /*     } else if (std::get_if<tokens::Define>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Define" << '\n'; */
-  /*     } else if (std::get_if<tokens::Domain>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Domain" << '\n'; */
-  /*     } else if (std::get_if<tokens::Problem>(&*tokens)) { */
-  /*       std::cout << tokens.location() << " Problem" << '\n'; */
-  /*     } */
-  /*   try { */
-  /*     tokens++; */
-  /*   } catch (const lexer::LexerException &e) { */
-  /*     if (e.location()) { */
-  /*       std::cerr << *e.location(); */
-  /*       std::cerr << ": "; */
-  /*     } */
-  /*     std::cerr << e.what() << std::endl; */
-  /*   } */
-  /* } */
-  //clang-format on
+
   return 0;
 }

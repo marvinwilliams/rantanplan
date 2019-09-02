@@ -125,18 +125,18 @@ std::unique_ptr<ast::TypedNameList>
 parse_typed_name_list(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
   auto lists = std::make_unique<
-      std::vector<std::unique_ptr<ast::SingleTypedNameList>>>();
+      std::vector<std::unique_ptr<ast::SingleTypeNameList>>>();
   while (has_type<tokens::Identifier>(token_iterator)) {
     auto inner_begin = token_iterator.location();
     auto name_list = parse_name_list(token_iterator);
-    std::optional<std::unique_ptr<ast::Name>> type;
+    std::unique_ptr<ast::Name> type = nullptr;
     if (skip_if<tokens::Hyphen>(token_iterator)) {
       type = std::make_unique<ast::Name>(
           token_iterator.location(),
           get<tokens::Identifier>(token_iterator).name);
       token_iterator++;
     }
-    auto single_list = std::make_unique<ast::SingleTypedNameList>(
+    auto single_list = std::make_unique<ast::SingleTypeNameList>(
         inner_begin + token_iterator.location(), std::move(name_list),
         std::move(type));
     lists->push_back(std::move(single_list));
@@ -151,18 +151,18 @@ std::unique_ptr<ast::TypedVariableList>
 parse_typed_variable_list(TokenIterator &token_iterator) {
   auto begin = token_iterator.location();
   auto lists = std::make_unique<
-      std::vector<std::unique_ptr<ast::SingleTypedVariableList>>>();
+      std::vector<std::unique_ptr<ast::SingleTypeVariableList>>>();
   while (has_type<tokens::Variable>(token_iterator)) {
     auto inner_begin = token_iterator.location();
     auto variable_list = parse_variable_list(token_iterator);
-    std::optional<std::unique_ptr<ast::Name>> type;
+    std::unique_ptr<ast::Name> type = nullptr;
     if (skip_if<tokens::Hyphen>(token_iterator)) {
       type = std::make_unique<ast::Name>(
           token_iterator.location(),
           get<tokens::Identifier>(token_iterator).name);
       token_iterator++;
     }
-    auto single_list = std::make_unique<ast::SingleTypedVariableList>(
+    auto single_list = std::make_unique<ast::SingleTypeVariableList>(
         inner_begin + token_iterator.location(), std::move(variable_list),
         std::move(type));
     lists->push_back(std::move(single_list));
@@ -328,7 +328,7 @@ std::unique_ptr<ast::Element> parse_action(TokenIterator &token_iterator) {
   auto parameters = parse_typed_variable_list(token_iterator);
   skip<tokens::RParen>(token_iterator);
   skip_comments(token_iterator);
-  std::optional<std::unique_ptr<ast::Precondition>> precondition;
+  std::unique_ptr<ast::Precondition> precondition = nullptr;
   if (has_type<tokens::Section>(token_iterator)) {
     auto section = get<tokens::Section>(token_iterator);
     if (section.name == "precondition") {
@@ -343,7 +343,7 @@ std::unique_ptr<ast::Element> parse_action(TokenIterator &token_iterator) {
           inner_begin + token_iterator.location(), std::move(condition));
     }
   }
-  std::optional<std::unique_ptr<ast::Effect>> effect;
+  std::unique_ptr<ast::Effect> effect = nullptr;
   if (has_type<tokens::Section>(token_iterator)) {
     auto section = get<tokens::Section>(token_iterator);
     if (section.name == "effect") {

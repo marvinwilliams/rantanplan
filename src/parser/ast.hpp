@@ -4,7 +4,6 @@
 #include "lexer/location.hpp"
 
 #include <memory>
-#include <optional>
 #include <variant>
 #include <vector>
 
@@ -29,10 +28,10 @@ struct Name : Node {
 };
 
 struct Variable : Node {
-  Variable(const lexer::Location &location, const std::string &variable)
-      : Node{location}, variable{variable} {}
+  Variable(const lexer::Location &location, const std::string &name)
+      : Node{location}, name{name} {}
 
-  std::string variable;
+  std::string name;
 };
 
 using Argument = std::variant<Name, Variable>;
@@ -60,12 +59,11 @@ template <typename T> struct SingleTypeList : Node {
   using element_type = List<T>;
 
   SingleTypeList(const lexer::Location &location,
-                 std::unique_ptr<element_type> list,
-                 std::optional<std::unique_ptr<Name>> type = std::nullopt)
+                 std::unique_ptr<element_type> list, std::unique_ptr<Name> type)
       : Node{location}, list{std::move(list)}, type{std::move(type)} {}
 
   std::unique_ptr<element_type> list;
-  std::optional<std::unique_ptr<Name>> type;
+  std::unique_ptr<Name> type;
 };
 
 template <typename T> struct TypedList : Node {
@@ -84,8 +82,8 @@ using NameList = detail::List<Name>;
 using VariableList = detail::List<Variable>;
 using RequirementList = detail::List<Requirement>;
 using ArgumentList = detail::List<Argument>;
-using SingleTypedNameList = detail::SingleTypeList<Name>;
-using SingleTypedVariableList = detail::SingleTypeList<Variable>;
+using SingleTypeNameList = detail::SingleTypeList<Name>;
+using SingleTypeVariableList = detail::SingleTypeList<Variable>;
 using TypedNameList = detail::TypedList<Name>;
 using TypedVariableList = detail::TypedList<Variable>;
 
@@ -196,16 +194,16 @@ struct Effect : Node {
 struct ActionDef : Node {
   ActionDef(const lexer::Location &location, std::unique_ptr<Name> name,
             std::unique_ptr<TypedVariableList> parameters,
-            std::optional<std::unique_ptr<Precondition>> precondition,
-            std::optional<std::unique_ptr<Effect>> effect)
+            std::unique_ptr<Precondition> precondition = nullptr,
+            std::unique_ptr<Effect> effect = nullptr)
       : Node{location}, name{std::move(name)}, parameters{std::move(
                                                    parameters)},
         precondition{std::move(precondition)}, effect{std::move(effect)} {}
 
   std::unique_ptr<Name> name;
   std::unique_ptr<TypedVariableList> parameters;
-  std::optional<std::unique_ptr<Precondition>> precondition;
-  std::optional<std::unique_ptr<Effect>> effect;
+  std::unique_ptr<Precondition> precondition;
+  std::unique_ptr<Effect> effect;
 };
 
 struct ObjectsDef : Node {

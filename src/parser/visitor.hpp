@@ -1,7 +1,8 @@
-#ifndef VISITOR_H
-#define VISITOR_H
+#ifndef VISITOR_HPP
+#define VISITOR_HPP
 
-#include "ast.h"
+#include "parser/ast.hpp"
+
 #include <type_traits>
 
 namespace parser {
@@ -22,17 +23,30 @@ public:
 
   bool traverse(const AST &ast) {
     get_derived_().visit_begin(ast);
-    if (!ast.get_domain()) {
-      return get_derived_().visit_end(ast);
+    if (ast.get_domain()) {
+      if (!get_derived_().traverse(*ast.get_domain())) {
+        return false;
+      }
     }
-    return get_derived_().traverse(*ast.get_domain()) &&
-           get_derived_().visit_end(ast);
+    if (ast.get_problem()) {
+      if (!get_derived_().traverse(*ast.get_problem())) {
+        return false;
+      }
+    }
+    return get_derived_().visit_end(ast);
   }
 
   bool traverse(const Domain &domain) {
     return get_derived_().visit_begin(domain) &&
            get_derived_().traverse(*domain.name) &&
-    traverse_(*domain.domain_body) && get_derived_().visit_end(domain);
+           traverse(*domain.domain_body) && get_derived_().visit_end(domain);
+  }
+
+  bool traverse(const Problem &problem) {
+    return get_derived_().visit_begin(problem) &&
+           get_derived_().traverse(*problem.name) &&
+           get_derived_().traverse(*problem.domain_ref) &&
+           traverse(*problem.problem_body) && get_derived_().visit_end(problem);
   }
 
   bool traverse(const Element &element) {
@@ -42,7 +56,7 @@ public:
 
   bool traverse(const RequirementsDef &requirements_def) {
     return get_derived_().visit_begin(requirements_def) &&
-           get_derived_().traverse(*requirements_def.requirements) &&
+           get_derived_().traverse(*requirements_def.requirement_list) &&
            get_derived_().visit_end(requirements_def);
   }
 
@@ -69,12 +83,48 @@ public:
            get_derived_().traverse(*action_def.name) &&
            get_derived_().traverse(*action_def.parameters) &&
            (action_def.precondition
-                ? get_derived_().traverse(*action_def.precondition.value())
+                ? get_derived_().traverse(*action_def.precondition)
                 : true) &&
-           (action_def.effect
-                ? get_derived_().traverse(*action_def.effect.value())
-                : true) &&
+           (action_def.effect ? get_derived_().traverse(*action_def.effect)
+                              : true) &&
            get_derived_().visit_end(action_def);
+  }
+
+  bool traverse(const ObjectsDef &objects_def) {
+    return get_derived_().visit_begin(objects_def) &&
+           get_derived_().traverse(*objects_def.objects) &&
+           get_derived_().visit_end(objects_def);
+  }
+
+  bool traverse(const InitDef &init_def) {
+    return get_derived_().visit_begin(init_def) &&
+           get_derived_().traverse(*init_def.init_predicates) &&
+           get_derived_().visit_end(init_def);
+  }
+
+  bool traverse(const GoalDef &goal_def) {
+    return get_derived_().visit_begin(goal_def) &&
+           get_derived_().traverse(*goal_def.goal) &&
+           get_derived_().visit_end(goal_def);
+  }
+
+  bool traverse(const InitCondition &init_condition) {
+    return get_derived_().visit_begin(init_condition) &&
+           std::visit(variant_visitor_, init_condition);
+    get_derived_().visit_end(init_condition);
+  }
+
+  bool traverse(const InitPredicate &init_predicate) {
+    return get_derived_().visit_begin(init_predicate) &&
+           get_derived_().traverse(*init_predicate.name) &&
+           get_derived_().traverse(*init_predicate.arguments) &&
+           get_derived_().visit_end(init_predicate);
+  }
+
+  bool traverse(const InitNegation &init_negation) {
+    return get_derived_().visit_begin(init_negation) &&
+           get_derived_().traverse(*init_negation.init_condition) &&
+           get_derived_().visit_end(init_negation);
   }
 
   bool traverse(const Precondition &precondition) {
@@ -135,8 +185,8 @@ public:
 
   template <typename ListElement>
   bool traverse(const detail::List<ListElement> &list) {
-    return get_derived_().visit_begin(list) && traverse_(*list.elements) &&
-           get_derived_().visit_end(list);
+    return get_derived_().visit_begin(list) &&
+           traverse_vector(*list.elements) && get_derived_().visit_end(list);
   }
 
   template <typename ListElement>
@@ -144,7 +194,7 @@ public:
     return get_derived_().visit_begin(single_typed_list) &&
            get_derived_().traverse(*single_typed_list.list) &&
            (single_typed_list.type
-                ? get_derived_().traverse(single_typed_list.type.value())
+                ? get_derived_().traverse(*single_typed_list.type)
                 : true) &&
            get_derived_().visit_end(single_typed_list);
   }
@@ -152,7 +202,8 @@ public:
   template <typename ListElement>
   bool traverse(const detail::TypedList<ListElement> &typed_list) {
     return get_derived_().visit_begin(typed_list) &&
-           traverse_(*typed_list.lists) && get_derived_().visit_end(typed_list);
+           traverse_vector(*typed_list.lists) &&
+           get_derived_().visit_end(typed_list);
   }
 
   template <typename Node> bool traverse(const Node &node) {
@@ -160,8 +211,13 @@ public:
   }
 
   // Visit functions to be overwritten.
-  template <typename Node> bool visit_begin(const Node &) { return true; }
-  template <typename Node> bool visit_end(const Node &) { return true; }
+  template <typename Node> constexpr bool visit_begin(const Node &) {
+    return true;
+  }
+
+  template <typename Node> constexpr bool visit_end(const Node &) {
+    return true;
+  }
 
   virtual ~Visitor() {}
 
@@ -180,7 +236,7 @@ private:
   };
 
   template <typename T>
-  bool traverse_(const std::vector<std::unique_ptr<T>> &element) {
+  bool traverse_vector(const std::vector<std::unique_ptr<T>> &element) {
     for (auto &c : element) {
       if (!get_derived_().traverse(*c)) {
         return false;
@@ -193,6 +249,7 @@ private:
 };
 
 } // namespace visitor
+
 } // namespace parser
 
-#endif /* end of include guard: VISITOR_H */
+#endif /* end of include guard: VISITOR_HPP */
