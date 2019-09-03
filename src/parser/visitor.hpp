@@ -110,8 +110,8 @@ public:
 
   bool traverse(const InitCondition &init_condition) {
     return get_derived_().visit_begin(init_condition) &&
-           std::visit(variant_visitor_, init_condition);
-    get_derived_().visit_end(init_condition);
+           std::visit(variant_visitor_, init_condition) &&
+           get_derived_().visit_end(init_condition);
   }
 
   bool traverse(const InitPredicate &init_predicate) {
@@ -148,8 +148,8 @@ public:
 
   bool traverse(const Condition &condition) {
     return get_derived_().visit_begin(condition) &&
-           std::visit(variant_visitor_, condition);
-    get_derived_().visit_end(condition);
+           std::visit(variant_visitor_, condition) &&
+           get_derived_().visit_end(condition);
   }
 
   bool traverse(const PredicateEvaluation &predicate_evaluation) {
@@ -179,7 +179,7 @@ public:
 
   bool traverse(const Argument &argument) {
     return get_derived_().visit_begin(argument) &&
-           std::visit(variant_visitor_, argument);
+           std::visit(variant_visitor_, argument) &&
     get_derived_().visit_end(argument);
   }
 

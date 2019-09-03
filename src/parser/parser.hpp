@@ -299,7 +299,7 @@ std::unique_ptr<ast::Condition> parse_condition(TokenIterator &token_iterator) {
     }
     auto condition_list = std::make_unique<ast::ConditionList>(
         inner_begin + token_iterator.location(), std::move(conditions));
-    return std::make_unique<ast::Condition>(ast::Conjunction{
+    return std::make_unique<ast::Condition>(ast::Disjunction{
         begin + token_iterator.location(), std::move(condition_list)});
   } else if (skip_if<tokens::Not>(token_iterator)) {
     skip_comments(token_iterator);

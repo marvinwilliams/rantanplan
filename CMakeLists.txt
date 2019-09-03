@@ -31,10 +31,10 @@ target_include_directories(rantanplan PRIVATE "src/")
 target_include_directories(rantanplan PRIVATE "lib/lexer/include/")
 target_include_directories(rantanplan PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
-add_custom_command(TARGET rantanplan POST_BUILD
-                  COMMAND ./build/rantanplan ARGS ../master_thesis/domains/barman/domain.pddl ../master_thesis/domains/barman/p01.pddl
-                  WORKING_DIRECTORY ..
-                  )
+# add_custom_command(TARGET rantanplan POST_BUILD
+#                   COMMAND ./build/rantanplan ARGS ../master_thesis/domains/barman/domain.pddl ../master_thesis/domains/barman/p01.pddl
+#                   WORKING_DIRECTORY ..
+#                   )
 
 option(DEBUG "DEBUG test" OFF)
 

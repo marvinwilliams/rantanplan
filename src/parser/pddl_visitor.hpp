@@ -41,7 +41,7 @@ private:
 
   Context context;
   model::Problem problem;
-  bool negated;
+  bool negated = false;
   std::vector<model::Condition> condition_stack;
   model::TypePtr type_ptr = 0;
 
@@ -324,22 +324,30 @@ private:
 
   bool visit_begin(const ast::Effect &) {
     context = Context::Effect;
-    negated = false;
     return true;
   }
 
   bool visit_begin(const ast::Precondition &) {
     context = Context::Precondition;
-    negated = false;
     return true;
   }
 
-  bool visit_begin(const ast::InitCondition &) {
-    negated = false;
+  bool visit_begin(const ast::Negation &) {
+    negated = !negated;
+    return true;
+  }
+
+  bool visit_end(const ast::Negation &) {
+    negated = !negated;
     return true;
   }
 
   bool visit_begin(const ast::InitNegation &) {
+    negated = !negated;
+    return true;
+  }
+
+  bool visit_end(const ast::InitNegation &) {
     negated = !negated;
     return true;
   }
@@ -351,11 +359,13 @@ private:
           "Predicate \"" + ast_init_predicate.name->name + "\" not defined";
       throw ParserException(ast_init_predicate.name->location, msg.c_str());
     }
+    // Negated init conditions are irrelevant with the closed-world assumption
+    if (negated) {
+      return true;
+    }
     model::PredicatePtr predicate_ptr =
         std::distance(problem.predicates.cbegin(), p);
     auto predicate = model::PredicateEvaluation{std::move(predicate_ptr)};
-    predicate.negated = negated;
-    negated = false;
     problem.initial_state.push_back(std::move(predicate));
     return true;
   }
@@ -382,36 +392,50 @@ private:
         std::distance(problem.predicates.cbegin(), p);
     auto predicate = model::PredicateEvaluation{std::move(predicate_ptr)};
     predicate.negated = negated;
-    negated = false;
     condition_stack.push_back(std::move(predicate));
     return true;
   }
 
-  bool visit_begin(const ast::Negation &) {
-    negated = !negated;
+  bool visit_begin(const ast::Conjunction &) {
+    auto junction = model::Junction{};
+    if (negated) {
+      junction.connective = model::Junction::Connective::Or;
+    } else {
+      junction.connective = model::Junction::Connective::And;
+    }
+    condition_stack.push_back(std::move(junction));
     return true;
   }
 
-  bool visit_end(const ast::Condition &) {
-    auto condition = condition_stack.back();
+  bool visit_begin(const ast::Disjunction &) {
+    auto junction = model::Junction{};
+    if (negated) {
+      junction.connective = model::Junction::Connective::And;
+    } else {
+      junction.connective = model::Junction::Connective::Or;
+    }
+    condition_stack.push_back(std::move(junction));
+    return true;
+  }
+
+  bool visit_end(const ast::PredicateEvaluation &) {
+    auto last_condition =
+        std::get<model::PredicateEvaluation>(condition_stack.back());
     condition_stack.pop_back();
     if (condition_stack.empty()) {
       if (context == Context::Precondition) {
-        problem.actions.back().precondition = std::move(condition);
+        problem.actions.back().precondition = std::move(last_condition);
       } else if (context == Context::Effect) {
-        problem.actions.back().effect = std::move(condition);
+        problem.actions.back().effect = std::move(last_condition);
       } else if (context == Context::Goal) {
-        problem.goal = std::move(condition);
+        problem.goal = std::move(last_condition);
       } else {
         throw ParserException("Internal error occurred while parsing");
       }
     } else {
-      if (std::holds_alternative<model::And>(condition_stack.back())) {
-        std::get<model::And>(condition_stack.back())
-            .arguments.push_back(std::move(condition));
-      } else if (std::holds_alternative<model::Or>(condition_stack.back())) {
-        std::get<model::Or>(condition_stack.back())
-            .arguments.push_back(std::move(condition));
+      if (std::holds_alternative<model::Junction>(condition_stack.back())) {
+        auto &junction = std::get<model::Junction>(condition_stack.back());
+        junction.arguments.push_back(std::move(last_condition));
       } else {
         throw ParserException("Internal error occurred while parsing");
       }
@@ -419,18 +443,57 @@ private:
     return true;
   }
 
-  bool visit_begin(const ast::Conjunction &) {
-    auto conjunction = model::And{};
-    conjunction.negated = negated;
-    negated = false;
-    condition_stack.push_back(std::move(conjunction));
+  bool visit_end(const ast::Conjunction &) {
+    auto last_condition = std::get<model::Junction>(condition_stack.back());
+    condition_stack.pop_back();
+    if (condition_stack.empty()) {
+      if (context == Context::Precondition) {
+        problem.actions.back().precondition = std::move(last_condition);
+      } else if (context == Context::Effect) {
+        problem.actions.back().effect = std::move(last_condition);
+      } else if (context == Context::Goal) {
+        problem.goal = std::move(last_condition);
+      } else {
+        throw ParserException("Internal error occurred while parsing");
+      }
+    } else {
+      if (std::holds_alternative<model::Junction>(condition_stack.back())) {
+        auto &junction = std::get<model::Junction>(condition_stack.back());
+        if (junction.connective == last_condition.connective) {
+          junction.arguments.insert(junction.arguments.end(),
+                                    last_condition.arguments.begin(),
+                                    last_condition.arguments.end());
+        } else {
+          junction.arguments.push_back(std::move(last_condition));
+        }
+      } else {
+        throw ParserException("Internal error occurred while parsing");
+      }
+    }
     return true;
   }
 
-  bool visit_begin(const ast::Disjunction &) {
-    auto disjunction = model::Or{};
-    disjunction.negated = negated;
-    condition_stack.push_back(std::move(disjunction));
+  bool visit_end(const ast::Disjunction &) {
+    auto last_condition = std::get<model::Junction>(condition_stack.back());
+    condition_stack.pop_back();
+    if (condition_stack.empty()) {
+      if (context == Context::Precondition) {
+        problem.actions.back().precondition = std::move(last_condition);
+      } else if (context == Context::Effect) {
+        problem.actions.back().effect = std::move(last_condition);
+      } else if (context == Context::Goal) {
+        problem.goal = std::move(last_condition);
+      } else {
+        throw ParserException("Internal error occurred while parsing");
+      }
+    } else {
+      if (std::holds_alternative<model::Junction>(condition_stack.back())) {
+        auto &junction = std::get<model::Junction>(condition_stack.back());
+        junction.arguments.push_back(std::move(last_condition));
+      } else {
+        throw ParserException("Internal error occurred while parsing");
+      }
+    }
     return true;
   }
 

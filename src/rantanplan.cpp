@@ -6,6 +6,7 @@
 #include "parser/parser.hpp"
 #include "parser/parser_exception.hpp"
 #include "parser/pddl_visitor.hpp"
+#include "grounding/normalize.hpp"
 
 #include <cctype>
 #include <fstream>
@@ -53,7 +54,10 @@ int main(int, char *argv[]) {
 
     parser::parse_problem(problem_tokens, ast);
     parser::PddlAstParser visitor;
-    visitor.parse(ast);
+    auto problem = visitor.parse(ast);
+    std::cout << problem;
+    grounding::normalize(problem);
+    std::cout << problem;
   } catch (const parser::ParserException &e) {
     if (e.location()) {
       std::cerr << *e.location();
