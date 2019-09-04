@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "grounding/normalize.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
 #include "model/model.hpp"
@@ -6,14 +7,18 @@
 #include "parser/parser.hpp"
 #include "parser/parser_exception.hpp"
 #include "parser/pddl_visitor.hpp"
-#include "grounding/normalize.hpp"
+#include "sat/ipasir_solver.hpp"
 
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <random>
 #include <string>
 #include <variant>
+
+using namespace std::chrono_literals;
 
 int main(int, char *argv[]) {
   if constexpr (debug_mode) {
@@ -58,6 +63,32 @@ int main(int, char *argv[]) {
     std::cout << abstract_problem;
     auto problem = grounding::normalize(abstract_problem);
     std::cout << problem;
+    sat::IpasirSolver solver;
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_int_distribution<> dis(1, 100000);
+    std::uniform_int_distribution<> dis2(5, 50);
+    int count = 0;
+    int length = dis2(gen);
+    for (int i = 0; i < 100000000; ++i) {
+      solver << dis(gen);
+      if (count == length) {
+        count = 0;
+        length = dis2(gen);
+        solver << sat::EndClause;
+      }
+      ++count;
+    }
+    std::cout << "Finished generating" << std::endl;
+    auto model = solver.solve(1s);
+    if (model) {
+      std::cout << "Solved!" << std::endl;
+      /* for (size_t i = 1; i < (*model).assignment.size(); ++i) { */
+      /*   std::cout << (*model)[i] << '\n'; */
+      /* } */
+    } else {
+      std::cout << "Not solved" << std::endl;
+    }
   } catch (const parser::ParserException &e) {
     if (e.location()) {
       std::cerr << *e.location();

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <sstream>
 
 namespace grounding {
 

@@ -23,23 +23,33 @@ configure_file(
   "${CMAKE_CURRENT_BINARY_DIR}/config.hpp"
   )
 
-add_executable(rantanplan
-  src/rantanplan.cpp
+include_directories(PRIVATE "src")
+include_directories(PRIVATE "lib/lexer/include")
+include_directories(PRIVATE "lib/sat/include")
+include_directories(PRIVATE "third_party/sat_solvers")
+include_directories(PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+set(SAT_SOLVER_DIR "${THIRD_PARTY_DIR}/sat_solvers")
+
+add_custom_command(
+  OUTPUT "${SAT_SOLVER_DIR}/glucose4/libipasirglucose4.a"
+  COMMAND make all
+  WORKING_DIRECTORY "${SAT_SOLVER_DIR}/glucose4"
   )
 
-target_include_directories(rantanplan PRIVATE "src/")
-target_include_directories(rantanplan PRIVATE "lib/lexer/include/")
-target_include_directories(rantanplan PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+add_executable(rantanplan_glucose
+  "src/rantanplan.cpp"
+  "${SAT_SOLVER_DIR}/glucose4/libipasirglucose4.a"
+  )
 
-# add_custom_command(TARGET rantanplan POST_BUILD
-#                   COMMAND ./build/rantanplan ARGS ../master_thesis/domains/barman/domain.pddl ../master_thesis/domains/barman/p01.pddl
-#                   WORKING_DIRECTORY ..
-#                   )
+target_link_directories(rantanplan_glucose PRIVATE "${SAT_SOLVER_DIR}/glucose4")
+target_link_libraries(rantanplan_glucose PRIVATE "ipasirglucose4")
 
-option(DEBUG "DEBUG test" OFF)
+option(DEBUG "DEBUG" OFF)
 
 if(DEBUG)
   add_definitions(-DDEBUG)
 endif()
 
-install(TARGETS rantanplan DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_glucose DESTINATION "${PROJECT_SOURCE_DIR}/bin")
