@@ -19,8 +19,6 @@ using namespace ast;
  * in the Derived class */
 template <typename Derived> class Visitor {
 public:
-  Visitor() : variant_visitor_{get_derived_()} {}
-
   bool traverse(const AST &ast) {
     get_derived_().visit_begin(ast);
     if (ast.get_domain()) {
@@ -50,6 +48,9 @@ public:
   }
 
   bool traverse(const Element &element) {
+    auto variant_visitor_ = [this](const auto &node) {
+      return get_derived_().traverse(*node);
+    };
     return get_derived_().visit_begin(element) &&
            std::visit(variant_visitor_, element) && visit_end(element);
   }
@@ -98,44 +99,25 @@ public:
 
   bool traverse(const InitDef &init_def) {
     return get_derived_().visit_begin(init_def) &&
-           get_derived_().traverse(*init_def.init_predicates) &&
+           get_derived_().traverse(init_def.init_condition) &&
            get_derived_().visit_end(init_def);
   }
 
   bool traverse(const GoalDef &goal_def) {
     return get_derived_().visit_begin(goal_def) &&
-           get_derived_().traverse(*goal_def.goal) &&
+           get_derived_().traverse(goal_def.goal) &&
            get_derived_().visit_end(goal_def);
-  }
-
-  bool traverse(const InitCondition &init_condition) {
-    return get_derived_().visit_begin(init_condition) &&
-           std::visit(variant_visitor_, init_condition) &&
-           get_derived_().visit_end(init_condition);
-  }
-
-  bool traverse(const InitPredicate &init_predicate) {
-    return get_derived_().visit_begin(init_predicate) &&
-           get_derived_().traverse(*init_predicate.name) &&
-           get_derived_().traverse(*init_predicate.arguments) &&
-           get_derived_().visit_end(init_predicate);
-  }
-
-  bool traverse(const InitNegation &init_negation) {
-    return get_derived_().visit_begin(init_negation) &&
-           get_derived_().traverse(*init_negation.init_condition) &&
-           get_derived_().visit_end(init_negation);
   }
 
   bool traverse(const Precondition &precondition) {
     return get_derived_().visit_begin(precondition) &&
-           get_derived_().traverse(*precondition.precondition) &&
+           get_derived_().traverse(precondition.precondition) &&
            get_derived_().visit_end(precondition);
   }
 
   bool traverse(const Effect &effect) {
     return get_derived_().visit_begin(effect) &&
-           get_derived_().traverse(*effect.effect) &&
+           get_derived_().traverse(effect.effect) &&
            get_derived_().visit_end(effect);
   }
 
@@ -147,6 +129,9 @@ public:
   }
 
   bool traverse(const Condition &condition) {
+    auto variant_visitor_ = [this](const auto &node) {
+      return get_derived_().traverse(*node);
+    };
     return get_derived_().visit_begin(condition) &&
            std::visit(variant_visitor_, condition) &&
            get_derived_().visit_end(condition);
@@ -173,14 +158,17 @@ public:
 
   bool traverse(const Negation &negation) {
     return get_derived_().visit_begin(negation) &&
-           get_derived_().traverse(*negation.condition) &&
+           get_derived_().traverse(negation.condition) &&
            get_derived_().visit_end(negation);
   }
 
   bool traverse(const Argument &argument) {
+    auto variant_visitor_ = [this](const auto &node) {
+      return get_derived_().traverse(*node);
+    };
     return get_derived_().visit_begin(argument) &&
            std::visit(variant_visitor_, argument) &&
-    get_derived_().visit_end(argument);
+           get_derived_().visit_end(argument);
   }
 
   template <typename ListElement>
@@ -197,13 +185,6 @@ public:
                 ? get_derived_().traverse(*single_typed_list.type)
                 : true) &&
            get_derived_().visit_end(single_typed_list);
-  }
-
-  template <typename ListElement>
-  bool traverse(const detail::TypedList<ListElement> &typed_list) {
-    return get_derived_().visit_begin(typed_list) &&
-           traverse_vector(*typed_list.lists) &&
-           get_derived_().visit_end(typed_list);
   }
 
   template <typename Node> bool traverse(const Node &node) {
@@ -224,20 +205,9 @@ public:
 private:
   Derived &get_derived_() { return *static_cast<Derived *>(this); }
 
-  struct VariantVisitor {
-    VariantVisitor(Derived &derived) : derived{derived} {}
-
-    bool operator()(const std::monostate &) { return true; }
-    template <typename Node> bool operator()(const Node &node) {
-      return derived.traverse(node);
-    }
-
-    Derived &derived;
-  };
-
   template <typename T>
   bool traverse_vector(const std::vector<std::unique_ptr<T>> &element) {
-    for (auto &c : element) {
+    for (const auto &c : element) {
       if (!get_derived_().traverse(*c)) {
         return false;
       }
@@ -245,7 +215,14 @@ private:
     return true;
   }
 
-  VariantVisitor variant_visitor_;
+  template <typename T> bool traverse_vector(const std::vector<T> &element) {
+    for (const auto &c : element) {
+      if (!get_derived_().traverse(c)) {
+        return false;
+      }
+    }
+    return true;
+  }
 };
 
 } // namespace visitor

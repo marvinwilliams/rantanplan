@@ -11,25 +11,39 @@ namespace parser {
 
 class PddlAstParser : public visitor::Visitor<PddlAstParser> {
 public:
-  enum class Context {
-    Requirements,
-    Types,
-    Constants,
-    Predicates,
-    Actions,
-    Precondition,
-    Effect,
-    InitialState,
-    Goal
+  struct Context {
+    enum class State {
+      Requirements,
+      Types,
+      Constants,
+      Predicates,
+      Actions,
+      Precondition,
+      Effect,
+      InitialState,
+      Goal
+    };
+
+    State state;
+    bool negated = false;
+    model::TypePtr type_ptr = 0;
   };
 
-  model::Problem parse(const ast::AST &ast) {
+  using State = Context::State;
+
+  model::AbstractProblem parse(const ast::AST &ast) {
+    problem = model::AbstractProblem{};
+    context = Context{};
+    condition_stack.clear();
+
     problem.types.emplace_back("_root", 0);
     auto equal_predicate = model::PredicateDefinition{"="};
     equal_predicate.parameters.emplace_back("first", 0);
     equal_predicate.parameters.emplace_back("second", 0);
     problem.predicates.push_back(std::move(equal_predicate));
+
     traverse(ast);
+
     return problem;
   }
   friend visitor::Visitor<PddlAstParser>;
@@ -40,130 +54,92 @@ private:
   using Visitor<PddlAstParser>::visit_end;
 
   Context context;
-  model::Problem problem;
-  bool negated = false;
+  model::AbstractProblem problem;
   std::vector<model::Condition> condition_stack;
-  model::TypePtr type_ptr = 0;
 
   template <typename List, typename Element>
-  typename List::const_iterator find(const List &list, const Element &name) {
+  typename List::const_iterator find(const List &list,
+                                     const Element &name) const {
     return std::find_if(list.cbegin(), list.cend(),
-                        [&name](auto &e) { return e.name == name.name; });
+                        [&name](const auto &e) { return e.name == name.name; });
   }
 
-  bool visit_begin(const ast::Domain &ast_domain) {
-    problem.domain_name = ast_domain.name->name;
+  bool visit_begin(const ast::Domain &domain) {
+    problem.domain_name = domain.name->name;
     return true;
   }
 
-  bool visit_begin(const ast::Problem &ast_problem) {
-    if (ast_problem.domain_ref->name != problem.domain_name) {
-      std::string msg = "Domain reference \"" + ast_problem.domain_ref->name +
+  bool visit_begin(const ast::Problem &problem) {
+    if (problem.domain_ref->name != this->problem.domain_name) {
+      std::string msg = "Domain reference \"" + problem.domain_ref->name +
                         "\" does not match domain name \"" +
-                        problem.domain_name + "\"";
-      throw ParserException(ast_problem.domain_ref->location, msg.c_str());
+                        this->problem.domain_name + "\"";
+      throw ParserException(problem.domain_ref->location, msg.c_str());
     }
-    problem.problem_name = ast_problem.name->name;
+    this->problem.problem_name = problem.name->name;
     return true;
   }
 
-  bool visit_begin(const ast::SingleTypeNameList &list) {
+  bool visit_begin(const ast::SingleTypeIdentifierList &list) {
     if (list.type) {
-      auto p = find(problem.types, *list.type);
+      const auto p = find(problem.types, *list.type);
       if (list.type->name == "object") {
-        type_ptr = 0;
+        context.type_ptr = 0;
         return true;
       }
       if (p == problem.types.cend()) {
         std::string msg = "Type \"" + list.type->name + "\" undefined";
         throw ParserException(list.type->location, msg.c_str());
       }
-      type_ptr = std::distance(problem.types.cbegin(), p);
+      context.type_ptr = std::distance(problem.types.cbegin(), p);
     }
     return true;
   }
 
-  bool visit_end(const ast::SingleTypeNameList &) {
-    type_ptr = 0;
+  bool visit_end(const ast::SingleTypeIdentifierList &) {
+    context.type_ptr = 0;
     return true;
   }
 
   bool visit_begin(const ast::SingleTypeVariableList &list) {
     if (list.type) {
-      auto p = find(problem.types, *list.type);
+      const auto p = find(problem.types, *list.type);
       if (list.type->name == "object") {
-        type_ptr = 0;
+        context.type_ptr = 0;
         return true;
       }
       if (p == problem.types.cend()) {
         std::string msg = "Type \"" + list.type->name + "\" undefined";
         throw ParserException(list.type->location, msg.c_str());
       }
-      type_ptr = std::distance(problem.types.cbegin(), p);
+      context.type_ptr = std::distance(problem.types.cbegin(), p);
     }
     return true;
   }
 
   bool visit_end(const ast::SingleTypeVariableList &) {
-    type_ptr = 0;
+    context.type_ptr = 0;
     return true;
   }
 
-  bool visit_begin(const ast::NameList &list) {
-    if (context == Context::Types) {
-      for (auto &name : *list.elements) {
-        if (find(problem.types, *name) != problem.types.cend()) {
-          std::string msg = "Type \"" + name->name + "\" already defined";
+  bool visit_begin(const ast::IdentifierList &list) {
+    if (context.state == State::Types) {
+      for (const auto &name : *list.elements) {
+        if (name->name == "object" ||
+            find(problem.types, *name) != problem.types.cend()) {
+          std::string msg = "Type \"" + name->name +
+                            "\" already defined (\"object\" not allowed)";
           throw ParserException(name->location, msg.c_str());
         }
-        problem.types.emplace_back(name->name, type_ptr);
+        problem.types.emplace_back(name->name, context.type_ptr);
       }
-    } else if (context == Context::Constants) {
-      for (auto &name : *list.elements) {
+    } else if (context.state == State::Constants) {
+      for (const auto &name : *list.elements) {
         if (find(problem.constants, *name) != problem.constants.cend()) {
           std::string msg = "Constant \"" + name->name + "\" already defined";
           throw ParserException(name->location, msg.c_str());
         }
-        problem.constants.emplace_back(name->name, type_ptr);
-      }
-    } else if (context == Context::InitialState) {
-      auto &predicate = problem.initial_state.back();
-      if (problem.predicates[predicate.definition.p].parameters.size() !=
-          list.elements->size()) {
-        std::stringstream msg;
-        msg << "Wrong number of arguments for predicate \""
-            << problem.predicates[predicate.definition.p].name
-            << "\": Expected "
-            << problem.predicates[predicate.definition.p].parameters.size()
-            << " but got " << list.elements->size();
-        throw ParserException(list.location, msg.str().c_str());
-      }
-      for (size_t i = 0; i < list.elements->size(); ++i) {
-        const auto &name = *(*list.elements)[i];
-        auto p = find(problem.constants, name);
-        if (p == problem.constants.cend()) {
-          std::string msg = "Constant \"" + name.name + "\" undefined";
-          throw ParserException(name.location, msg.c_str());
-        }
-        if (!model::is_subtype(problem, (*p).type,
-                               problem.predicates[predicate.definition.p]
-                                   .parameters[i]
-                                   .type)) {
-          std::string msg =
-              "Type mismatch of argument \"" + name.name +
-              "\": Expected a subtype of \"" +
-              problem
-                  .types[problem.predicates[predicate.definition.p]
-                             .parameters[i]
-                             .type.p]
-                  .name +
-              "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
-          throw ParserException(name.location, msg.c_str());
-        }
-        model::ConstantPtr constant_ptr =
-            std::distance(problem.constants.cbegin(), p);
-        problem.initial_state.back().arguments.push_back(
-            std::move(constant_ptr));
+        problem.constants.emplace_back(name->name, context.type_ptr);
       }
     } else {
       throw ParserException("Internal error occurred while parsing");
@@ -172,8 +148,8 @@ private:
   }
 
   bool visit_begin(const ast::VariableList &list) {
-    if (context == Context::Predicates) {
-      for (auto &variable : *list.elements) {
+    if (context.state == State::Predicates) {
+      for (const auto &variable : *list.elements) {
         if (find(problem.predicates.back().parameters, *variable) !=
             problem.predicates.back().parameters.cend()) {
           std::string msg =
@@ -181,10 +157,10 @@ private:
           throw ParserException(variable->location, msg.c_str());
         }
         problem.predicates.back().parameters.emplace_back(variable->name,
-                                                          type_ptr);
+                                                          context.type_ptr);
       }
-    } else if (context == Context::Actions) {
-      for (auto &variable : *list.elements) {
+    } else if (context.state == State::Actions) {
+      for (const auto &variable : *list.elements) {
         if (find(problem.actions.back().parameters, *variable) !=
             problem.actions.back().parameters.cend()) {
           std::string msg =
@@ -192,7 +168,7 @@ private:
           throw ParserException(variable->location, msg.c_str());
         }
         problem.actions.back().parameters.emplace_back(variable->name,
-                                                       type_ptr);
+                                                       context.type_ptr);
       }
     } else {
       throw ParserException("Internal error occurred while parsing");
@@ -201,172 +177,147 @@ private:
   }
 
   bool visit_begin(const ast::ArgumentList &list) {
-    if (context == Context::Precondition || context == Context::Effect ||
-        context == Context::Goal) {
-      if (!std::holds_alternative<model::PredicateEvaluation>(
-              condition_stack.back())) {
-        throw ParserException("Internal error occurred while parsing");
-      }
-      auto &predicate =
-          std::get<model::PredicateEvaluation>(condition_stack.back());
-      if (problem.predicates[predicate.definition.p].parameters.size() !=
-          list.elements->size()) {
-        std::stringstream msg;
-        msg << "Wrong number of arguments for predicate \""
-            << problem.predicates[predicate.definition.p].name
-            << "\": Expected "
-            << problem.predicates[predicate.definition.p].parameters.size()
-            << " but got " << list.elements->size();
-        throw ParserException(list.location, msg.str().c_str());
-      }
-      for (size_t i = 0; i < list.elements->size(); ++i) {
-        const auto &argument = *(*list.elements)[i];
-        if (std::holds_alternative<ast::Name>(argument)) {
-          const ast::Name &name = std::get<ast::Name>(argument);
-          auto p = find(problem.constants, name);
-          if (p == problem.constants.cend()) {
-            std::string msg = "Constant \"" + name.name + "\" undefined";
-            throw ParserException(name.location, msg.c_str());
-          }
-          if (!model::is_subtype(problem, (*p).type,
-                                 problem.predicates[predicate.definition.p]
-                                     .parameters[i]
-                                     .type)) {
-            std::string msg =
-                "Type mismatch of argument \"" + name.name +
-                "\": Expected a subtype of \"" +
-                problem
-                    .types[problem.predicates[predicate.definition.p]
-                               .parameters[i]
-                               .type.p]
-                    .name +
-                "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
-            throw ParserException(name.location, msg.c_str());
-          }
-          model::ConstantPtr constant_ptr =
-              std::distance(problem.constants.cbegin(), p);
-          predicate.arguments.push_back(std::move(constant_ptr));
-        } else {
-          const ast::Variable &variable = std::get<ast::Variable>(argument);
-          auto p = find(problem.actions.back().parameters, variable);
-          if (p == problem.actions.back().parameters.cend()) {
-            std::string msg = "Parameter \"" + variable.name +
-                              "\" undefined in action \"" +
-                              problem.actions.back().name + "\"";
-            throw ParserException(variable.location, msg.c_str());
-          }
-          if (!model::is_subtype(problem, (*p).type,
-                                 problem.predicates[predicate.definition.p]
-                                     .parameters[i]
-                                     .type)) {
-            std::string msg =
-                "Type mismatch of argument \"" + variable.name +
-                "\": Expected a subtype of \"" +
-                problem
-                    .types[problem.predicates[predicate.definition.p]
-                               .parameters[i]
-                               .type.p]
-                    .name +
-                "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
-            throw ParserException(variable.location, msg.c_str());
-          }
-          model::ParameterPtr parameter_ptr =
-              std::distance(problem.actions.back().parameters.cbegin(), p);
-          predicate.arguments.push_back(std::move(parameter_ptr));
-        }
-      }
-    } else {
+    if (!std::holds_alternative<model::PredicateEvaluation>(
+            condition_stack.back())) {
       throw ParserException("Internal error occurred while parsing");
+    }
+
+    auto &predicate =
+        std::get<model::PredicateEvaluation>(condition_stack.back());
+
+    if (problem.predicates[predicate.definition.p].parameters.size() !=
+        list.elements->size()) {
+      std::stringstream msg;
+      msg << "Wrong number of arguments for predicate \""
+          << problem.predicates[predicate.definition.p].name << "\": Expected "
+          << problem.predicates[predicate.definition.p].parameters.size()
+          << " but got " << list.elements->size();
+      throw ParserException(list.location, msg.str().c_str());
+    }
+
+    for (size_t i = 0; i < list.elements->size(); ++i) {
+      const auto &argument = (*list.elements)[i];
+      const auto supertype =
+          problem.predicates[predicate.definition.p].parameters[i].type;
+      if (std::holds_alternative<std::unique_ptr<ast::Identifier>>(argument)) {
+        const auto &name =
+            *std::get<std::unique_ptr<ast::Identifier>>(argument);
+        const auto p = find(problem.constants, name);
+
+        if (p == problem.constants.cend()) {
+          std::string msg = "Constant \"" + name.name + "\" undefined";
+          throw ParserException(name.location, msg.c_str());
+        }
+
+        if (!model::is_subtype(problem.types, (*p).type, supertype)) {
+          std::string msg =
+              "Type mismatch of argument \"" + name.name +
+              "\": Expected a subtype of \"" + problem.types[supertype.p].name +
+              "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
+          throw ParserException(name.location, msg.c_str());
+        }
+
+        model::ConstantPtr constant_ptr =
+            std::distance(problem.constants.cbegin(), p);
+        predicate.arguments.push_back(constant_ptr);
+      } else {
+        const auto &variable =
+            *std::get<std::unique_ptr<ast::Variable>>(argument);
+
+        if (context.state == State::InitialState ||
+            context.state == State::Goal) {
+          throw ParserException(variable.location,
+                                "Variables are only allowed in actions");
+        }
+
+        const auto p = find(problem.actions.back().parameters, variable);
+
+        if (p == problem.actions.back().parameters.cend()) {
+          std::string msg = "Parameter \"" + variable.name +
+                            "\" undefined in action \"" +
+                            problem.actions.back().name + "\"";
+          throw ParserException(variable.location, msg.c_str());
+        }
+
+        if (!model::is_subtype(problem.types, (*p).type, supertype)) {
+          std::string msg =
+              "Type mismatch of argument \"" + variable.name +
+              "\": Expected a subtype of \"" + problem.types[supertype.p].name +
+              "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
+          throw ParserException(variable.location, msg.c_str());
+        }
+        model::ParameterPtr parameter_ptr =
+            std::distance(problem.actions.back().parameters.cbegin(), p);
+        predicate.arguments.push_back(std::move(parameter_ptr));
+      }
     }
     return true;
   }
 
   bool visit_begin(const ast::RequirementsDef &) {
-    context = Context::Requirements;
+    context.state = State::Requirements;
     return true;
   }
 
   bool visit_begin(const ast::TypesDef &) {
-    context = Context::Types;
+    context.state = State::Types;
     return true;
   }
 
   bool visit_begin(const ast::ConstantsDef &) {
-    context = Context::Constants;
+    context.state = State::Constants;
     return true;
   }
 
   bool visit_begin(const ast::PredicatesDef &) {
-    context = Context::Predicates;
+    context.state = State::Predicates;
     return true;
   }
 
-  bool visit_begin(const ast::ActionDef &ast_action) {
-    context = Context::Actions;
-    problem.actions.emplace_back(ast_action.name->name);
+  bool visit_begin(const ast::ActionDef &action_def) {
+    context.state = State::Actions;
+    model::AbstractAction action{};
+    action.name = action_def.name->name;
+    problem.actions.push_back(std::move(action));
     return true;
   }
 
   bool visit_begin(const ast::ObjectsDef &) {
-    context = Context::Constants;
+    context.state = State::Constants;
     return true;
   }
 
   bool visit_begin(const ast::InitDef &) {
-    context = Context::InitialState;
+    context.state = State::InitialState;
     return true;
   }
 
   bool visit_begin(const ast::GoalDef &) {
-    context = Context::Goal;
+    context.state = State::Goal;
     return true;
   }
 
   bool visit_begin(const ast::Effect &) {
-    context = Context::Effect;
+    context.state = State::Effect;
     return true;
   }
 
   bool visit_begin(const ast::Precondition &) {
-    context = Context::Precondition;
+    context.state = State::Precondition;
     return true;
   }
 
-  bool visit_begin(const ast::Negation &) {
-    negated = !negated;
+  bool visit_begin(const ast::Negation &negation) {
+    if (context.negated && context.state != State::Precondition) {
+      throw ParserException(negation.location,
+                            "Nested negation is only allowed in preconditions");
+    }
+    context.negated = !context.negated;
     return true;
   }
 
   bool visit_end(const ast::Negation &) {
-    negated = !negated;
-    return true;
-  }
-
-  bool visit_begin(const ast::InitNegation &) {
-    negated = !negated;
-    return true;
-  }
-
-  bool visit_end(const ast::InitNegation &) {
-    negated = !negated;
-    return true;
-  }
-
-  bool visit_begin(const ast::InitPredicate &ast_init_predicate) {
-    auto p = find(problem.predicates, *ast_init_predicate.name);
-    if (p == problem.predicates.cend()) {
-      std::string msg =
-          "Predicate \"" + ast_init_predicate.name->name + "\" not defined";
-      throw ParserException(ast_init_predicate.name->location, msg.c_str());
-    }
-    // Negated init conditions are irrelevant with the closed-world assumption
-    if (negated) {
-      return true;
-    }
-    model::PredicatePtr predicate_ptr =
-        std::distance(problem.predicates.cbegin(), p);
-    auto predicate = model::PredicateEvaluation{std::move(predicate_ptr)};
-    problem.initial_state.push_back(std::move(predicate));
+    context.negated = !context.negated;
     return true;
   }
 
@@ -382,7 +333,7 @@ private:
   }
 
   bool visit_begin(const ast::PredicateEvaluation &ast_predicate) {
-    auto p = find(problem.predicates, *ast_predicate.name);
+    const auto p = find(problem.predicates, *ast_predicate.name);
     if (p == problem.predicates.cend()) {
       std::string msg =
           "Predicate \"" + ast_predicate.name->name + "\" not defined";
@@ -391,14 +342,19 @@ private:
     model::PredicatePtr predicate_ptr =
         std::distance(problem.predicates.cbegin(), p);
     auto predicate = model::PredicateEvaluation{std::move(predicate_ptr)};
-    predicate.negated = negated;
+    predicate.negated = context.negated;
     condition_stack.push_back(std::move(predicate));
     return true;
   }
 
-  bool visit_begin(const ast::Conjunction &) {
+  bool visit_begin(const ast::Conjunction &conjunction) {
     auto junction = model::Junction{};
-    if (negated) {
+    if (context.negated) {
+      if (context.state != State::Precondition) {
+        throw ParserException(
+            conjunction.location,
+            "Negated conjunction only allowed in preconditions");
+      }
       junction.connective = model::Junction::Connective::Or;
     } else {
       junction.connective = model::Junction::Connective::And;
@@ -407,9 +363,13 @@ private:
     return true;
   }
 
-  bool visit_begin(const ast::Disjunction &) {
+  bool visit_begin(const ast::Disjunction &disjunction) {
+    if (context.state != State::Precondition) {
+      throw ParserException(disjunction.location,
+                            "Disjunction only allowed in preconditions");
+    }
     auto junction = model::Junction{};
-    if (negated) {
+    if (context.negated) {
       junction.connective = model::Junction::Connective::And;
     } else {
       junction.connective = model::Junction::Connective::Or;
@@ -418,81 +378,31 @@ private:
     return true;
   }
 
-  bool visit_end(const ast::PredicateEvaluation &) {
-    auto last_condition =
-        std::get<model::PredicateEvaluation>(condition_stack.back());
-    condition_stack.pop_back();
-    if (condition_stack.empty()) {
-      if (context == Context::Precondition) {
-        problem.actions.back().precondition = std::move(last_condition);
-      } else if (context == Context::Effect) {
-        problem.actions.back().effect = std::move(last_condition);
-      } else if (context == Context::Goal) {
-        problem.goal = std::move(last_condition);
-      } else {
-        throw ParserException("Internal error occurred while parsing");
-      }
-    } else {
-      if (std::holds_alternative<model::Junction>(condition_stack.back())) {
-        auto &junction = std::get<model::Junction>(condition_stack.back());
-        junction.arguments.push_back(std::move(last_condition));
-      } else {
-        throw ParserException("Internal error occurred while parsing");
-      }
+  bool visit_end(const ast::Condition &condition) {
+    if (std::holds_alternative<std::unique_ptr<ast::Empty>>(condition) ||
+        std::holds_alternative<std::unique_ptr<ast::Negation>>(condition)) {
+      return true;
     }
-    return true;
-  }
-
-  bool visit_end(const ast::Conjunction &) {
-    auto last_condition = std::get<model::Junction>(condition_stack.back());
+    auto last_condition = condition_stack.back();
     condition_stack.pop_back();
     if (condition_stack.empty()) {
-      if (context == Context::Precondition) {
+      if (context.state == State::Precondition) {
         problem.actions.back().precondition = std::move(last_condition);
-      } else if (context == Context::Effect) {
+      } else if (context.state == State::Effect) {
         problem.actions.back().effect = std::move(last_condition);
-      } else if (context == Context::Goal) {
+      } else if (context.state == State::Goal) {
         problem.goal = std::move(last_condition);
+      } else if (context.state == State::InitialState) {
+        problem.initial_state = std::move(last_condition);
       } else {
         throw ParserException("Internal error occurred while parsing");
       }
     } else {
-      if (std::holds_alternative<model::Junction>(condition_stack.back())) {
-        auto &junction = std::get<model::Junction>(condition_stack.back());
-        if (junction.connective == last_condition.connective) {
-          junction.arguments.insert(junction.arguments.end(),
-                                    last_condition.arguments.begin(),
-                                    last_condition.arguments.end());
-        } else {
-          junction.arguments.push_back(std::move(last_condition));
-        }
-      } else {
+      auto junction_ptr = std::get_if<model::Junction>(&condition_stack.back());
+      if (junction_ptr == nullptr) {
         throw ParserException("Internal error occurred while parsing");
       }
-    }
-    return true;
-  }
-
-  bool visit_end(const ast::Disjunction &) {
-    auto last_condition = std::get<model::Junction>(condition_stack.back());
-    condition_stack.pop_back();
-    if (condition_stack.empty()) {
-      if (context == Context::Precondition) {
-        problem.actions.back().precondition = std::move(last_condition);
-      } else if (context == Context::Effect) {
-        problem.actions.back().effect = std::move(last_condition);
-      } else if (context == Context::Goal) {
-        problem.goal = std::move(last_condition);
-      } else {
-        throw ParserException("Internal error occurred while parsing");
-      }
-    } else {
-      if (std::holds_alternative<model::Junction>(condition_stack.back())) {
-        auto &junction = std::get<model::Junction>(condition_stack.back());
-        junction.arguments.push_back(std::move(last_condition));
-      } else {
-        throw ParserException("Internal error occurred while parsing");
-      }
+      junction_ptr->arguments.push_back(std::move(last_condition));
     }
     return true;
   }

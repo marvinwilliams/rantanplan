@@ -54,9 +54,9 @@ int main(int, char *argv[]) {
 
     parser::parse_problem(problem_tokens, ast);
     parser::PddlAstParser visitor;
-    auto problem = visitor.parse(ast);
-    std::cout << problem;
-    grounding::normalize(problem);
+    auto abstract_problem = visitor.parse(ast);
+    std::cout << abstract_problem;
+    auto problem = grounding::normalize(abstract_problem);
     std::cout << problem;
   } catch (const parser::ParserException &e) {
     if (e.location()) {

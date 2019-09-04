@@ -102,7 +102,7 @@ inline Location operator+(Location location, unsigned int count) {
 }
 
 inline Location &operator+=(Location &begin, const Location &end) {
-  begin.end_ = end.begin_;
+  begin.end_ = end.end_;
   return begin;
 }
 

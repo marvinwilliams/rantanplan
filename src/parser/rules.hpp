@@ -3,8 +3,8 @@
 
 #include "parser/tokens.hpp"
 
-#include <cstring>
 #include <cctype>
+#include <cstring>
 #include <string>
 
 namespace parser {
@@ -106,7 +106,8 @@ struct Variable {
   bool matches() const { return valid; }
   TokenType get_token(const std::string &current_string) const {
     tokens::Variable variable;
-    variable.name = current_string;
+    variable.name =
+        std::string{current_string.begin() + 1, current_string.end()};
     return variable;
   }
   void reset() {
