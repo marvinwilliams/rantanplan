@@ -1,0 +1,14 @@
+- grounding
+  - plangraph
+  - lifted?
+  - inkremental / start?
+  - test sas grounding
+  - incremental pruning
+  - find not applicable actions
+  - find not important predicates
+  - ground for parallelism
+  - variable tree
+- encoding
+  - foreach
+  - sequential
+  - helper
