@@ -25,6 +25,7 @@ private:
   std::optional<Location> location_;
   std::string message_;
 };
+
 } // namespace lexer
 
 #endif /* end of include guard: LEXER_EXCEPTION_HPP */

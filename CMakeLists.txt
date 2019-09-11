@@ -19,8 +19,8 @@ add_compile_options(
   )
 
 configure_file(
-  "src/config.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/config.hpp"
+  "src/build_config.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/build_config.hpp"
   )
 
 include_directories(PRIVATE "src")
@@ -46,10 +46,19 @@ add_executable(rantanplan_glucose
 target_link_directories(rantanplan_glucose PRIVATE "${SAT_SOLVER_DIR}/glucose4")
 target_link_libraries(rantanplan_glucose PRIVATE "ipasirglucose4")
 
-option(DEBUG "DEBUG" OFF)
+option(DEBUG_MODE "Compile with additional debug information enabled" OFF)
 
-if(DEBUG)
-  add_definitions(-DDEBUG)
+if(DEBUG_MODE)
+  set(CMAKE_BUILD_TYPE "Debug")
+  add_definitions(-DDEBUG_MODE -DDEBUG_PRINT)
+  add_compile_options(
+    -g -O0
+    )
+else()
+  set(CMAKE_BUILD_TYPE "Release")
+  add_compile_options(
+    -O3 -march=native
+    )
 endif()
 
 install(TARGETS rantanplan_glucose DESTINATION "${PROJECT_SOURCE_DIR}/bin")

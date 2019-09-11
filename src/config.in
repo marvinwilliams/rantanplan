@@ -1,7 +1,0 @@
-#define VERSION_MAJOR @rantanplan_VERSION_MAJOR@
-#define VERSION_MINOR @rantanplan_VERSION_MINOR@
-#ifdef DEBUG
-static constexpr bool debug_mode = true;
-#else
-static constexpr bool debug_mode = false;
-#endif

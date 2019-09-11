@@ -3,9 +3,9 @@
 
 #include "model/model.hpp"
 
-#include <variant>
 #include <algorithm>
 #include <sstream>
+#include <variant>
 #include <vector>
 
 namespace model {
@@ -126,6 +126,22 @@ std::vector<Action> normalize_action(const AbstractAction &action) {
     new_actions.push_back(std::move(new_action));
   }
   return new_actions;
+}
+
+std::vector<std::vector<ConstantPtr>>
+normalize_constants(const std::vector<Type> &types,
+                    const std::vector<Constant> &constants) {
+  std::vector<std::vector<ConstantPtr>> normalized_constants(types.size());
+  for (unsigned int i = 0; i < constants.size(); ++i) {
+    ConstantPtr constant{i};
+    TypePtr type = constants[i].type;
+    normalized_constants[type.i].push_back(constant);
+    while (get(types, type).parent != type) {
+      type = get(types, type).parent;
+      normalized_constants[type.i].push_back(constant);
+    }
+  }
+  return normalized_constants;
 }
 
 Problem normalize(const AbstractProblem &abstract_problem) {

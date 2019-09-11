@@ -10,6 +10,9 @@ struct Config {
   bool log_parser = true;
   bool log_normalize = false;
   bool log_visitor = false;
+
+  std::string domain_file;
+  std::string problem_file;
 };
 
 #endif /* end of include guard: CONFIG_HPP */

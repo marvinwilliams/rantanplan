@@ -5,6 +5,8 @@
 #include "parser/parser_exception.hpp"
 #include "parser/rules.hpp"
 #include "parser/tokens.hpp"
+#include "util/logger.hpp"
+#include <config.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -14,6 +16,8 @@
 #include <vector>
 
 namespace parser {
+
+static logging::Logger logger{"Parser"};
 
 template <typename TokenType, typename TokenIterator>
 bool has_type(TokenIterator &token_iterator) {
@@ -71,12 +75,14 @@ parse_identifier_list(TokenIterator &token_iterator) {
       std::make_unique<std::vector<std::unique_ptr<ast::Identifier>>>();
   while (has_type<tokens::Identifier>(token_iterator)) {
     const auto &name = get<tokens::Identifier>(token_iterator).name;
+    LOG_DEBUG(logger, "Found identifier \"%s\"", name.c_str());
     auto identifier =
         std::make_unique<ast::Identifier>(token_iterator.location(), name);
     names->push_back(std::move(identifier));
     token_iterator++;
   }
   const auto &end = token_iterator.location();
+  LOG_DEBUG(logger, "Number of elements: %u", names->size());
   return std::make_unique<ast::IdentifierList>(begin + end, std::move(names));
 }
 
@@ -87,12 +93,14 @@ parse_variable_list(TokenIterator &token_iterator) {
   auto names = std::make_unique<std::vector<std::unique_ptr<ast::Variable>>>();
   while (has_type<tokens::Variable>(token_iterator)) {
     const auto &name = get<tokens::Variable>(token_iterator).name;
+    LOG_DEBUG(logger, "Found variable \"?%s\"", name.c_str());
     auto variable =
         std::make_unique<ast::Variable>(token_iterator.location(), name);
     names->push_back(std::move(variable));
     token_iterator++;
   }
   const auto &end = token_iterator.location();
+  LOG_DEBUG(logger, "Number of elements: %u", names->size());
   return std::make_unique<ast::VariableList>(begin + end, std::move(names));
 }
 
@@ -105,11 +113,13 @@ parse_argument_list(TokenIterator &token_iterator) {
          has_type<tokens::Variable>(token_iterator)) {
     if (has_type<tokens::Identifier>(token_iterator)) {
       const auto &name = get<tokens::Identifier>(token_iterator).name;
+      LOG_DEBUG(logger, "Found argument(identifier) \"%s\"", name.c_str());
       auto argument =
           std::make_unique<ast::Identifier>(token_iterator.location(), name);
       arguments->push_back(std::move(argument));
     } else {
       const auto &name = get<tokens::Variable>(token_iterator).name;
+      LOG_DEBUG(logger, "Found argument(variable) \"?%s\"", name.c_str());
       auto argument =
           std::make_unique<ast::Variable>(token_iterator.location(), name);
       arguments->push_back(std::move(argument));
@@ -117,6 +127,7 @@ parse_argument_list(TokenIterator &token_iterator) {
     token_iterator++;
   }
   const auto &end = token_iterator.location();
+  LOG_DEBUG(logger, "Number of elements: %u", arguments->size());
   return std::make_unique<ast::ArgumentList>(begin + end, std::move(arguments));
 }
 
@@ -126,9 +137,10 @@ parse_single_type_identifier_list(TokenIterator &token_iterator) {
   const auto begin = token_iterator.location();
   auto name_list = parse_identifier_list(token_iterator);
   if (skip_if<tokens::Hyphen>(token_iterator)) {
-    auto type = std::make_unique<ast::Identifier>(
-        token_iterator.location(),
-        get<tokens::Identifier>(token_iterator).name);
+    const auto &name = get<tokens::Identifier>(token_iterator).name;
+    LOG_DEBUG(logger, "Found type \"%s\"", name.c_str());
+    auto type =
+        std::make_unique<ast::Identifier>(token_iterator.location(), name);
     token_iterator++;
     const auto &end = type->location;
     return std::make_unique<ast::SingleTypeIdentifierList>(
@@ -144,9 +156,10 @@ parse_single_type_variable_list(TokenIterator &token_iterator) {
   const auto begin = token_iterator.location();
   auto variable_list = parse_variable_list(token_iterator);
   if (skip_if<tokens::Hyphen>(token_iterator)) {
-    auto type = std::make_unique<ast::Identifier>(
-        token_iterator.location(),
-        get<tokens::Identifier>(token_iterator).name);
+    const auto &name = get<tokens::Identifier>(token_iterator).name;
+    LOG_DEBUG(logger, "Found type \"%s\"", name.c_str());
+    auto type =
+        std::make_unique<ast::Identifier>(token_iterator.location(), name);
     token_iterator++;
     const auto &end = type->location;
     return std::make_unique<ast::SingleTypeVariableList>(
@@ -159,6 +172,7 @@ parse_single_type_variable_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::TypedIdentifierList>
 parse_typed_identifier_list(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing typed identifier list");
   const auto begin = token_iterator.location();
   auto lists = std::make_unique<
       std::vector<std::unique_ptr<ast::SingleTypeIdentifierList>>>();
@@ -175,6 +189,7 @@ parse_typed_identifier_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::TypedVariableList>
 parse_typed_variable_list(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing typed variable list");
   const auto begin = token_iterator.location();
   auto lists = std::make_unique<
       std::vector<std::unique_ptr<ast::SingleTypeVariableList>>>();
@@ -209,16 +224,20 @@ parse_requirement_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::RequirementsDef>
 parse_requirements(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing requirements");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto requirement_list = parse_requirement_list(token_iterator);
   const auto &end = requirement_list->location;
+  LOG_DEBUG(logger, "Number of requirements: %u",
+            requirement_list->elements->size());
   return std::make_unique<ast::RequirementsDef>(begin + end,
                                                 std::move(requirement_list));
 }
 
 template <typename TokenIterator>
 std::unique_ptr<ast::TypesDef> parse_types(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing types");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto type_list = parse_typed_identifier_list(token_iterator);
@@ -229,6 +248,7 @@ std::unique_ptr<ast::TypesDef> parse_types(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::ConstantsDef>
 parse_constants(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing constants");
   auto begin = token_iterator.location();
   advance(token_iterator);
   auto constant_list = parse_typed_identifier_list(token_iterator);
@@ -241,6 +261,7 @@ template <typename TokenIterator>
 std::unique_ptr<ast::Predicate> parse_predicate(TokenIterator &token_iterator) {
   const auto begin = token_iterator.location();
   const auto &name = get<tokens::Identifier>(token_iterator).name;
+  LOG_DEBUG(logger, "Found predicate \"%s\"", name.c_str());
   auto identifier =
       std::make_unique<ast::Identifier>(token_iterator.location(), name);
   advance(token_iterator);
@@ -270,10 +291,12 @@ parse_predicate_list(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::PredicatesDef>
 parse_predicates(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing predicates");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto predicate_list = parse_predicate_list(token_iterator);
   const auto &end = predicate_list->location;
+  LOG_DEBUG(logger, "Number of predicates: %u", predicate_list->elements->size());
   return std::make_unique<ast::PredicatesDef>(begin + end,
                                               std::move(predicate_list));
 }
@@ -284,10 +307,12 @@ ast::Condition parse_condition(TokenIterator &);
 template <typename TokenIterator>
 std::unique_ptr<ast::PredicateEvaluation>
 parse_predicate_evaluation(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing predicate evaluation");
   const auto begin = token_iterator.location();
   const std::string &name = (has_type<tokens::Equality>(token_iterator))
                                 ? "="
                                 : get<tokens::Identifier>(token_iterator).name;
+  LOG_DEBUG(logger, "Found call to predicate \"%s\"", name.c_str());
   auto predicate_name =
       std::make_unique<ast::Identifier>(token_iterator.location(), name);
   advance(token_iterator);
@@ -300,6 +325,7 @@ parse_predicate_evaluation(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::Conjunction>
 parse_conjunction(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing conjunction");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto arguments = std::make_unique<std::vector<ast::Condition>>();
@@ -320,6 +346,7 @@ parse_conjunction(TokenIterator &token_iterator) {
 template <typename TokenIterator>
 std::unique_ptr<ast::Disjunction>
 parse_disjunction(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing disjunction");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto arguments = std::make_unique<std::vector<ast::Condition>>();
@@ -347,6 +374,7 @@ ast::Condition parse_condition(TokenIterator &token_iterator) {
   } else if (has_type<tokens::Or>(token_iterator)) {
     return parse_disjunction(token_iterator);
   } else if (has_type<tokens::Not>(token_iterator)) {
+    LOG_DEBUG(logger, "Parsing negation");
     const auto begin = token_iterator.location();
     advance(token_iterator);
     skip<tokens::LParen>(token_iterator);
@@ -368,6 +396,7 @@ parse_init_list(TokenIterator &token_iterator) {
   while (skip_if<tokens::LParen>(token_iterator)) {
     skip_comments(token_iterator);
     if (has_type<tokens::Not>(token_iterator)) {
+      LOG_DEBUG(logger, "Parsing negation");
       const auto begin_negation = token_iterator.location();
       advance(token_iterator);
       skip<tokens::LParen>(token_iterator);
@@ -386,6 +415,7 @@ parse_init_list(TokenIterator &token_iterator) {
     skip<tokens::RParen>(token_iterator);
     skip_comments(token_iterator);
   }
+  LOG_DEBUG(logger, "Number of init predicates: %u", arguments->size());
   const auto &end = token_iterator.location();
   auto condition_list =
       std::make_unique<ast::ConditionList>(begin + end, std::move(arguments));
@@ -395,9 +425,11 @@ parse_init_list(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::ActionDef> parse_action(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing action");
   const auto begin = token_iterator.location();
   token_iterator++;
   const auto &name = get<tokens::Identifier>(token_iterator).name;
+  LOG_DEBUG(logger, "Found action \"%s\"", name.c_str());
   auto action_name = std::make_unique<ast::Identifier>(
       token_iterator.location(), std::move(name));
   advance(token_iterator);
@@ -412,6 +444,7 @@ std::unique_ptr<ast::ActionDef> parse_action(TokenIterator &token_iterator) {
   if (has_type<tokens::Section>(token_iterator)) {
     const auto &section = get<tokens::Section>(token_iterator);
     if (section.name == "precondition") {
+      LOG_DEBUG(logger, "Parsing precondition");
       const auto precondition_begin = token_iterator.location();
       advance(token_iterator);
       skip<tokens::LParen>(token_iterator);
@@ -428,6 +461,7 @@ std::unique_ptr<ast::ActionDef> parse_action(TokenIterator &token_iterator) {
   if (has_type<tokens::Section>(token_iterator)) {
     const auto &section = get<tokens::Section>(token_iterator);
     if (section.name == "effect") {
+      LOG_DEBUG(logger, "Parsing effect");
       const auto effect_begin = token_iterator.location();
       advance(token_iterator);
       skip<tokens::LParen>(token_iterator);
@@ -448,6 +482,7 @@ std::unique_ptr<ast::ActionDef> parse_action(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::ObjectsDef> parse_objects(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing objects");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto objects = parse_typed_identifier_list(token_iterator);
@@ -457,6 +492,7 @@ std::unique_ptr<ast::ObjectsDef> parse_objects(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::InitDef> parse_init(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing init list");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   auto init_list = parse_init_list(token_iterator);
@@ -466,6 +502,7 @@ std::unique_ptr<ast::InitDef> parse_init(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::GoalDef> parse_goal(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing goal");
   const auto begin = token_iterator.location();
   advance(token_iterator);
   skip<tokens::LParen>(token_iterator);
@@ -496,6 +533,7 @@ ast::Element parse_element(TokenIterator &token_iterator) {
   } else if (!is_domain && section == "goal") {
     return parse_goal(token_iterator);
   } else {
+    LOG_ERROR(logger, "No match for section \"%s\"", section.c_str());
     std::string msg = "Unknown section: \"" + section + "\"";
     throw ParserException(token_iterator.location(), msg);
   }
@@ -518,12 +556,14 @@ parse_elements(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::Domain> parse_domain(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing domain");
   const auto begin = token_iterator.location();
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Define>(token_iterator);
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Domain>(token_iterator);
   const auto &name = get<tokens::Identifier>(token_iterator).name;
+  LOG_DEBUG(logger, "Found name \"%s\"", name.c_str());
   auto domain_name =
       std::make_unique<ast::Identifier>(token_iterator.location(), name);
   token_iterator++;
@@ -538,12 +578,14 @@ std::unique_ptr<ast::Domain> parse_domain(TokenIterator &token_iterator) {
 
 template <typename TokenIterator>
 std::unique_ptr<ast::Problem> parse_problem(TokenIterator &token_iterator) {
+  LOG_DEBUG(logger, "Parsing problem");
   const auto begin = token_iterator.location();
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Define>(token_iterator);
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Problem>(token_iterator);
   const auto &name = get<tokens::Identifier>(token_iterator).name;
+  LOG_DEBUG(logger, "Found name \"%s\"", name.c_str());
   auto problem_name =
       std::make_unique<ast::Identifier>(token_iterator.location(), name);
   token_iterator++;
@@ -551,6 +593,7 @@ std::unique_ptr<ast::Problem> parse_problem(TokenIterator &token_iterator) {
   skip<tokens::LParen>(token_iterator);
   skip<tokens::Section>(token_iterator);
   const auto &domain_ref = get<tokens::Identifier>(token_iterator).name;
+  LOG_DEBUG(logger, "Found reference to domain \"%s\"", name.c_str());
   auto domain_ref_name =
       std::make_unique<ast::Identifier>(token_iterator.location(), domain_ref);
   token_iterator++;

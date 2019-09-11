@@ -1,37 +1,64 @@
 #include "config.hpp"
-#include "grounding/normalize.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
 #include "model/model.hpp"
+#include "model/normalize.hpp"
 #include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/parser_exception.hpp"
 #include "parser/pddl_visitor.hpp"
 #include "sat/ipasir_solver.hpp"
+#include "util/logger.hpp"
+#include "util/option_parser.hpp"
+#include "encoding/encoding.hpp"
 
 #include <cctype>
 #include <chrono>
+#include <climits>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <random>
+#include <sstream>
 #include <string>
+#include <unistd.h>
 #include <variant>
 
 using namespace std::chrono_literals;
 
-int main(int, char *argv[]) {
-  if constexpr (debug_mode) {
-    std::cout << "Rantanplan v" << VERSION_MAJOR << '.' << VERSION_MINOR
-              << " DEBUG build" << '\n';
-  } else {
-    std::cout << "Rantanplan v" << VERSION_MAJOR << '.' << VERSION_MINOR
-              << '\n';
+static void print_version() {
+  char hostname[HOST_NAME_MAX];
+  gethostname(hostname, HOST_NAME_MAX);
+  const char *format = "Rantanplan v%u.%u %srunning on %s";
+  PRINT_INFO(format, VERSION_MAJOR, VERSION_MINOR,
+             debug_mode ? "DEBUG build " : "", hostname);
+}
+
+int main(int argc, char *argv[]) {
+  print_version();
+
+  Config config;
+
+  options::Options options{};
+
+  options.add_positional_option<std::string>("domain");
+  options.add_positional_option<std::string>("problem");
+  options.add_option<bool>("log-parser", "p", "Enable logging for the parser",
+                           "0");
+  options.add_option<bool>("log-visitor", "v",
+                           "Enable logging for the ast visitor", "0");
+  options.parse(argc, argv);
+  config.domain_file = options.get<std::string>("domain");
+  config.problem_file = options.get<std::string>("problem");
+  config.log_parser = options.get<bool>("log-parser");
+  config.log_visitor = options.get<bool>("log-visitor");
+
+  if (config.log_parser) {
+    parser::logger.add_default_appender();
   }
-  std::ifstream domain(argv[1]);
-  std::ifstream problem(argv[2]);
-  std::string domain_file(argv[1]);
-  std::string problem_file(argv[2]);
+
+  std::ifstream domain(config.domain_file);
+  std::ifstream problem(config.problem_file);
 
   using Rules =
       lexer::RuleSet<parser::rules::Primitive<parser::tokens::LParen>,
@@ -50,58 +77,38 @@ int main(int, char *argv[]) {
   parser::ast::AST ast;
   try {
     auto domain_tokens =
-        lexer.lex(domain_file, std::istreambuf_iterator<char>(domain),
+        lexer.lex(config.domain_file, std::istreambuf_iterator<char>(domain),
                   std::istreambuf_iterator<char>());
+    PRINT_INFO("Parsing problem...");
     parser::parse_domain(domain_tokens, ast);
     auto problem_tokens =
-        lexer.lex(problem_file, std::istreambuf_iterator<char>(problem),
+        lexer.lex(config.problem_file, std::istreambuf_iterator<char>(problem),
                   std::istreambuf_iterator<char>());
 
     parser::parse_problem(problem_tokens, ast);
     parser::PddlAstParser visitor;
     auto abstract_problem = visitor.parse(ast);
-    std::cout << abstract_problem;
-    auto problem = grounding::normalize(abstract_problem);
-    std::cout << problem;
-    sat::IpasirSolver solver;
-    std::random_device rd;
-    std::default_random_engine gen(rd());
-    std::uniform_int_distribution<> dis(1, 100000);
-    std::uniform_int_distribution<> dis2(5, 50);
-    int count = 0;
-    int length = dis2(gen);
-    for (int i = 0; i < 100000000; ++i) {
-      solver << dis(gen);
-      if (count == length) {
-        count = 0;
-        length = dis2(gen);
-        solver << sat::EndClause;
-      }
-      ++count;
-    }
-    std::cout << "Finished generating" << std::endl;
-    auto model = solver.solve(1s);
-    if (model) {
-      std::cout << "Solved!" << std::endl;
-      /* for (size_t i = 1; i < (*model).assignment.size(); ++i) { */
-      /*   std::cout << (*model)[i] << '\n'; */
-      /* } */
-    } else {
-      std::cout << "Not solved" << std::endl;
-    }
+    PRINT_INFO("Normalizing problem...");
+    auto problem = model::normalize(abstract_problem);
+    encoding::Encoder encoder{problem};
+    encoder.encode();
   } catch (const parser::ParserException &e) {
+    std::stringstream ss;
     if (e.location()) {
-      std::cerr << *e.location();
-      std::cerr << ": ";
+      ss << *e.location();
+      ss << ": ";
     }
-    std::cerr << e.what() << std::endl;
+    ss << e.what();
+    PRINT_ERROR(ss.str().c_str());
     return 1;
   } catch (const lexer::LexerException &e) {
+    std::stringstream ss;
     if (e.location()) {
-      std::cerr << *e.location();
-      std::cerr << ": ";
+      ss << *e.location();
+      ss << ": ";
     }
-    std::cerr << e.what() << std::endl;
+    ss << e.what();
+    PRINT_ERROR(ss.str().c_str());
     return 1;
   }
 

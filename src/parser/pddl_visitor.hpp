@@ -2,6 +2,7 @@
 #define PDDL_VISITOR_HPP
 
 #include "model/model.hpp"
+#include "model/model_utils.hpp"
 #include "parser/parser_exception.hpp"
 #include "parser/visitor.hpp"
 #include <sstream>
@@ -185,12 +186,13 @@ private:
     auto &predicate =
         std::get<model::PredicateEvaluation>(condition_stack.back());
 
-    if (problem.predicates[predicate.definition.p].parameters.size() !=
+    if (get(problem.predicates, predicate.definition).parameters.size() !=
         list.elements->size()) {
       std::stringstream msg;
       msg << "Wrong number of arguments for predicate \""
-          << problem.predicates[predicate.definition.p].name << "\": Expected "
-          << problem.predicates[predicate.definition.p].parameters.size()
+          << get(problem.predicates, predicate.definition).name
+          << "\": Expected "
+          << get(problem.predicates, predicate.definition).parameters.size()
           << " but got " << list.elements->size();
       throw ParserException(list.location, msg.str().c_str());
     }
@@ -198,7 +200,7 @@ private:
     for (size_t i = 0; i < list.elements->size(); ++i) {
       const auto &argument = (*list.elements)[i];
       const auto supertype =
-          problem.predicates[predicate.definition.p].parameters[i].type;
+          get(problem.predicates, predicate.definition).parameters[i].type;
       if (std::holds_alternative<std::unique_ptr<ast::Identifier>>(argument)) {
         const auto &name =
             *std::get<std::unique_ptr<ast::Identifier>>(argument);
@@ -209,11 +211,11 @@ private:
           throw ParserException(name.location, msg.c_str());
         }
 
-        if (!model::is_subtype(problem.types, (*p).type, supertype)) {
+        if (!model::is_subtype(problem.types, p->type, supertype)) {
           std::string msg =
               "Type mismatch of argument \"" + name.name +
-              "\": Expected a subtype of \"" + problem.types[supertype.p].name +
-              "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
+              "\": Expected a subtype of \"" + get(problem.types, supertype).name +
+              "\" but got type \"" + get(problem.types, p->type).name + "\"";
           throw ParserException(name.location, msg.c_str());
         }
 
@@ -239,11 +241,11 @@ private:
           throw ParserException(variable.location, msg.c_str());
         }
 
-        if (!model::is_subtype(problem.types, (*p).type, supertype)) {
+        if (!model::is_subtype(problem.types, p->type, supertype)) {
           std::string msg =
               "Type mismatch of argument \"" + variable.name +
-              "\": Expected a subtype of \"" + problem.types[supertype.p].name +
-              "\" but got type \"" + problem.types[(*p).type.p].name + "\"";
+              "\": Expected a subtype of \"" + get(problem.types, supertype).name +
+              "\" but got type \"" + get(problem.types, p->type).name + "\"";
           throw ParserException(variable.location, msg.c_str());
         }
         model::ParameterPtr parameter_ptr =

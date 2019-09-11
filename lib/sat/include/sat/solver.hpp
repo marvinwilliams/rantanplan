@@ -25,7 +25,7 @@ public:
   virtual Solver &operator<<(Literal literal) = 0;
 
   virtual void assume(Literal literal) = 0;
-  virtual std::optional<Model> solve(std::chrono::seconds timeout = 0s) = 0;
+  virtual std::optional<Model> solve(std::chrono::milliseconds timeout = 0s) = 0;
 
   virtual ~Solver() {}
 };

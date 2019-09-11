@@ -29,13 +29,15 @@ public:
 
   void assume(Literal literal) { ipasir_assume(handle_, literal.index); }
 
-  std::optional<Model> solve(std::chrono::seconds timeout) {
+  std::optional<Model> solve(std::chrono::milliseconds timeout) {
     using clock = std::chrono::steady_clock;
     auto end_time = clock::now() + timeout;
     if (timeout != timeout.zero()) {
       ipasir_set_terminate(handle_, &end_time, [](void *end_time) {
-        return static_cast<int>(clock::now() >
-                                *static_cast<clock::time_point *>(end_time));
+        return static_cast<int>(std::max(
+            (clock::now() - *static_cast<clock::time_point *>(end_time))
+                .count(),
+            clock::rep(0)));
       });
     }
     if (ipasir_solve(handle_) == 10) {
@@ -43,7 +45,8 @@ public:
       model.assignment.reserve(num_vars + 1);
       model.assignment.push_back(false); // Skip index 0
       for (unsigned int i = 1; i <= num_vars; ++i) {
-        model.assignment.push_back(ipasir_val(handle_, i) == i);
+        int index = static_cast<int>(i);
+        model.assignment.push_back(ipasir_val(handle_, index) == index);
       }
       return model;
     }

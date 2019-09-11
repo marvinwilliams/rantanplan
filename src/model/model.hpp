@@ -1,39 +1,59 @@
 #ifndef MODEL_HPP
 #define MODEL_HPP
 
+#include <functional>
 #include <optional>
 #include <ostream>
 #include <string>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
 namespace model {
 
-template <typename T> struct Pointer {
+template <typename T> struct Index {
   template <typename Integral>
-  Pointer(Integral p) : p{static_cast<size_t>(p)} {}
-  size_t p;
+  Index(Integral i = 0) : i{static_cast<size_t>(i)} {}
+  Index(const Index &index) : Index{index.i} {}
+  Index() : Index(0) {}
+
+  Index &operator=(const Index &index) {
+    i = index.i;
+    return *this;
+  }
+
+  size_t i;
 };
 
 template <typename T>
-bool operator==(const Pointer<T> &first, const Pointer<T> &second) {
-  return first.p == second.p;
+inline bool operator==(const Index<T> &first, const Index<T> &second) {
+  return first.i == second.i;
 }
 
 template <typename T>
-bool operator!=(const Pointer<T> &first, const Pointer<T> &second) {
-  return first.p != second.p;
+inline bool operator!=(const Index<T> &first, const Index<T> &second) {
+  return !(first == second);
 }
+
+template <typename T> struct IndexHash {
+  size_t operator()(const Index<T> &index) {
+    return std::hash<size_t>{}(index.i);
+  }
+};
 
 struct Type;
 struct Constant;
 struct Parameter;
 struct PredicateDefinition;
 
-using TypePtr = Pointer<Type>;
-using ConstantPtr = Pointer<Constant>;
-using ParameterPtr = Pointer<Parameter>;
-using PredicatePtr = Pointer<PredicateDefinition>;
+using TypePtr = Index<Type>;
+using ConstantPtr = Index<Constant>;
+using ParameterPtr = Index<Parameter>;
+using PredicatePtr = Index<PredicateDefinition>;
+
+template <typename T> const T get(const std::vector<T> &list, Index<T> index) {
+  return list[index.i];
+}
 
 struct Type {
   Type(const std::string &name, TypePtr parent) : name{name}, parent{parent} {}
@@ -78,6 +98,11 @@ struct PredicateEvaluation {
   bool negated = false;
 };
 
+struct GroundPredicate {
+  PredicatePtr definition;
+  std::vector<ConstantPtr> arguments;
+};
+
 struct Junction {
   enum class Connective { And, Or };
   Connective connective;
@@ -99,6 +124,7 @@ struct Problem {
   std::vector<Type> types;
   std::vector<Constant> constants;
   std::vector<PredicateDefinition> predicates;
+  std::vector<std::vector<ConstantPtr>> constants_of_type;
   std::vector<Action> actions;
   std::vector<PredicateEvaluation> initial_state;
   std::vector<PredicateEvaluation> goal;
@@ -123,279 +149,31 @@ struct AbstractProblem {
   model::Condition goal = TrivialTrue{};
 };
 
-bool is_subtype(const std::vector<Type> &types, TypePtr type,
-                TypePtr supertype) {
-  if (type == supertype) {
-    return true;
-  }
-  while (types[type.p].parent != type) {
-    type = types[type.p].parent;
-    if (type == supertype) {
-      return true;
-    }
-  }
-  return false;
+bool operator==(const GroundPredicate &first, const GroundPredicate &second) {
+  return first.definition == second.definition &&
+         first.arguments == second.arguments;
 }
 
-std::string print_condition(const AbstractProblem &problem,
-                            const Condition &condition,
-                            const AbstractAction &action) {
-  std::string result;
-  if (std::holds_alternative<Junction>(condition)) {
-    const Junction &junction = std::get<Junction>(condition);
-    result += "(";
-    for (auto it = junction.arguments.cbegin(); it != junction.arguments.cend();
-         ++it) {
-      if (it != junction.arguments.cbegin()) {
-        result +=
-            junction.connective == Junction::Connective::And ? " ∧ " : " ∨ ";
-      }
-      result += print_condition(problem, *it, action);
+struct GroundPredicateHash {
+  size_t operator()(const GroundPredicate &predicate) const noexcept {
+    size_t hash = IndexHash<PredicateDefinition>{}(predicate.definition);
+    for (ConstantPtr p : predicate.arguments) {
+      hash ^= IndexHash<Constant>{}(p);
     }
-    result += ")";
-  } else {
-    const PredicateEvaluation &predicate =
-        std::get<PredicateEvaluation>(condition);
-    if (predicate.negated) {
-      result += "¬";
-    }
-    result += problem.predicates[predicate.definition.p].name;
-    result += "(";
-    for (auto it = predicate.arguments.cbegin();
-         it != predicate.arguments.cend(); ++it) {
-      if (it != predicate.arguments.cbegin()) {
-        result += ", ";
-      }
-      if (std::holds_alternative<ConstantPtr>(*it)) {
-        result += problem.constants[std::get<ConstantPtr>(*it).p].name;
-      } else {
-        result += "?" + action.parameters[std::get<ParameterPtr>(*it).p].name;
-      }
-    }
-    result += ")";
+    return hash;
   }
-  return result;
-}
+};
 
-std::ostream &operator<<(std::ostream &out, const AbstractProblem &problem) {
-  out << "Domain: " << problem.domain_name << '\n';
-  out << "Problem: " << problem.problem_name << '\n';
-  out << "Requirements:";
-  for (auto &requirement : problem.requirements) {
-    out << ' ' << requirement;
-  }
-  out << '\n';
-  out << "Types:" << '\n';
-  for (auto &type : problem.types) {
-    out << '\t' << type.name;
-    if (type.parent.p != 0) {
-      out << " - " << problem.types[type.parent.p].name;
-    }
-    out << '\n';
-  }
-  out << "Constants:" << '\n';
-  for (auto &constant : problem.constants) {
-    out << '\t' << constant.name;
-    if (constant.type.p != 0) {
-      out << " - " << problem.types[constant.type.p].name;
-    }
-    out << '\n';
-  }
-  out << "Predicates:" << '\n';
-  for (auto &predicate : problem.predicates) {
-    out << '\t' << predicate.name << '(';
-    for (auto it = predicate.parameters.cbegin();
-         it != predicate.parameters.cend(); ++it) {
-      if (it != predicate.parameters.cbegin()) {
-        out << ", ";
-      }
-      out << '?' << (*it).name;
-      if ((*it).type.p != 0) {
-        out << " - " << problem.types[(*it).type.p].name;
-      }
-    }
-    out << ')' << '\n';
-  }
-  out << "Actions:" << '\n';
-  for (auto &action : problem.actions) {
-    out << '\t' << action.name << '(';
-    for (auto it = action.parameters.cbegin(); it != action.parameters.cend();
-         ++it) {
-      if (it != action.parameters.cbegin()) {
-        out << ", ";
-      }
-      out << '?' << (*it).name;
-      if ((*it).type.p != 0) {
-        out << " - " << problem.types[(*it).type.p].name;
-      }
-    }
-    out << ')' << '\n';
-    out << '\t' << "Preconditions:" << '\n';
-    out << '\t' << '\t'
-        << print_condition(problem, action.precondition, action);
-    out << '\n';
-    out << '\t' << "Effects:" << '\n';
-    out << '\t' << '\t' << print_condition(problem, action.effect, action);
-    out << '\n';
-    out << '\n';
-  }
-  out << "Initial state: "
-      << print_condition(problem, problem.initial_state, AbstractAction{});
-  out << '\n';
-  out << "Goal: " << print_condition(problem, problem.goal, AbstractAction{});
-  out << '\n';
-  return out;
-}
+struct State {
+  std::vector<GroundPredicate> predicates;
+};
 
-std::ostream &operator<<(std::ostream &out, const Problem &problem) {
-  out << "Domain: " << problem.domain_name << '\n';
-  out << "Problem: " << problem.problem_name << '\n';
-  out << "Requirements:";
-  for (auto &requirement : problem.requirements) {
-    out << ' ' << requirement;
-  }
-  out << '\n';
-  out << "Types:" << '\n';
-  for (auto &type : problem.types) {
-    out << '\t' << type.name;
-    if (type.parent.p != 0) {
-      out << " - " << problem.types[type.parent.p].name;
-    }
-    out << '\n';
-  }
-  out << "Constants:" << '\n';
-  for (auto &constant : problem.constants) {
-    out << '\t' << constant.name;
-    if (constant.type.p != 0) {
-      out << " - " << problem.types[constant.type.p].name;
-    }
-    out << '\n';
-  }
-  out << "Predicates:" << '\n';
-  for (auto &predicate : problem.predicates) {
-    out << '\t' << predicate.name << '(';
-    for (auto it = predicate.parameters.cbegin();
-         it != predicate.parameters.cend(); ++it) {
-      out << '?' << (*it).name;
-      if ((*it).type.p != 0) {
-        out << " - " << problem.types[(*it).type.p].name;
-      }
-      if (it != predicate.parameters.cend()) {
-        out << ", ";
-      }
-    }
-    out << ')' << '\n';
-  }
-  out << "Actions:" << '\n';
-  for (auto &action : problem.actions) {
-    out << '\t' << action.name << '(';
-    for (auto it = action.parameters.cbegin(); it != action.parameters.cend();
-         ++it) {
-      if (it != action.parameters.cbegin()) {
-        out << ", ";
-      }
-      out << '?' << (*it).name;
-      if ((*it).type.p != 0) {
-        out << " - " << problem.types[(*it).type.p].name;
-      }
-    }
-    out << ')' << '\n';
-    if (action.preconditions.size() > 0) {
-      out << '\t' << "Preconditions:";
-      for (const auto &precondition : action.preconditions) {
-        out << '\n';
-        out << '\t' << '\t';
-        if (precondition.negated) {
-          out << "¬";
-        }
-        out << problem.predicates[precondition.definition.p].name;
-        out << "(";
-        for (auto it = precondition.arguments.cbegin();
-             it != precondition.arguments.cend(); ++it) {
-          if (it != precondition.arguments.cbegin()) {
-            out << ", ";
-          }
-          if (std::holds_alternative<ConstantPtr>(*it)) {
-            out << problem.constants[std::get<ConstantPtr>(*it).p].name;
-          } else {
-            out << "?" << action.parameters[std::get<ParameterPtr>(*it).p].name;
-          }
-        }
-        out << ")";
-      }
-      out << '\n';
-    }
-    if (action.effects.size() > 0) {
-      out << '\t' << "Effects:";
-      for (const auto &effect : action.effects) {
-        out << '\n';
-        out << '\t' << '\t';
-        if (effect.negated) {
-          out << "¬";
-        }
-        out << problem.predicates[effect.definition.p].name;
-        out << "(";
-        for (auto it = effect.arguments.cbegin(); it != effect.arguments.cend();
-             ++it) {
-          if (it != effect.arguments.cbegin()) {
-            out << ", ";
-          }
-          if (std::holds_alternative<ConstantPtr>(*it)) {
-            out << problem.constants[std::get<ConstantPtr>(*it).p].name;
-          } else {
-            out << "?" + action.parameters[std::get<ParameterPtr>(*it).p].name;
-          }
-        }
-        out << ")";
-      }
-      out << '\n';
-    }
-    out << '\n';
-  }
-  out << "Initial state:";
-  for (const auto &predicate : problem.initial_state) {
-    out << '\n';
-    out << '\t';
-    if (predicate.negated) {
-      out << "¬";
-    }
-    out << problem.predicates[predicate.definition.p].name;
-    out << "(";
-    for (auto it = predicate.arguments.cbegin();
-         it != predicate.arguments.cend(); ++it) {
-      if (it != predicate.arguments.cbegin()) {
-        out << ", ";
-      }
-      if (std::holds_alternative<ConstantPtr>(*it)) {
-        out << problem.constants[std::get<ConstantPtr>(*it).p].name;
-      }
-    }
-    out << ")";
-  }
-  out << '\n';
-  out << "Goal:";
-  for (const auto &predicate : problem.goal) {
-    out << '\n';
-    out << '\t';
-    if (predicate.negated) {
-      out << "¬";
-    }
-    out << problem.predicates[predicate.definition.p].name;
-    out << "(";
-    for (auto it = predicate.arguments.cbegin();
-         it != predicate.arguments.cend(); ++it) {
-      if (it != predicate.arguments.cbegin()) {
-        out << ", ";
-      }
-      if (std::holds_alternative<ConstantPtr>(*it)) {
-        out << problem.constants[std::get<ConstantPtr>(*it).p].name;
-      }
-    }
-    out << ")";
-  }
-  out << '\n';
-  return out;
-}
+// A relaxed state holds the initial state as well as each predicate which is
+// either present or not
+struct RelaxedState {
+  std::unordered_set<GroundPredicate, GroundPredicateHash> predicates;
+  State initial_state;
+};
 
 } // namespace model
 
