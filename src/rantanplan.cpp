@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "encoding/encoding.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
 #include "model/model.hpp"
@@ -10,7 +11,6 @@
 #include "sat/ipasir_solver.hpp"
 #include "util/logger.hpp"
 #include "util/option_parser.hpp"
-#include "encoding/encoding.hpp"
 
 #include <cctype>
 #include <chrono>
@@ -45,16 +45,22 @@ int main(int argc, char *argv[]) {
   options.add_positional_option<std::string>("problem");
   options.add_option<bool>("log-parser", "p", "Enable logging for the parser",
                            "0");
+  options.add_option<bool>("log-encoding", "e",
+                           "Enable logging for the encoder", "0");
   options.add_option<bool>("log-visitor", "v",
                            "Enable logging for the ast visitor", "0");
   options.parse(argc, argv);
   config.domain_file = options.get<std::string>("domain");
   config.problem_file = options.get<std::string>("problem");
   config.log_parser = options.get<bool>("log-parser");
+  config.log_encoding = options.get<bool>("log-encoding");
   config.log_visitor = options.get<bool>("log-visitor");
 
   if (config.log_parser) {
     parser::logger.add_default_appender();
+  }
+  if (config.log_encoding) {
+    encoding::logger.add_default_appender();
   }
 
   std::ifstream domain(config.domain_file);
@@ -90,6 +96,7 @@ int main(int argc, char *argv[]) {
     auto abstract_problem = visitor.parse(ast);
     PRINT_INFO("Normalizing problem...");
     auto problem = model::normalize(abstract_problem);
+    /* std::cout << problem; */
     encoding::Encoder encoder{problem};
     encoder.encode();
   } catch (const parser::ParserException &e) {

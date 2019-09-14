@@ -5,6 +5,7 @@
 #include <optional>
 #include <ostream>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -12,17 +13,20 @@
 namespace model {
 
 template <typename T> struct Index {
-  template <typename Integral>
-  Index(Integral i = 0) : i{static_cast<size_t>(i)} {}
+  using value_type = size_t;
+  template <typename Integral,
+            std::enable_if_t<std::is_integral_v<Integral>, int> = 0>
+  Index(Integral i = 0) : i{static_cast<value_type>(i)} {}
   Index(const Index &index) : Index{index.i} {}
   Index() : Index(0) {}
-
-  Index &operator=(const Index &index) {
+  Index &operator=(const Index<T> &index) {
     i = index.i;
     return *this;
   }
 
-  size_t i;
+  operator value_type() const { return i; }
+
+  value_type i;
 };
 
 template <typename T>
@@ -93,14 +97,37 @@ using Condition =
 
 struct PredicateEvaluation {
   PredicateEvaluation(PredicatePtr predicate) : definition{predicate} {}
+  PredicateEvaluation(PredicatePtr predicate,
+                      const std::vector<Argument> &arguments)
+      : definition{predicate}, arguments{arguments} {}
   PredicatePtr definition;
   std::vector<Argument> arguments;
   bool negated = false;
 };
 
 struct GroundPredicate {
+  GroundPredicate(PredicatePtr definition,
+                  const std::vector<ConstantPtr> &arguments)
+      : definition{definition}, arguments(arguments) {}
+  GroundPredicate(PredicatePtr definition, std::vector<ConstantPtr> &&arguments)
+      : definition{definition}, arguments(std::move(arguments)) {}
   PredicatePtr definition;
   std::vector<ConstantPtr> arguments;
+};
+
+bool operator==(const GroundPredicate &first, const GroundPredicate &second) {
+  return first.definition == second.definition &&
+         first.arguments == second.arguments;
+}
+
+struct GroundPredicateHash {
+  size_t operator()(const GroundPredicate &predicate) const noexcept {
+    size_t hash = IndexHash<PredicateDefinition>{}(predicate.definition);
+    for (ConstantPtr p : predicate.arguments) {
+      hash ^= IndexHash<Constant>{}(p);
+    }
+    return hash;
+  }
 };
 
 struct Junction {
@@ -117,14 +144,26 @@ struct Action {
   std::vector<PredicateEvaluation> effects;
 };
 
-struct Problem {
+bool operator==(const Action &first, const Action &second) {
+  return first.name == second.name;
+}
+
+struct ProblemBase {
   std::string domain_name;
   std::string problem_name;
   std::vector<std::string> requirements;
   std::vector<Type> types;
   std::vector<Constant> constants;
   std::vector<PredicateDefinition> predicates;
+};
+
+struct Problem {
+  Problem(const ProblemBase &base) : base{base} {}
+  Problem(ProblemBase &&base) : base{std::move(base)} {}
+
+  ProblemBase base;
   std::vector<std::vector<ConstantPtr>> constants_of_type;
+  std::vector<GroundPredicate> ground_predicates;
   std::vector<Action> actions;
   std::vector<PredicateEvaluation> initial_state;
   std::vector<PredicateEvaluation> goal;
@@ -133,35 +172,15 @@ struct Problem {
 struct AbstractAction {
   std::string name;
   std::vector<model::Parameter> parameters;
-  model::Condition precondition = TrivialTrue{};
-  model::Condition effect = TrivialTrue{};
+  Condition precondition = TrivialTrue{};
+  Condition effect = TrivialTrue{};
 };
 
 struct AbstractProblem {
-  std::string domain_name;
-  std::string problem_name;
-  std::vector<std::string> requirements;
-  std::vector<Type> types;
-  std::vector<Constant> constants;
-  std::vector<PredicateDefinition> predicates;
+  ProblemBase base;
   std::vector<AbstractAction> actions;
   model::Condition initial_state = TrivialTrue{};
   model::Condition goal = TrivialTrue{};
-};
-
-bool operator==(const GroundPredicate &first, const GroundPredicate &second) {
-  return first.definition == second.definition &&
-         first.arguments == second.arguments;
-}
-
-struct GroundPredicateHash {
-  size_t operator()(const GroundPredicate &predicate) const noexcept {
-    size_t hash = IndexHash<PredicateDefinition>{}(predicate.definition);
-    for (ConstantPtr p : predicate.arguments) {
-      hash ^= IndexHash<Constant>{}(p);
-    }
-    return hash;
-  }
 };
 
 struct State {

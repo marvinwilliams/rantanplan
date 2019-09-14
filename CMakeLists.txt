@@ -24,6 +24,7 @@ configure_file(
   )
 
 include_directories(PRIVATE "src")
+include_directories(PRIVATE "include")
 include_directories(PRIVATE "lib/lexer/include")
 include_directories(PRIVATE "lib/sat/include")
 include_directories(PRIVATE "third_party/sat_solvers")

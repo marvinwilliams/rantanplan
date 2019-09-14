@@ -2,6 +2,7 @@
 #define NORMALIZE_HPP
 
 #include "model/model.hpp"
+#include "model/model_utils.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -132,32 +133,47 @@ std::vector<std::vector<ConstantPtr>>
 normalize_constants(const std::vector<Type> &types,
                     const std::vector<Constant> &constants) {
   std::vector<std::vector<ConstantPtr>> normalized_constants(types.size());
-  for (unsigned int i = 0; i < constants.size(); ++i) {
+  for (size_t i = 0; i < constants.size(); ++i) {
     ConstantPtr constant{i};
     TypePtr type = constants[i].type;
-    normalized_constants[type.i].push_back(constant);
-    while (get(types, type).parent != type) {
-      type = get(types, type).parent;
-      normalized_constants[type.i].push_back(constant);
+    normalized_constants[type].push_back(constant);
+    while (types[type].parent != type) {
+      type = types[type].parent;
+      normalized_constants[type].push_back(constant);
     }
   }
   return normalized_constants;
 }
 
 Problem normalize(const AbstractProblem &abstract_problem) {
-  Problem problem;
-  problem.domain_name = abstract_problem.domain_name;
-  problem.problem_name = abstract_problem.problem_name;
-  problem.requirements = abstract_problem.requirements;
-  problem.types = abstract_problem.types;
-  problem.constants = abstract_problem.constants;
-  problem.predicates = abstract_problem.predicates;
+  Problem problem{abstract_problem.base};
+
+  problem.constants_of_type =
+      normalize_constants(problem.base.types, problem.base.constants);
+  for (size_t i = 0; i < problem.base.predicates.size(); ++i) {
+    auto new_predicates = ground_predicate(i, problem);
+    problem.ground_predicates.reserve(problem.ground_predicates.size() +
+                                      new_predicates.size());
+    for (const auto &predicate : new_predicates) {
+      problem.ground_predicates.push_back(predicate);
+    }
+  }
+
   for (auto &action : abstract_problem.actions) {
     auto new_actions = normalize_action(action);
     problem.actions.insert(problem.actions.cend(), new_actions.begin(),
                            new_actions.end());
   }
+
   problem.initial_state = to_list(abstract_problem.initial_state);
+  // Reserve space for initial and equality predicates
+  problem.initial_state.reserve(problem.initial_state.size() +
+                                problem.base.constants.size());
+  for (size_t i = 0; i < problem.base.constants.size(); ++i) {
+    std::vector<Argument> args{i, i};
+    problem.initial_state.emplace_back(0, args);
+  }
+
   problem.goal = to_list(abstract_problem.goal);
   return problem;
 }

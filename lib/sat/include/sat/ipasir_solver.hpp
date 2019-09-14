@@ -13,7 +13,7 @@ extern "C" {
 
 namespace sat {
 
-class IpasirSolver : Solver {
+class IpasirSolver : public Solver {
 public:
   IpasirSolver() : handle_{ipasir_init()}, num_vars{0} {
     ipasir_set_learn(handle_, NULL, 0, NULL);

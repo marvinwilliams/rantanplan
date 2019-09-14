@@ -9,6 +9,7 @@ struct Config {
       debug_mode ? logging::Level::DEBUG : logging::Level::INFO;
   bool log_parser = true;
   bool log_normalize = false;
+  bool log_encoding = false;
   bool log_visitor = false;
 
   std::string domain_file;

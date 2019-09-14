@@ -8,13 +8,6 @@
 namespace sat {
 using namespace std::chrono_literals;
 
-struct Literal {
-  constexpr Literal(int index) : index{index} {}
-  int index;
-  Literal operator!() { return Literal{-index}; }
-};
-static constexpr Literal EndClause{0};
-
 struct Model {
   bool operator[](size_t i) const { return assignment[i]; }
   std::vector<bool> assignment;
