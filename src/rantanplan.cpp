@@ -4,6 +4,7 @@
 #include "lexer/rule_set.hpp"
 #include "model/model.hpp"
 #include "model/normalize.hpp"
+#include "model/to_string.hpp"
 #include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/parser_exception.hpp"
@@ -94,9 +95,10 @@ int main(int argc, char *argv[]) {
     parser::parse_problem(problem_tokens, ast);
     parser::PddlAstParser visitor;
     auto abstract_problem = visitor.parse(ast);
+    PRINT_DEBUG(to_string(abstract_problem).c_str());
     PRINT_INFO("Normalizing problem...");
     auto problem = model::normalize(abstract_problem);
-    /* std::cout << problem; */
+    PRINT_DEBUG(to_string(problem).c_str());
     encoding::Encoder encoder{problem};
     encoder.encode();
   } catch (const parser::ParserException &e) {

@@ -15,10 +15,11 @@ struct Model {
 
 class Solver {
 public:
-  virtual Solver &operator<<(Literal literal) = 0;
+  virtual Solver &operator<<(int) = 0;
 
-  virtual void assume(Literal literal) = 0;
-  virtual std::optional<Model> solve(std::chrono::milliseconds timeout = 0s) = 0;
+  virtual void assume(int) = 0;
+  virtual std::optional<Model>
+  solve(std::chrono::milliseconds timeout = 0s) = 0;
 
   virtual ~Solver() {}
 };

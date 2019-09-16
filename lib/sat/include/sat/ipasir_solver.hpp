@@ -19,15 +19,15 @@ public:
     ipasir_set_learn(handle_, NULL, 0, NULL);
   }
 
-  IpasirSolver &operator<<(Literal literal) {
-    ipasir_add(handle_, literal.index);
-    if (std::abs(literal.index) > static_cast<int>(num_vars)) {
-      num_vars = static_cast<unsigned int>(std::abs(literal.index));
+  IpasirSolver &operator<<(int i) {
+    ipasir_add(handle_, i);
+    if (static_cast<unsigned int>(std::abs(i)) > num_vars) {
+      num_vars = static_cast<unsigned int>(std::abs(i));
     }
     return *this;
   }
 
-  void assume(Literal literal) { ipasir_assume(handle_, literal.index); }
+  void assume(int i) { ipasir_assume(handle_, i); }
 
   std::optional<Model> solve(std::chrono::milliseconds timeout) {
     using clock = std::chrono::steady_clock;

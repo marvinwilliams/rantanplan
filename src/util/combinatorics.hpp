@@ -1,11 +1,10 @@
-#ifndef ALGORITHM_HPP
-#define ALGORITHM_HPP
+#ifndef COMBINATORICS_HPP
+#define COMBINATORICS_HPP
 
 #include <algorithm>
 #include <functional>
 #include <vector>
-
-namespace algorithm {
+#include <numeric>
 
 std::vector<std::vector<size_t>>
 all_combinations(const std::vector<size_t> &list_sizes) {
@@ -28,6 +27,4 @@ all_combinations(const std::vector<size_t> &list_sizes) {
   return combinations;
 }
 
-} // namespace algorithm
-
-#endif /* end of include guard: ALGORITHM_HPP */
+#endif /* end of include guard: COMBINATORICS_HPP */

@@ -7,39 +7,6 @@
 
 namespace sat {
 
-class Variable {
-public:
-  using value_type = unsigned int;
-
-  template <typename Integral,
-            std::enable_if_t<std::is_integral_v<Integral>, int> = 0>
-  constexpr Literal(Integral index) : index{static_cast<value_type>(index)} {
-    assert(index > 1);
-  }
-
-  operator value_type() const { return index; }
-
-private:
-  value_type index;
-};
-
-class Literal {
-public:
-  constexpr explicit Literal(Variable variable, bool negated = false)
-      : variable{variable}, negated{negated} {}
-
-  Literal operator!() { return Literal{variable, !negated}; }
-  operator int() const { return (negated ? -1 : 1) * variable; }
-
-private:
-  Variable variable;
-  bool negated = true;
-};
-
-struct Clause {
-  std::vector<Literal> literals;
-};
-
 namespace detail {
 
 struct end_clause_t {};
@@ -48,17 +15,35 @@ struct end_clause_t {};
 
 static const detail::end_clause_t EndClause;
 
-struct Formula {
+template <typename Variable> struct Formula {
+  class Literal {
+  public:
+    constexpr explicit Literal(Variable variable, bool negated = false)
+        : variable{variable}, negated{negated} {}
+
+    Literal operator!() { return Literal{variable, !negated}; }
+
+  private:
+    Variable variable;
+    bool negated;
+  };
+
+  struct Clause {
+    std::vector<Literal> literals;
+  };
+
   Formula &operator<<(Literal literal) {
-    current_clause.literals.push_back(literal);
+    current_clause.literals.push_back(std::move(literal));
+    return *this;
   }
 
   Formula &operator<<(detail::end_clause_t) {
     clauses.push_back(std::move(current_clause));
     current_clause.literals.clear();
+    return *this;
   }
 
-  void add_formula(Formula &&formula) {
+  void add_formula(const Formula &formula) {
     clauses.insert(clauses.cend(), formula.clauses.begin(),
                    formula.clauses.end());
   }
@@ -70,7 +55,7 @@ struct Formula {
       list_sizes.push_back(clause.literals.size());
     }
 
-    auto combinations = algorithm::all_combinations(list_sizes);
+    auto combinations = all_combinations(list_sizes);
 
     for (const auto &combination : combinations) {
       for (size_t i = 0; i < combination.size(); ++i) {
@@ -80,10 +65,11 @@ struct Formula {
     }
   }
 
-  void at_most_one(std::vector<Literal> group) {
+  void at_most_one(std::vector<Variable> group) {
     for (size_t i = 0; i < group.size() - 1; ++i) {
       for (size_t j = i + 1; j < group.size(); ++j) {
-        *this << !Literal{group[i]} << !Literal{group[j]} << EndClause;
+        *this << Literal{group[i], true} << Literal{group[j], true}
+              << EndClause;
       }
     }
   }

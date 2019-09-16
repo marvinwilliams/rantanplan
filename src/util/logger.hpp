@@ -68,6 +68,8 @@ private:
 
 class ConsoleAppender : public Appender {
 public:
+  ConsoleAppender(const ConsoleAppender &) = delete;
+  ConsoleAppender &operator=(const ConsoleAppender &) = delete;
   enum class Mode { Out, Err };
 
   ConsoleAppender(Level level = Level::INFO, Mode mode = Mode::Out)
@@ -110,9 +112,9 @@ static Appender &get_default_appender() {
 
 class Logger {
 public:
-  Logger(const std::string &name) : name_{name} {}
+  Logger(const std::string &name) : name_{name}, appenders_{} {}
 
-  Logger(const std::string &name, Appender &appender) : name_{name} {
+  Logger(const std::string &name, Appender &appender) : name_{name}, appenders_{} {
     add_appender(appender);
   }
 

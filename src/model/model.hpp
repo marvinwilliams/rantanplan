@@ -26,6 +26,17 @@ template <typename T> struct Index {
 
   operator value_type() const { return i; }
 
+  Index &operator++() {
+    ++i;
+    return *this;
+  }
+
+  Index operator++(int) {
+    Index old{*this};
+    ++(*this);
+    return old;
+  }
+
   value_type i;
 };
 
@@ -49,15 +60,15 @@ struct Type;
 struct Constant;
 struct Parameter;
 struct PredicateDefinition;
+struct GroundPredicate;
+struct Action;
 
 using TypePtr = Index<Type>;
 using ConstantPtr = Index<Constant>;
 using ParameterPtr = Index<Parameter>;
 using PredicatePtr = Index<PredicateDefinition>;
-
-template <typename T> const T get(const std::vector<T> &list, Index<T> index) {
-  return list[index.i];
-}
+using GroundPredicatePtr = Index<GroundPredicate>;
+using ActionPtr = Index<Action>;
 
 struct Type {
   Type(const std::string &name, TypePtr parent) : name{name}, parent{parent} {}
@@ -97,20 +108,25 @@ using Condition =
 
 struct PredicateEvaluation {
   PredicateEvaluation(PredicatePtr predicate) : definition{predicate} {}
-  PredicateEvaluation(PredicatePtr predicate,
-                      const std::vector<Argument> &arguments)
-      : definition{predicate}, arguments{arguments} {}
+
+  PredicateEvaluation(PredicatePtr predicate, std::vector<Argument> arguments)
+      : definition{predicate}, arguments{std::move(arguments)} {}
   PredicatePtr definition;
   std::vector<Argument> arguments;
   bool negated = false;
 };
 
 struct GroundPredicate {
-  GroundPredicate(PredicatePtr definition,
-                  const std::vector<ConstantPtr> &arguments)
-      : definition{definition}, arguments(arguments) {}
-  GroundPredicate(PredicatePtr definition, std::vector<ConstantPtr> &&arguments)
+  GroundPredicate(PredicatePtr definition, std::vector<ConstantPtr> arguments)
       : definition{definition}, arguments(std::move(arguments)) {}
+
+  GroundPredicate(const PredicateEvaluation &predicate) {
+    arguments.reserve(predicate.arguments.size());
+    for (const auto &argument : predicate.arguments) {
+      arguments.push_back(std::get<ConstantPtr>(argument));
+    }
+  }
+
   PredicatePtr definition;
   std::vector<ConstantPtr> arguments;
 };
@@ -148,22 +164,31 @@ bool operator==(const Action &first, const Action &second) {
   return first.name == second.name;
 }
 
-struct ProblemBase {
+struct ProblemHeader {
   std::string domain_name;
   std::string problem_name;
   std::vector<std::string> requirements;
+};
+
+struct ProblemBase {
+  ProblemBase() = default;
+  virtual ~ProblemBase() = default;
+
   std::vector<Type> types;
   std::vector<Constant> constants;
   std::vector<PredicateDefinition> predicates;
+
+protected:
+  ProblemBase(const ProblemBase &) = default;
+  ProblemBase(ProblemBase &&) = default;
+  ProblemBase &operator=(const ProblemBase &) = default;
+  ProblemBase &operator=(ProblemBase &&) = default;
 };
 
-struct Problem {
-  Problem(const ProblemBase &base) : base{base} {}
-  Problem(ProblemBase &&base) : base{std::move(base)} {}
+struct Problem : ProblemBase {
+  Problem(ProblemHeader header) : header{std::move(header)} {}
 
-  ProblemBase base;
-  std::vector<std::vector<ConstantPtr>> constants_of_type;
-  std::vector<GroundPredicate> ground_predicates;
+  ProblemHeader header;
   std::vector<Action> actions;
   std::vector<PredicateEvaluation> initial_state;
   std::vector<PredicateEvaluation> goal;
@@ -171,13 +196,13 @@ struct Problem {
 
 struct AbstractAction {
   std::string name;
-  std::vector<model::Parameter> parameters;
+  std::vector<Parameter> parameters;
   Condition precondition = TrivialTrue{};
   Condition effect = TrivialTrue{};
 };
 
-struct AbstractProblem {
-  ProblemBase base;
+struct AbstractProblem : ProblemBase {
+  ProblemHeader header;
   std::vector<AbstractAction> actions;
   model::Condition initial_state = TrivialTrue{};
   model::Condition goal = TrivialTrue{};

@@ -124,9 +124,9 @@ private:
         }
       }
 
-      result.emplace_back(ArgumentAssignment{mapping, combination}, GroundPredicate
-          {predicate.definition, std::move(arguments)}
-          );
+      result.emplace_back(
+          ArgumentAssignment{mapping, combination},
+          GroundPredicate{predicate.definition, std::move(arguments)});
     }
     return result;
   }
