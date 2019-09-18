@@ -121,6 +121,7 @@ struct GroundPredicate {
       : definition{definition}, arguments(std::move(arguments)) {}
 
   GroundPredicate(const PredicateEvaluation &predicate) {
+    definition = predicate.definition;
     arguments.reserve(predicate.arguments.size());
     for (const auto &argument : predicate.arguments) {
       arguments.push_back(std::get<ConstantPtr>(argument));

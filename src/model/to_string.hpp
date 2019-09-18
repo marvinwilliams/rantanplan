@@ -50,7 +50,7 @@ std::string to_string(const PredicateEvaluation &predicate,
                       const AbstractAction &action, const ProblemBase &problem) {
   std::stringstream ss;
   if (predicate.negated) {
-    ss << '¬';
+    ss << '!';
   }
   ss << problem.predicates.at(predicate.definition).name;
   ss << '(';
@@ -73,7 +73,7 @@ std::string to_string(const PredicateEvaluation &predicate,
                       const Action &action, const ProblemBase &problem) {
   std::stringstream ss;
   if (predicate.negated) {
-    ss << '¬';
+    ss << '!';
   }
   ss << problem.predicates.at(predicate.definition).name;
   ss << '(';
@@ -96,7 +96,7 @@ std::string to_string(const PredicateEvaluation &predicate,
                       const ProblemBase &problem) {
   std::stringstream ss;
   if (predicate.negated) {
-    ss << '¬';
+    ss << '!';
   }
   ss << problem.predicates[predicate.definition].name;
   ss << '(';

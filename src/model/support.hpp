@@ -3,6 +3,7 @@
 
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
+#include "model/to_string.hpp"
 
 #include <cassert>
 #include <utility>
@@ -122,8 +123,7 @@ private:
       std::vector<size_t> number_arguments;
       number_arguments.reserve(predicate.parameters.size());
       for (const auto &parameter : predicate.parameters) {
-        number_arguments.push_back(
-            constants_of_type[parameter.type].size());
+        number_arguments.push_back(constants_of_type[parameter.type].size());
       }
 
       auto combinations = all_combinations(number_arguments);
@@ -139,6 +139,8 @@ private:
           arguments.push_back(constant);
         }
         ground_predicates_.emplace_back(predicate_ptr, std::move(arguments));
+        PRINT_DEBUG("Added predicate %s",
+                    to_string(ground_predicates_.back(), problem).c_str());
       }
     }
   }
@@ -168,7 +170,7 @@ private:
 
     auto combinations{all_combinations(number_arguments)};
 
-    auto predicate_support = select_support(predicate.negated, is_effect);
+    auto& predicate_support = select_support(predicate.negated, is_effect);
 
     for (const auto &combination : combinations) {
       for (size_t i = 0; i < mapping.size(); ++i) {
@@ -179,8 +181,10 @@ private:
         }
       }
       auto index = get_predicate_index(ground_predicate);
+      PRINT_DEBUG("Added support for predicate %s(%u) %u",
+                  to_string(ground_predicate, problem).c_str(), index.i, mapping.size());
       ArgumentAssignment assignment{mapping, combination};
-      predicate_support[index].emplace_back(action_ptr, assignment);
+      predicate_support[index].emplace_back(action_ptr, std::move(assignment));
     }
   }
 
@@ -191,6 +195,7 @@ private:
     neg_effect_support_.resize(ground_predicates_.size());
     for (ActionPtr action_ptr = 0; action_ptr < problem.actions.size();
          ++action_ptr) {
+      PRINT_DEBUG("Adding support for action %u", action_ptr.i);
       for (const auto &predicate : problem.actions[action_ptr].preconditions) {
         ground_action_predicate(problem, action_ptr, predicate, false);
       }

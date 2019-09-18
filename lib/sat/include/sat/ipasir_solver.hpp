@@ -7,6 +7,7 @@ extern "C" {
 #include "ipasir.h"
 }
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -39,6 +40,8 @@ public:
                 .count(),
             clock::rep(0)));
       });
+    } else {
+      ipasir_set_terminate(handle_, nullptr, [](void *) { return 0; });
     }
     if (ipasir_solve(handle_) == 10) {
       Model model;

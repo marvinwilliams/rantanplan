@@ -112,9 +112,9 @@ static Appender &get_default_appender() {
 
 class Logger {
 public:
-  Logger(const std::string &name) : name_{name}, appenders_{} {}
+  Logger(const std::string &name) : name_{name} {}
 
-  Logger(const std::string &name, Appender &appender) : name_{name}, appenders_{} {
+  Logger(const std::string &name, Appender &appender) : name_{name} {
     add_appender(appender);
   }
 

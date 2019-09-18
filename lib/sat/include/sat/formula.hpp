@@ -16,14 +16,12 @@ struct end_clause_t {};
 static const detail::end_clause_t EndClause;
 
 template <typename Variable> struct Formula {
-  class Literal {
-  public:
+  struct Literal {
     constexpr explicit Literal(Variable variable, bool negated = false)
         : variable{variable}, negated{negated} {}
 
     Literal operator!() { return Literal{variable, !negated}; }
 
-  private:
     Variable variable;
     bool negated;
   };

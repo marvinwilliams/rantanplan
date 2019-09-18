@@ -14,7 +14,6 @@
 #include "util/option_parser.hpp"
 
 #include <cctype>
-#include <chrono>
 #include <climits>
 #include <fstream>
 #include <iostream>
@@ -24,8 +23,6 @@
 #include <string>
 #include <unistd.h>
 #include <variant>
-
-using namespace std::chrono_literals;
 
 static void print_version() {
   char hostname[HOST_NAME_MAX];
@@ -101,6 +98,7 @@ int main(int argc, char *argv[]) {
     PRINT_DEBUG(to_string(problem).c_str());
     encoding::Encoder encoder{problem};
     encoder.encode();
+    encoder.plan();
   } catch (const parser::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
