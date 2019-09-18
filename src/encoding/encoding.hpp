@@ -1,13 +1,14 @@
 #ifndef ENCODING_HPP
 #define ENCODING_HPP
 
+#include "logging/logging.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
 #include "model/support.hpp"
 #include "sat/formula.hpp"
 #include "sat/ipasir_solver.hpp"
 #include "util/combinatorics.hpp"
-#include "util/logger.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -287,17 +288,18 @@ public:
         }
       }
     }
-    PRINT_INFO("Found plan:\n%s", to_string(plan).c_str());
+    std::ofstream s{"plan.txt"};
+    s << to_string(plan);
   }
 
   std::string to_string(const Plan &plan) {
     std::stringstream ss;
     unsigned int step = 0;
     for (const auto &[action_ptr, arguments] : plan) {
-      ss << step << ": " << problem_.actions[action_ptr].name << '(';
+      ss << step << ": " << '(' << problem_.actions[action_ptr].name << ' ';
       for (auto it = arguments.cbegin(); it != arguments.cend(); ++it) {
         if (it != arguments.cbegin()) {
-          ss << ", ";
+          ss << ' ';
         }
         ss << problem_.constants[*it].name;
       }

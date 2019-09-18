@@ -1,19 +1,21 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
-#include "build_config.hpp"
-#include "util/logger.hpp"
+#include "build_config.hpp" // VERSION_MAJOR, VERSION_MINOR and debug_mode
+#include "logging/logging.hpp"
 
 struct Config {
+  // General
+  std::string domain_file;
+  std::string problem_file;
+
+  // Logging
   logging::Level log_level =
-      debug_mode ? logging::Level::DEBUG : logging::Level::INFO;
-  bool log_parser = true;
+      DEBUG_MODE ? logging::Level::DEBUG : logging::Level::INFO;
+  bool log_parser = false;
   bool log_normalize = false;
   bool log_encoding = false;
   bool log_visitor = false;
-
-  std::string domain_file;
-  std::string problem_file;
 };
 
 #endif /* end of include guard: CONFIG_HPP */

@@ -47,12 +47,13 @@ std::string to_string(const PredicateDefinition &predicate,
 }
 
 std::string to_string(const PredicateEvaluation &predicate,
-                      const AbstractAction &action, const ProblemBase &problem) {
+                      const AbstractAction &action,
+                      const ProblemBase &problem) {
   std::stringstream ss;
   if (predicate.negated) {
     ss << '!';
   }
-  ss << problem.predicates.at(predicate.definition).name;
+  ss << problem.predicates[predicate.definition].name;
   ss << '(';
   for (auto it = predicate.arguments.cbegin(); it != predicate.arguments.cend();
        ++it) {
@@ -60,9 +61,9 @@ std::string to_string(const PredicateEvaluation &predicate,
       ss << ", ";
     }
     if (std::holds_alternative<ConstantPtr>(*it)) {
-      ss << problem.constants.at(std::get<ConstantPtr>(*it)).name;
+      ss << problem.constants[std::get<ConstantPtr>(*it)].name;
     } else {
-      ss << '?' << action.parameters.at(std::get<ParameterPtr>(*it)).name;
+      ss << '?' << action.parameters[std::get<ParameterPtr>(*it)].name;
     }
   }
   ss << ')';
@@ -75,7 +76,7 @@ std::string to_string(const PredicateEvaluation &predicate,
   if (predicate.negated) {
     ss << '!';
   }
-  ss << problem.predicates.at(predicate.definition).name;
+  ss << problem.predicates[predicate.definition].name;
   ss << '(';
   for (auto it = predicate.arguments.cbegin(); it != predicate.arguments.cend();
        ++it) {
@@ -83,9 +84,9 @@ std::string to_string(const PredicateEvaluation &predicate,
       ss << ", ";
     }
     if (std::holds_alternative<ConstantPtr>(*it)) {
-      ss << problem.constants.at(std::get<ConstantPtr>(*it)).name;
+      ss << problem.constants[std::get<ConstantPtr>(*it)].name;
     } else {
-      ss << '?' << action.parameters.at(std::get<ParameterPtr>(*it)).name;
+      ss << '?' << action.parameters[std::get<ParameterPtr>(*it)].name;
     }
   }
   ss << ')';

@@ -27,6 +27,8 @@ include_directories(PRIVATE "src")
 include_directories(PRIVATE "include")
 include_directories(PRIVATE "lib/lexer/include")
 include_directories(PRIVATE "lib/sat/include")
+include_directories(PRIVATE "lib/logging/include")
+include_directories(PRIVATE "lib/options/include")
 include_directories(PRIVATE "third_party/sat_solvers")
 include_directories(PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
@@ -41,17 +43,19 @@ add_custom_command(
 
 add_executable(rantanplan_glucose
   "src/rantanplan.cpp"
+  "lib/logging/src/logging/logging.cpp"
   "${SAT_SOLVER_DIR}/glucose4/libipasirglucose4.a"
   )
 
 target_link_directories(rantanplan_glucose PRIVATE "${SAT_SOLVER_DIR}/glucose4")
 target_link_libraries(rantanplan_glucose PRIVATE "ipasirglucose4")
 
-option(DEBUG_MODE "Compile with additional debug information enabled" OFF)
+option(DEBUG "Compile in debug mode" OFF)
+option(DEBUG_LOG "Compile with debug logging capability" OFF)
 
-if(DEBUG_MODE)
+if(DEBUG)
   set(CMAKE_BUILD_TYPE "Debug")
-  add_definitions(-DDEBUG_MODE -DDEBUG_PRINT)
+  add_definitions(-DDEBUG_BUILD -D_GLIBCXX_DEBUG)
   add_compile_options(
     -g -O0
     )
@@ -60,6 +64,10 @@ else()
   add_compile_options(
     -O3 -march=native
     )
+endif()
+
+if(DEBUG_LOG)
+  add_definitions(-DDEBUG_LOG)
 endif()
 
 install(TARGETS rantanplan_glucose DESTINATION "${PROJECT_SOURCE_DIR}/bin")

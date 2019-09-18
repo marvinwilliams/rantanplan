@@ -1,5 +1,5 @@
-#ifndef MATCHER_HPP
-#define MATCHER_HPP
+#ifndef RULE_SET_HPP
+#define RULE_SET_HPP
 
 #include "lexer/lexer.hpp"
 
@@ -96,4 +96,4 @@ private:
 
 } // namespace lexer
 
-#endif /* end of include guard: MATCHER_HPP */
+#endif /* end of include guard: RULE_SET_HPP */

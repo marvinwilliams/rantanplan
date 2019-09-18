@@ -5,7 +5,7 @@
 #include "parser/parser_exception.hpp"
 #include "parser/rules.hpp"
 #include "parser/tokens.hpp"
-#include "util/logger.hpp"
+#include "logging/logging.hpp"
 #include <config.hpp>
 
 #include <algorithm>

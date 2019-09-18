@@ -1,8 +1,13 @@
-#define VERSION_MAJOR @rantanplan_VERSION_MAJOR@
-#define VERSION_MINOR @rantanplan_VERSION_MINOR@
+#ifndef BUILD_CONFIG_HPP
+#define BUILD_CONFIG_HPP
 
-#ifdef DEBUG_MODE
-static constexpr bool debug_mode = true;
+constexpr auto VERSION_MAJOR = @rantanplan_VERSION_MAJOR@;
+constexpr auto VERSION_MINOR = @rantanplan_VERSION_MINOR@;
+
+#ifdef DEBUG_BUILD
+static constexpr bool DEBUG_MODE = true;
 #else
-static constexpr bool debug_mode = false;
+static constexpr bool DEBUG_MODE = false;
 #endif
+
+#endif /* end of include guard: BUILD_CONFIG_HPP */

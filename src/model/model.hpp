@@ -172,7 +172,6 @@ struct ProblemHeader {
 };
 
 struct ProblemBase {
-  ProblemBase() = default;
   virtual ~ProblemBase() = default;
 
   std::vector<Type> types;
@@ -180,6 +179,7 @@ struct ProblemBase {
   std::vector<PredicateDefinition> predicates;
 
 protected:
+  ProblemBase() = default;
   ProblemBase(const ProblemBase &) = default;
   ProblemBase(ProblemBase &&) = default;
   ProblemBase &operator=(const ProblemBase &) = default;
