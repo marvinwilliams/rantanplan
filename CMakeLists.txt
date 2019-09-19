@@ -50,10 +50,10 @@ add_executable(rantanplan_glucose
 target_link_directories(rantanplan_glucose PRIVATE "${SAT_SOLVER_DIR}/glucose4")
 target_link_libraries(rantanplan_glucose PRIVATE "ipasirglucose4")
 
-option(DEBUG "Compile in debug mode" OFF)
+option(DEBUG_BUILD "Compile in debug mode" OFF)
 option(DEBUG_LOG "Compile with debug logging capability" OFF)
 
-if(DEBUG)
+if(DEBUG_BUILD)
   set(CMAKE_BUILD_TYPE "Debug")
   add_definitions(-DDEBUG_BUILD -D_GLIBCXX_DEBUG)
   add_compile_options(

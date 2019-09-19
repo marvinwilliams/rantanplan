@@ -21,11 +21,11 @@ Logger default_logger = []() {
 
 static const auto start_time = std::chrono::steady_clock::now();
 
-inline static bool is_tty(std::FILE *stream) {
+inline static bool is_tty(std::FILE *stream) noexcept {
   return isatty(fileno(stream)) != 0;
 }
 
-Appender::Appender(Level level, bool color_support)
+Appender::Appender(Level level, bool color_support) noexcept
     : level_{level}, color_support_{color_support} {}
 
 void Appender::write(Level level, const std::vector<char> &msg) {
@@ -47,14 +47,14 @@ void Appender::write(Level level, const std::vector<char> &msg) {
         c_msg.resize(c_length + 1);
         color_message(c_msg.data(), c_msg.size(), Color::Red);
       }
-      write(c_msg);
+      write_(c_msg);
     } else {
-      write(msg);
+      write_(msg);
     }
   }
 }
 
-ConsoleAppender::ConsoleAppender(Level level, Mode mode)
+ConsoleAppender::ConsoleAppender(Level level, Mode mode) noexcept
     : Appender{level, is_tty(get_console(mode))}, stream_{get_console(mode)} {}
 
 FileAppender::FileAppender(Level level, const std::filesystem::path &file,
@@ -64,7 +64,7 @@ FileAppender::FileAppender(Level level, const std::filesystem::path &file,
   os_.exceptions(std::ios::failbit);
 }
 
-Logger::Logger(const std::string &name) : name_{name} {}
+Logger::Logger(const std::string &name) noexcept : name_{name} {}
 
 void Logger::log(Level level, const char *file, unsigned int line,
                  const char *format, ...) const {

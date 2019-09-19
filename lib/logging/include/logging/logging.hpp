@@ -10,7 +10,7 @@ namespace logging {
 
 enum class Level { ERROR, WARN, INFO, DEBUG };
 
-constexpr const char *level_name(Level level) {
+constexpr const char *level_name(Level level) noexcept {
   switch (level) {
   case Level::ERROR:
     return "Error";
@@ -35,13 +35,14 @@ public:
   virtual ~Appender() = default;
 
   void write(Level, const std::vector<char> &msg);
-  inline void set_level(Level level) { level_ = level; }
+  inline void set_level(Level level) noexcept { level_ = level; }
 
 protected:
-  Appender(Level, bool color_support);
+  explicit Appender(Level, bool color_support) noexcept;
 
 private:
-  virtual void write(const std::vector<char> &msg) = 0;
+  virtual void write_(const std::vector<char> &msg) = 0;
+
   Level level_;
   bool color_support_;
 };
@@ -50,14 +51,14 @@ class ConsoleAppender : public Appender {
 public:
   enum class Mode { Out, Err };
 
-  ConsoleAppender(Level = Level::INFO, Mode = Mode::Out);
+  explicit ConsoleAppender(Level = Level::INFO, Mode = Mode::Out) noexcept;
 
 private:
-  inline void write(const std::vector<char> &msg) override {
+  inline void write_(const std::vector<char> &msg) override {
     fprintf(stream_, "%s\n", msg.data());
   }
 
-  inline static std::FILE *get_console(Mode mode) {
+  inline static std::FILE *get_console(Mode mode) noexcept {
     return mode == Mode::Out ? stdout : stderr;
   }
 
@@ -66,10 +67,11 @@ private:
 
 class FileAppender : public Appender {
 public:
-  FileAppender(Level, const std::filesystem::path &file, bool append = false);
+  explicit FileAppender(Level, const std::filesystem::path &file,
+                        bool append = false);
 
 private:
-  inline void write(const std::vector<char> &msg) override {
+  inline void write_(const std::vector<char> &msg) override {
     os_ << msg.data() << std::endl;
   }
 
@@ -78,13 +80,13 @@ private:
 
 class Logger {
 public:
-  Logger(const std::string &name);
+  explicit Logger(const std::string &name) noexcept;
   Logger(Logger &&) = default;
 
   void log(Level, const char *file, unsigned int line, const char *format,
            ...) const;
 
-  inline void add_appender(Appender &appender) {
+  inline void add_appender(Appender &appender) noexcept {
     appenders_.push_back(&appender);
   }
 
@@ -114,7 +116,8 @@ extern Logger default_logger;
   logger.log(::logging::Level::INFO, "", 0, __VA_ARGS__)
 #define PRINT_INFO(...)                                                        \
   ::logging::default_logger.log(::logging::Level::INFO, "", 0, __VA_ARGS__)
-#define LOG_WARN(logger, ...) logger.log(::logging::Level::WARN, __VA_ARGS__)
+#define LOG_WARN(logger, ...)                                                  \
+  logger.log(::logging::Level::WARN, "", 0, __VA_ARGS__)
 #define PRINT_WARN(...)                                                        \
   ::logging::default_logger.log(::logging::Level::WARN, "", 0, __VA_ARGS__)
 #define LOG_ERROR(logger, ...)                                                 \

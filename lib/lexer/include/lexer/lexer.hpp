@@ -58,13 +58,13 @@ public:
       return !(*this == other);
     }
 
-    template <typename TokenType> bool has_type() {
+    template <typename TokenType> bool has_type() const {
       return std::holds_alternative<TokenType>(token_);
     }
 
-    std::string to_string() {
-      return std::visit([](auto &t) { return std::string(t.printable_name); },
-                        token_);
+    std::string to_string() const {
+      return std::visit(
+          [](const auto &t) { return std::string(t.printable_name); }, token_);
     }
 
     reference token() const { return token_; }

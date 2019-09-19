@@ -12,3 +12,18 @@
   - foreach
   - sequential
   - helper
+- general
+  - improve lexer (one rule after another)
+
+
+ref qualifiers
+copy on construction
+constness
+constexpr
+static
+extern
+[[nodiscard]]
+[[noreturn]]
+overloads
+explicit
+noexcept

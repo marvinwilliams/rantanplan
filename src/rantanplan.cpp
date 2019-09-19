@@ -1,5 +1,7 @@
 #include "config.hpp"
 #include "encoding/encoding.hpp"
+#include "encoding/foreach.hpp"
+#include "encoding/sequential.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
 #include "logging/logging.hpp"
@@ -12,7 +14,7 @@
 #include <string>
 #include <unistd.h>
 
-void print_version() {
+void print_version() noexcept {
   char hostname[HOST_NAME_MAX];
   gethostname(hostname, HOST_NAME_MAX);
   PRINT_INFO("Rantanplan v%u.%u %srunning on %s", VERSION_MAJOR, VERSION_MINOR,
@@ -23,34 +25,65 @@ Config get_config(const options::Options &options) {
   Config config;
   config.domain_file = options.get<std::string>("domain");
   config.problem_file = options.get<std::string>("problem");
+
+  if (options.is_present<std::string>("planner")) {
+    config.planner = options.get<std::string>("planner");
+  }
+
+  if (options.is_present<std::string>("plan-output")) {
+    config.plan_output_file = options.get<std::string>("plan-output");
+  }
+
+  if (options.is_present<int>("log-level")) {
+    auto log_level = options.get<int>("log-level");
+    if (0 <= log_level && log_level <= 3) {
+      config.log_level =
+          static_cast<logging::Level>(options.get<int>("log-level"));
+    } else {
+      PRINT_WARN("Invalid log level, using level \'%s\' instead",
+                 logging::level_name(config.log_level));
+    }
+  }
+
   config.log_parser = options.get<bool>("log-parser");
   config.log_encoding = options.get<bool>("log-encoding");
-  config.log_visitor = options.get<bool>("log-visitor");
 
   return config;
 }
 
 int main(int argc, char *argv[]) {
-  print_version();
-
-  options::Options options;
-
-  options.add_positional_option<std::string>("domain");
-  options.add_positional_option<std::string>("problem");
+  options::Options options(argv[0]);
+  options.add_positional_option<std::string>("domain", "The pddl domain file");
+  options.add_positional_option<std::string>("problem",
+                                             "The pddl problem file");
+  options.add_option<std::string>("planner", 'x', "Planner to use", "foreach");
+  options.add_option<std::string>("plan-output", 'o',
+                                  "File to output the plan to", "plan.txt");
+  options.add_option<int>(
+      "log-level", 'v',
+      "Control the log level (0: Error, 1: Warn, 2: Info, 3: Debug)", "2");
   options.add_option<bool>("log-parser", 'p', "Enable logging for the parser",
                            "1");
   options.add_option<bool>("log-encoding", 'e',
                            "Enable logging for the encoder", "1");
-  options.add_option<bool>("log-visitor", 'v',
-                           "Enable logging for the ast visitor", "1");
+  options.add_option<bool>("help", 'h', "Display usage information");
+
   try {
     options.parse(argc, argv);
   } catch (const options::OptionException &e) {
     PRINT_ERROR(e.what());
+    PRINT_INFO("Try --help for further information");
     return 1;
   }
 
+  if (options.is_present<bool>("help")) {
+    options.print_usage();
+    return 0;
+  }
+
   auto config = get_config(options);
+
+  logging::default_appender.set_level(config.log_level);
 
   if (config.log_parser) {
     parser::logger.add_appender(logging::default_appender);
@@ -58,6 +91,8 @@ int main(int argc, char *argv[]) {
   if (config.log_encoding) {
     encoding::logger.add_appender(logging::default_appender);
   }
+
+  print_version();
 
   std::ifstream domain(config.domain_file);
   std::ifstream problem(config.problem_file);
@@ -70,20 +105,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  using Rules =
-      lexer::RuleSet<parser::rules::Primitive<parser::tokens::LParen>,
-                     parser::rules::Primitive<parser::tokens::RParen>,
-                     parser::rules::Primitive<parser::tokens::Hyphen>,
-                     parser::rules::Primitive<parser::tokens::Equality>,
-                     parser::rules::Primitive<parser::tokens::And>,
-                     parser::rules::Primitive<parser::tokens::Or>,
-                     parser::rules::Primitive<parser::tokens::Not>,
-                     parser::rules::Primitive<parser::tokens::Define>,
-                     parser::rules::Primitive<parser::tokens::Domain>,
-                     parser::rules::Primitive<parser::tokens::Problem>,
-                     parser::rules::Section, parser::rules::Identifier,
-                     parser::rules::Variable, parser::rules::Comment>;
-  lexer::Lexer<Rules> lexer;
+  lexer::Lexer<parser::Rules> lexer;
   parser::ast::AST ast;
   try {
     auto domain_tokens =
@@ -102,9 +124,19 @@ int main(int argc, char *argv[]) {
     PRINT_INFO("Normalizing problem...");
     auto problem = model::normalize(abstract_problem);
     PRINT_DEBUG(to_string(problem).c_str());
-    encoding::Encoder encoder{problem};
-    encoder.encode();
-    encoder.plan();
+    std::unique_ptr<encoding::Encoder> encoder;
+    if (config.planner == "sequential") {
+      PRINT_INFO("Using sequential encoding");
+      encoder = std::make_unique<encoding::SequentialEncoder>(problem);
+    } else if (config.planner == "foreach") {
+      PRINT_INFO("Using foreach encoding");
+      encoder = std::make_unique<encoding::ForeachEncoder>(problem);
+    } else {
+      PRINT_ERROR("Unknown planner type \'%s\'", config.planner.c_str());
+      return 1;
+    }
+    encoder->encode();
+    encoder->plan(config);
   } catch (const parser::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
