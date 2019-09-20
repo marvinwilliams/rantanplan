@@ -5,5 +5,5 @@ set -euo pipefail
 DOMAIN=$1
 PROBLEM=$2
 
-./bin/rantanplan_glucose $1 $2
-./../master_thesis/VAL/Validate $1 $2 plan.txt
+./bin/rantanplan_glucose $DOMAIN $PROBLEM -x $3 -o
+./../master_thesis/VAL/Validate $DOMAIN $PROBLEM plan.txt

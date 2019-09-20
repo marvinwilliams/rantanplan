@@ -13,11 +13,9 @@
 
 namespace lexer {
 
-template <typename Rules, typename CharT = char,
-          typename Traits = LexerTraits<CharT>>
-class Lexer {
+template <typename Rules, typename Traits = LexerTraits> class Lexer {
 public:
-  using char_type = CharT;
+  using char_type = typename LexerTraits::char_type;
   using Token = typename Rules::Token;
 
   // This iterator is used to extract the tokens. New tokens will be read when
@@ -97,7 +95,7 @@ private:
   void get_next_token(TokenIterator<CharIterator> &token_iterator) {
     // Skip blanks
     while (token_iterator.to_ != token_iterator.end_) {
-      CharT current_char = *token_iterator.to_;
+      char_type current_char = *token_iterator.to_;
       if (Traits::is_blank(current_char)) {
         token_iterator.location_.advance_column();
       } else if (Traits::is_newline(current_char)) {
@@ -117,14 +115,14 @@ private:
       return;
     }
 
-    std::basic_string<CharT> current_string;
     rules_.reset();
+    std::basic_string<char_type> current_string;
     CharIterator current_iterator = token_iterator.to_;
     Location current_location = token_iterator.location_;
 
     // Read the next char until it cannot be part of any token
     while (rules_.accepts() && current_iterator != token_iterator.end_) {
-      CharT current_char = *current_iterator;
+      char_type current_char = *current_iterator;
       if (Traits::end_at_newline && Traits::is_newline(current_char)) {
         break;
       }
@@ -152,10 +150,11 @@ private:
       token_iterator.from_ = token_iterator.end_;
       token_iterator.to_ = token_iterator.end_;
       token_iterator.location_ = current_location;
-      std::basic_string<CharT> msg =
-          "Could not match token: \"" + current_string + '\"';
+      std::stringstream ss;
+
+      ss << "Could not match token: \'" << current_string << '\'';
       // Location is one off because of early exit
-      throw LexerException(current_location, msg);
+      throw LexerException(current_location, std::move(ss).str());
     }
   }
 

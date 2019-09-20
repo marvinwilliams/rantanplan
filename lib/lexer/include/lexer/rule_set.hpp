@@ -3,9 +3,9 @@
 
 #include "lexer/lexer.hpp"
 
+#include <string>
 #include <tuple>
 #include <variant>
-#include <string>
 
 namespace lexer {
 
@@ -25,7 +25,8 @@ template <typename Rule> struct Wrapper {
   }
 
   template <typename Token, typename CharT>
-  bool get_token(Token& token, const std::basic_string<CharT> &current_string) const {
+  bool get_token(Token &token,
+                 const std::basic_string<CharT> &current_string) const {
     if (matching) {
       token = rule.get_token(current_string);
     }
@@ -51,7 +52,6 @@ struct ErrorToken {
   static constexpr auto printable_name = "";
 };
 
-
 // This class manages the given rules
 template <typename... Rules> class RuleSet {
 public:
@@ -64,7 +64,9 @@ public:
 
   bool accepts() const {
     return std::apply(
-        [](const Wrapper<Rules> &... rules) { return (rules.accepting || ...); },
+        [](const Wrapper<Rules> &... rules) {
+          return (rules.accepting || ...);
+        },
         rules_);
   }
 
@@ -85,7 +87,7 @@ public:
     std::apply(
         [&token, &current_string](Wrapper<Rules> &... rules) {
           (rules.get_token(token, current_string) || ...);
-         },
+        },
         rules_);
     return token;
   }

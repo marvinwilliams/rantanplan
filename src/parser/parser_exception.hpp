@@ -11,20 +11,27 @@ namespace parser {
 
 class ParserException : public std::exception {
 public:
-  ParserException(const lexer::Location &location, const std::string &message)
-      : location_(location), message_{message} {}
-  ParserException(const lexer::Location &location)
+  explicit ParserException(const lexer::Location &location, std::string message)
+      : location_(location), message_{std::move(message)} {}
+  explicit ParserException(const lexer::Location &location)
       : ParserException(location, "unknown error") {}
-  ParserException(const std::string &message) : message_{message} {}
+  explicit ParserException(std::string message)
+      : message_{std::move(message)} {}
 
-  const char *what() const noexcept override { return message_.c_str(); }
+  [[nodiscard]] inline const char *what() const noexcept override {
+    return message_.c_str();
+  }
 
-  std::optional<lexer::Location> location() const noexcept { return location_; }
+  [[nodiscard]] inline const std::optional<lexer::Location> &location() const
+      noexcept {
+    return location_;
+  }
 
 private:
   std::optional<lexer::Location> location_;
   std::string message_;
 };
+
 } // namespace parser
 
 #endif /* end of include guard: PARSER_EXCEPTION_HPP */

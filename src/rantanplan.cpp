@@ -108,10 +108,10 @@ int main(int argc, char *argv[]) {
   lexer::Lexer<parser::Rules> lexer;
   parser::ast::AST ast;
   try {
+    PRINT_INFO("Parsing problem...");
     auto domain_tokens =
         lexer.lex(config.domain_file, std::istreambuf_iterator<char>(domain),
                   std::istreambuf_iterator<char>());
-    PRINT_INFO("Parsing problem...");
     parser::parse_domain(domain_tokens, ast);
     auto problem_tokens =
         lexer.lex(config.problem_file, std::istreambuf_iterator<char>(problem),

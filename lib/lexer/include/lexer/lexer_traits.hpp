@@ -5,17 +5,20 @@
 
 namespace lexer {
 
-template <typename CharT> struct LexerTraits;
+struct LexerTraits {
+  using char_type = char;
 
-template <> struct LexerTraits<char> {
   // Controls whether tokens can consume newlines
-  static const bool end_at_newline = true;
+  static constexpr bool end_at_newline = true;
+
   // Controls whether tokens can consume blanks
-  static const bool end_at_blank = false;
+  static constexpr bool end_at_blank = false;
+
   // Newlines are skippend and used for location information
-  static bool is_newline(char c) { return c == '\n'; }
+  static constexpr bool is_newline(char_type c) { return c == '\n'; }
+
   // Leading blanks are skipped
-  static bool is_blank(char c) { return std::isblank(c); }
+  static bool is_blank(char_type c) { return std::isblank(c); }
 };
 
 } // namespace lexer
