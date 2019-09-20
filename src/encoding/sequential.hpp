@@ -99,9 +99,9 @@ private:
     for (size_t parameter_pos = 0; parameter_pos < max_parameters_;
          ++parameter_pos) {
       std::vector<Variable> all_arguments;
-      all_arguments.reserve(max_arguments_);
-      for (model::ConstantPtr constant_ptr = 0; constant_ptr < max_arguments_;
-           ++constant_ptr) {
+      all_arguments.reserve(problem_.constants.size());
+      for (model::ConstantPtr constant_ptr = 0;
+           constant_ptr < problem_.constants.size(); ++constant_ptr) {
         all_arguments.emplace_back(
             GlobalParameterVariable{parameter_pos, constant_ptr});
       }
@@ -124,13 +124,11 @@ private:
       for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
            ++parameter_pos) {
         const auto &parameter = action.parameters[parameter_pos];
-        size_t number_arguments =
-            support_.get_constants_of_type(parameter.type).size();
         universal_clauses_ << Literal{ActionVariable{action_ptr}, true};
-        for (size_t constant_index = 0; constant_index < number_arguments;
-             ++constant_index) {
+        for (model::ConstantPtr constant_ptr :
+             support_.get_constants_of_type(parameter.type)) {
           universal_clauses_ << Literal{
-              GlobalParameterVariable{parameter_pos, constant_index}, false};
+              GlobalParameterVariable{parameter_pos, constant_ptr}, false};
         }
         universal_clauses_ << sat::EndClause;
       }
@@ -147,10 +145,15 @@ private:
       for (const auto &[action_ptr, assignment] :
            predicate_support[predicate_ptr]) {
         formula << Literal{ActionVariable{action_ptr}, true};
+        const auto &parameters = problem_.actions[action_ptr].parameters;
         for (auto [parameter_index, constant_index] :
              assignment.get_arguments()) {
+          const auto &constants_of_type =
+              support_.get_constants_of_type(parameters[parameter_index].type);
           formula << Literal{
-              GlobalParameterVariable{parameter_index, constant_index}, true};
+              GlobalParameterVariable{parameter_index,
+                                      constants_of_type[constant_index]},
+              true};
         }
         formula << Literal{PredicateVariable{predicate_ptr, !is_effect},
                            is_negated}
@@ -171,10 +174,15 @@ private:
       for (const auto &[action_ptr, assignment] :
            support_.get_predicate_support(is_negated, true)[predicate_ptr]) {
         dnf << Literal{ActionVariable{action_ptr}, false};
+        const auto &parameters = problem_.actions[action_ptr].parameters;
         for (auto [parameter_index, constant_index] :
              assignment.get_arguments()) {
+          const auto &constants_of_type =
+              support_.get_constants_of_type(parameters[parameter_index].type);
           dnf << Literal{
-              GlobalParameterVariable{parameter_index, constant_index}, false};
+              GlobalParameterVariable{parameter_index,
+                                      constants_of_type[constant_index]},
+              false};
         }
         dnf << sat::EndClause;
       }
@@ -205,8 +213,8 @@ private:
 
     representation_.parameters.resize(max_parameters_);
     for (size_t i = 0; i < max_parameters_; ++i) {
-      representation_.parameters[i].reserve(max_arguments_);
-      for (size_t j = 0; j < max_arguments_; ++j) {
+      representation_.parameters[i].reserve(problem_.constants.size());
+      for (size_t j = 0; j < problem_.constants.size(); ++j) {
         representation_.parameters[i].push_back(variable_counter++);
       }
     }
@@ -222,17 +230,9 @@ private:
 
   void generate_formula_() override {
     max_parameters_ = 0;
-    max_arguments_ = 0;
     for (const auto &action : problem_.actions) {
       if (action.parameters.size() > max_parameters_) {
         max_parameters_ = action.parameters.size();
-      }
-      for (const auto &parameter : action.parameters) {
-        if (support_.get_constants_of_type(parameter.type).size() >
-            max_arguments_) {
-          max_arguments_ =
-              support_.get_constants_of_type(parameter.type).size();
-        }
       }
     }
     encode_initial_state();
@@ -264,7 +264,7 @@ private:
                    std::get_if<GlobalParameterVariable>(&literal.variable);
                p) {
       variable =
-          representation_.parameters[p->parameter_index][p->constant_index];
+          representation_.parameters[p->parameter_index][p->constant_ptr];
     }
     assert(variable != 0);
     if (variable == 1) {
@@ -300,14 +300,12 @@ private:
           for (size_t parameter_pos = 0;
                parameter_pos < action.parameters.size(); ++parameter_pos) {
             [[maybe_unused]] bool found = false;
-            const auto &parameter = action.parameters[parameter_pos];
-            for (size_t i = 0;
-                 i < support_.get_constants_of_type(parameter.type).size();
-                 ++i) {
-              if (model[representation_.parameters[parameter_pos][i] +
+            for (model::ConstantPtr constant_ptr = 0;
+                 constant_ptr < problem_.constants.size(); ++constant_ptr) {
+              if (model[representation_
+                            .parameters[parameter_pos][constant_ptr] +
                         s * representation_.num_vars]) {
-                arguments.push_back(
-                    support_.get_constants_of_type(parameter.type)[i]);
+                arguments.push_back(constant_ptr);
                 found = true;
                 break;
               }
@@ -340,13 +338,12 @@ private:
   }
 
   size_t max_parameters_;
-  size_t max_arguments_;
   Representation representation_;
   Formula initial_state_;
   Formula universal_clauses_;
   Formula transition_clauses_;
   Formula goal_;
-};
+}; // namespace encoding
 
 } // namespace encoding
 

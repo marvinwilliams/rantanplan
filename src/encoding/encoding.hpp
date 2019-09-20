@@ -34,7 +34,7 @@ struct ParameterVariable {
 
 struct GlobalParameterVariable {
   size_t parameter_index;
-  size_t constant_index;
+  model::ConstantPtr constant_ptr;
 };
 
 class Encoder {
