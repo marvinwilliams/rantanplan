@@ -3,6 +3,7 @@
 
 
 #include "logging/logging.hpp"
+#include "encoding/encoding.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
 #include "model/support.hpp"
@@ -26,10 +27,23 @@ namespace encoding {
 class ForeachEncoder : public Encoder {
 
 public:
+  using Variable =
+      std::variant<ActionVariable, PredicateVariable, ParameterVariable>;
+  using Formula = sat::Formula<Variable>;
+  using Literal = Formula::Literal;
+
+  struct Representation {
+    const unsigned int SAT = 1;
+    std::vector<unsigned int> predicates;
+    std::vector<unsigned int> actions;
+    std::vector<std::vector<std::vector<unsigned int>>> parameters;
+    size_t num_vars;
+  };
+
   explicit ForeachEncoder(const model::Problem &problem)
       : Encoder{problem} {}
 
-  void plan(const Config &config) {
+  void plan(const Config &config) override {
     *solver_ << static_cast<int>(representation_.SAT) << 0;
     LOG_DEBUG(logger, "Initial state");
     add_formula(initial_state_, 0);
@@ -210,7 +224,7 @@ private:
     }
   }
 
-  void init_vars_() {
+  void init_vars_() override {
     PRINT_INFO("Initializing sat variables...");
     unsigned int variable_counter = representation_.SAT + 1;
 
@@ -349,6 +363,7 @@ private:
     return ss.str();
   }
 
+  Representation representation_;
   Formula initial_state_;
   Formula universal_clauses_;
   Formula transition_clauses_;

@@ -1,6 +1,8 @@
 #ifndef ENCODING_HPP
 #define ENCODING_HPP
 
+#include "config.hpp"
+#include "logging/logging.hpp"
 #include "model/model.hpp"
 #include "model/support.hpp"
 #include "sat/formula.hpp"
@@ -30,14 +32,14 @@ struct ParameterVariable {
   size_t constant_index;
 };
 
-using Variable =
-    std::variant<ActionVariable, PredicateVariable, ParameterVariable>;
+struct GlobalParameterVariable {
+  size_t parameter_index;
+  size_t constant_index;
+};
 
 class Encoder {
 
 public:
-  using Formula = sat::Formula<Variable>;
-  using Literal = Formula::Literal;
   using Plan =
       std::vector<std::pair<model::ActionPtr, std::vector<model::ConstantPtr>>>;
 
@@ -58,21 +60,12 @@ protected:
   Encoder(const Encoder &) = delete;
   Encoder(Encoder &&) = default;
   Encoder &operator=(const Encoder &) = delete;
-  Encoder &operator=(Encoder &&) = default;
-
-  struct Representation {
-    const unsigned int SAT = 1;
-    std::vector<unsigned int> predicates;
-    std::vector<unsigned int> actions;
-    std::vector<std::vector<std::vector<unsigned int>>> parameters;
-    size_t num_vars;
-  };
+  Encoder &operator=(Encoder &&) = delete;
 
   std::unique_ptr<sat::Solver> solver_;
 
   const model::Problem &problem_;
   model::Support support_;
-  Representation representation_;
 
 private:
   virtual void generate_formula_() = 0;
