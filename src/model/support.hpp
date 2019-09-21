@@ -1,6 +1,7 @@
 #ifndef SUPPORT_HPP
 #define SUPPORT_HPP
 
+#include "logging/logging.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
 #include "model/to_string.hpp"
@@ -67,6 +68,16 @@ public:
     sort_constants(problem);
     ground_predicates(problem);
     set_predicate_support(problem);
+    initial_state_.reserve(problem.initial_state.size());
+    for (const auto &predicate : problem.initial_state) {
+      auto predicate_ptr = get_predicate_index(GroundPredicate(predicate));
+      initial_state_.push_back({predicate_ptr, predicate.negated});
+    }
+    goal_.reserve(problem.goal.size());
+    for (const auto &predicate : problem.goal) {
+      auto predicate_ptr = get_predicate_index(GroundPredicate{predicate});
+      goal_.push_back({predicate_ptr, predicate.negated});
+    }
   }
 
   const std::vector<ConstantPtr> &get_constants_of_type(TypePtr type) {
@@ -80,16 +91,40 @@ public:
   GroundPredicatePtr get_predicate_index(const GroundPredicate &predicate) {
     auto it = std::find(ground_predicates_.cbegin(), ground_predicates_.cend(),
                         predicate);
-    if (it == ground_predicates_.cend()) {
-      // Invalid predicate
-      return ground_predicates_.size();
-    }
+    assert(it != ground_predicates_.cend());
     return std::distance(ground_predicates_.cbegin(), it);
   }
 
   const std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>> &
   get_predicate_support(bool is_negated, bool is_effect) {
     return select_support(is_negated, is_effect);
+  }
+
+  bool is_relevant(GroundPredicatePtr predicate) {
+    // Predicate is in any precondition
+    bool as_precondition = !select_support(true, false)[predicate].empty() ||
+                           !select_support(false, false)[predicate].empty();
+    if (as_precondition) {
+      return true;
+    }
+    // Predicate is in goal
+    return std::any_of(goal_.cbegin(), goal_.cend(),
+                       [&predicate](const auto &goal_predicate) {
+                         return predicate == goal_predicate.first;
+                       });
+  }
+
+  bool is_rigid(GroundPredicatePtr predicate, bool negated) {
+    // Is in initial state
+    bool in_init = std::any_of(initial_state_.cbegin(), initial_state_.cend(),
+                               [&predicate](const auto &initial_predicate) {
+                                 return predicate == initial_predicate.first;
+                               });
+    if (in_init == negated) {
+      return false;
+    }
+    // Opposite predicate is in any effect
+    return select_support(!negated, true)[predicate].empty();
   }
 
 private:
@@ -139,8 +174,6 @@ private:
           arguments.push_back(constant);
         }
         ground_predicates_.emplace_back(predicate_ptr, std::move(arguments));
-        PRINT_DEBUG("Added predicate %s",
-                    to_string(ground_predicates_.back(), problem).c_str());
       }
     }
   }
@@ -170,7 +203,7 @@ private:
 
     auto combinations{all_combinations(number_arguments)};
 
-    auto& predicate_support = select_support(predicate.negated, is_effect);
+    auto &predicate_support = select_support(predicate.negated, is_effect);
 
     for (const auto &combination : combinations) {
       for (size_t i = 0; i < mapping.size(); ++i) {
@@ -181,8 +214,6 @@ private:
         }
       }
       auto index = get_predicate_index(ground_predicate);
-      PRINT_DEBUG("Added support for predicate %s(%u) %u",
-                  to_string(ground_predicate, problem).c_str(), index.i, mapping.size());
       ArgumentAssignment assignment{mapping, combination};
       predicate_support[index].emplace_back(action_ptr, std::move(assignment));
     }
@@ -195,7 +226,6 @@ private:
     neg_effect_support_.resize(ground_predicates_.size());
     for (ActionPtr action_ptr = 0; action_ptr < problem.actions.size();
          ++action_ptr) {
-      PRINT_DEBUG("Adding support for action %u", action_ptr.i);
       for (const auto &predicate : problem.actions[action_ptr].preconditions) {
         ground_action_predicate(problem, action_ptr, predicate, false);
       }
@@ -205,6 +235,8 @@ private:
     }
   }
 
+  std::vector<std::pair<GroundPredicatePtr, bool>> initial_state_;
+  std::vector<std::pair<GroundPredicatePtr, bool>> goal_;
   std::vector<std::vector<ConstantPtr>> constants_of_type;
   std::vector<GroundPredicate> ground_predicates_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
@@ -215,7 +247,7 @@ private:
       pos_effect_support_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
       neg_effect_support_;
-};
+}; // namespace model
 
 } // namespace model
 

@@ -33,6 +33,7 @@ public:
 
   struct Representation {
     const unsigned int SAT = 1;
+    const unsigned int UNSAT = SAT + 1;
     std::vector<unsigned int> predicates;
     std::vector<unsigned int> actions;
     std::vector<std::vector<unsigned int>> parameters;
@@ -44,6 +45,7 @@ public:
 
   void plan(const Config &config) override {
     *solver_ << static_cast<int>(representation_.SAT) << 0;
+    *solver_ << -static_cast<int>(representation_.UNSAT) << 0;
     add_formula(initial_state_, 0);
     add_formula(universal_clauses_, 0);
     add_formula(transition_clauses_, 0);
@@ -99,9 +101,9 @@ private:
     for (size_t parameter_pos = 0; parameter_pos < max_parameters_;
          ++parameter_pos) {
       std::vector<Variable> all_arguments;
-      all_arguments.reserve(problem_.constants.size());
-      for (model::ConstantPtr constant_ptr = 0;
-           constant_ptr < problem_.constants.size(); ++constant_ptr) {
+      all_arguments.reserve(max_arguments_);
+      for (model::ConstantPtr constant_ptr = 0; constant_ptr < max_arguments_;
+           ++constant_ptr) {
         all_arguments.emplace_back(
             GlobalParameterVariable{parameter_pos, constant_ptr});
       }
@@ -124,11 +126,13 @@ private:
       for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
            ++parameter_pos) {
         const auto &parameter = action.parameters[parameter_pos];
+        size_t number_arguments =
+            support_.get_constants_of_type(parameter.type).size();
         universal_clauses_ << Literal{ActionVariable{action_ptr}, true};
-        for (model::ConstantPtr constant_ptr :
-             support_.get_constants_of_type(parameter.type)) {
+        for (size_t constant_index = 0; constant_index < number_arguments;
+             ++constant_index) {
           universal_clauses_ << Literal{
-              GlobalParameterVariable{parameter_pos, constant_ptr}, false};
+              GlobalParameterVariable{parameter_pos, constant_index}, false};
         }
         universal_clauses_ << sat::EndClause;
       }
@@ -145,15 +149,10 @@ private:
       for (const auto &[action_ptr, assignment] :
            predicate_support[predicate_ptr]) {
         formula << Literal{ActionVariable{action_ptr}, true};
-        const auto &parameters = problem_.actions[action_ptr].parameters;
         for (auto [parameter_index, constant_index] :
              assignment.get_arguments()) {
-          const auto &constants_of_type =
-              support_.get_constants_of_type(parameters[parameter_index].type);
           formula << Literal{
-              GlobalParameterVariable{parameter_index,
-                                      constants_of_type[constant_index]},
-              true};
+              GlobalParameterVariable{parameter_index, constant_index}, true};
         }
         formula << Literal{PredicateVariable{predicate_ptr, !is_effect},
                            is_negated}
@@ -174,15 +173,10 @@ private:
       for (const auto &[action_ptr, assignment] :
            support_.get_predicate_support(is_negated, true)[predicate_ptr]) {
         dnf << Literal{ActionVariable{action_ptr}, false};
-        const auto &parameters = problem_.actions[action_ptr].parameters;
         for (auto [parameter_index, constant_index] :
              assignment.get_arguments()) {
-          const auto &constants_of_type =
-              support_.get_constants_of_type(parameters[parameter_index].type);
           dnf << Literal{
-              GlobalParameterVariable{parameter_index,
-                                      constants_of_type[constant_index]},
-              false};
+              GlobalParameterVariable{parameter_index, constant_index}, false};
         }
         dnf << sat::EndClause;
       }
@@ -201,7 +195,7 @@ private:
 
   void init_vars_() override {
     PRINT_INFO("Initializing sat variables...");
-    unsigned int variable_counter = representation_.SAT + 1;
+    unsigned int variable_counter = representation_.UNSAT + 1;
 
     representation_.actions.reserve(problem_.actions.size());
     for (const auto &action : problem_.actions) {
@@ -213,26 +207,41 @@ private:
 
     representation_.parameters.resize(max_parameters_);
     for (size_t i = 0; i < max_parameters_; ++i) {
-      representation_.parameters[i].reserve(problem_.constants.size());
-      for (size_t j = 0; j < problem_.constants.size(); ++j) {
+      representation_.parameters[i].reserve(max_arguments_);
+      for (size_t j = 0; j < max_arguments_; ++j) {
         representation_.parameters[i].push_back(variable_counter++);
       }
     }
 
     representation_.predicates.reserve(support_.get_ground_predicates().size());
-    for (size_t i = 0; i < support_.get_ground_predicates().size(); ++i) {
-      representation_.predicates.push_back(variable_counter++);
+    for (model::GroundPredicatePtr i = 0;
+         i < support_.get_ground_predicates().size(); ++i) {
+      if (support_.is_rigid(i, false)) {
+        representation_.predicates.push_back(representation_.SAT);
+      } else if (support_.is_rigid(i, true)) {
+        representation_.predicates.push_back(representation_.UNSAT);
+      } else {
+        representation_.predicates.push_back(variable_counter++);
+      }
     }
 
-    representation_.num_vars = variable_counter - 2;
+    representation_.num_vars = variable_counter - 3;
     PRINT_INFO("Representation uses %u variables", representation_.num_vars);
   }
 
   void generate_formula_() override {
     max_parameters_ = 0;
+    max_arguments_ = 0;
     for (const auto &action : problem_.actions) {
       if (action.parameters.size() > max_parameters_) {
         max_parameters_ = action.parameters.size();
+      }
+      for (const auto &parameter : action.parameters) {
+        if (support_.get_constants_of_type(parameter.type).size() >
+            max_arguments_) {
+          max_arguments_ =
+              support_.get_constants_of_type(parameter.type).size();
+        }
       }
     }
     encode_initial_state();
@@ -256,19 +265,20 @@ private:
     } else if (const PredicateVariable *p =
                    std::get_if<PredicateVariable>(&literal.variable);
                p) {
-      variable =
-          representation_.predicates[p->predicate_ptr] +
-          (p->this_step ? 0
-                        : static_cast<unsigned int>(representation_.num_vars));
+      variable = representation_.predicates[p->predicate_ptr];
+      if (!p->this_step && variable > representation_.UNSAT) {
+        variable += static_cast<unsigned int>(representation_.num_vars);
+      }
     } else if (const GlobalParameterVariable *p =
                    std::get_if<GlobalParameterVariable>(&literal.variable);
                p) {
       variable =
-          representation_.parameters[p->parameter_index][p->constant_ptr];
+          representation_.parameters[p->parameter_index][p->constant_index];
     }
     assert(variable != 0);
-    if (variable == 1) {
-      return literal.negated ? -1 : 1;
+    if (variable <= representation_.UNSAT) {
+      LOG_DEBUG(logger, "%d ", (literal.negated ? -1 : 1) * variable);
+      return (literal.negated ? -1 : 1) * static_cast<int>(variable);
     }
     LOG_DEBUG(logger, "%d ",
               (literal.negated ? -1 : 1) *
@@ -283,7 +293,6 @@ private:
         *solver_ << get_sat_var(literal, step);
       }
       *solver_ << 0;
-      LOG_DEBUG(logger, "\n");
     }
   }
 
@@ -300,12 +309,14 @@ private:
           for (size_t parameter_pos = 0;
                parameter_pos < action.parameters.size(); ++parameter_pos) {
             [[maybe_unused]] bool found = false;
-            for (model::ConstantPtr constant_ptr = 0;
-                 constant_ptr < problem_.constants.size(); ++constant_ptr) {
-              if (model[representation_
-                            .parameters[parameter_pos][constant_ptr] +
+            const auto &parameter = action.parameters[parameter_pos];
+            for (size_t i = 0;
+                 i < support_.get_constants_of_type(parameter.type).size();
+                 ++i) {
+              if (model[representation_.parameters[parameter_pos][i] +
                         s * representation_.num_vars]) {
-                arguments.push_back(constant_ptr);
+                arguments.push_back(
+                    support_.get_constants_of_type(parameter.type)[i]);
                 found = true;
                 break;
               }
@@ -338,12 +349,13 @@ private:
   }
 
   size_t max_parameters_;
+  size_t max_arguments_;
   Representation representation_;
   Formula initial_state_;
   Formula universal_clauses_;
   Formula transition_clauses_;
   Formula goal_;
-}; // namespace encoding
+};
 
 } // namespace encoding
 

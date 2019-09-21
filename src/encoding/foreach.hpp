@@ -45,24 +45,18 @@ public:
 
   void plan(const Config &config) override {
     *solver_ << static_cast<int>(representation_.SAT) << 0;
-    LOG_DEBUG(logger, "Initial state");
     add_formula(initial_state_, 0);
-    LOG_DEBUG(logger, "First universal clauses");
     add_formula(universal_clauses_, 0);
-    LOG_DEBUG(logger, "First transition clauses");
     add_formula(transition_clauses_, 0);
     unsigned int step = 1;
     while (true) {
-      LOG_DEBUG(logger, "Universal clauses");
       add_formula(universal_clauses_, step);
       PRINT_INFO("Solving step %u", step);
-      LOG_DEBUG(logger, "Assume goal");
       for (const auto &clause : goal_.clauses) {
         for (const auto &literal : clause.literals) {
           solver_->assume(get_sat_var(literal, step));
         }
       }
-      LOG_DEBUG(logger, "Start solving");
       auto model = solver_->solve();
       if (model) {
         PRINT_INFO("Found plan");
@@ -75,7 +69,6 @@ public:
         }
         return;
       }
-      LOG_DEBUG(logger, "Transition clauses");
       add_formula(transition_clauses_, step);
       ++step;
     }
@@ -131,13 +124,10 @@ private:
   void parameter_implies_predicate(bool is_negated, bool is_effect) {
     const auto &predicate_support =
         support_.get_predicate_support(is_negated, is_effect);
-    PRINT_DEBUG("Support size: %u", predicate_support.size());
     auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
     for (model::GroundPredicatePtr predicate_ptr = 0;
          predicate_ptr < support_.get_ground_predicates().size();
          ++predicate_ptr) {
-      PRINT_DEBUG("Support for predicate %u: %u", predicate_ptr.i,
-                  predicate_support[predicate_ptr].size());
       for (const auto &[action_ptr, assignment] :
            predicate_support[predicate_ptr]) {
         formula << Literal{ActionVariable{action_ptr}, true};
@@ -307,7 +297,6 @@ private:
         *solver_ << get_sat_var(literal, step);
       }
       *solver_ << 0;
-      LOG_DEBUG(logger, "\n");
     }
   }
 
