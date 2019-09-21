@@ -1,14 +1,13 @@
 #ifndef FOREACH_HPP
 #define FOREACH_HPP
 
-
-#include "logging/logging.hpp"
+#include "config.hpp"
 #include "encoding/encoding.hpp"
+#include "logging/logging.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
 #include "model/support.hpp"
 #include "sat/formula.hpp"
-#include "config.hpp"
 #include "sat/ipasir_solver.hpp"
 #include "util/combinatorics.hpp"
 
@@ -33,18 +32,20 @@ public:
   using Literal = Formula::Literal;
 
   struct Representation {
+    const unsigned int DONTCARE = 0;
     const unsigned int SAT = 1;
+    const unsigned int UNSAT = 2;
     std::vector<unsigned int> predicates;
     std::vector<unsigned int> actions;
     std::vector<std::vector<std::vector<unsigned int>>> parameters;
     size_t num_vars;
   };
 
-  explicit ForeachEncoder(const model::Problem &problem)
-      : Encoder{problem} {}
+  explicit ForeachEncoder(const model::Problem &problem) : Encoder{problem} {}
 
   void plan(const Config &config) override {
     *solver_ << static_cast<int>(representation_.SAT) << 0;
+    *solver_ << -static_cast<int>(representation_.UNSAT) << 0;
     add_formula(initial_state_, 0);
     add_formula(universal_clauses_, 0);
     add_formula(transition_clauses_, 0);
@@ -73,6 +74,7 @@ public:
       ++step;
     }
   }
+
 private:
   void encode_initial_state() {
     for (model::GroundPredicatePtr predicate_ptr = 0;
@@ -216,7 +218,7 @@ private:
 
   void init_vars_() override {
     PRINT_INFO("Initializing sat variables...");
-    unsigned int variable_counter = representation_.SAT + 1;
+    unsigned int variable_counter = representation_.UNSAT + 1;
 
     representation_.actions.reserve(problem_.actions.size());
     representation_.parameters.reserve(problem_.actions.size());
@@ -240,10 +242,18 @@ private:
 
     representation_.predicates.reserve(support_.get_ground_predicates().size());
     for (size_t i = 0; i < support_.get_ground_predicates().size(); ++i) {
-      representation_.predicates.push_back(variable_counter++);
+      if (!support_.is_relevant(i)) {
+        representation_.predicates.push_back(representation_.DONTCARE);
+      } else if (support_.is_rigid(i, false)) {
+        representation_.predicates.push_back(representation_.SAT);
+      } else if (support_.is_rigid(i, true)) {
+        representation_.predicates.push_back(representation_.UNSAT);
+      } else {
+        representation_.predicates.push_back(variable_counter++);
+      }
     }
 
-    representation_.num_vars = variable_counter - 2;
+    representation_.num_vars = variable_counter - 3;
     PRINT_INFO("Representation uses %u variables", representation_.num_vars);
   }
 
@@ -270,19 +280,25 @@ private:
     } else if (const PredicateVariable *p =
                    std::get_if<PredicateVariable>(&literal.variable);
                p) {
-      variable = representation_.predicates[p->predicate_ptr] +
-                 (p->this_step ? 0 : representation_.num_vars);
+      variable = representation_.predicates[p->predicate_ptr];
+      if (!p->this_step && variable > representation_.UNSAT) {
+        variable += static_cast<unsigned int>(representation_.num_vars);
+      }
     } else if (const ParameterVariable *p =
                    std::get_if<ParameterVariable>(&literal.variable);
                p) {
       variable =
           representation_
               .parameters[p->action_ptr][p->parameter_index][p->constant_index];
+    } else {
+      assert(false);
     }
-    assert(variable != 0);
-    if (variable == 1) {
-      LOG_DEBUG(logger, "%d ", literal.negated ? -1 : 1);
-      return literal.negated ? -1 : 1;
+    if (variable == representation_.DONTCARE) {
+      return static_cast<int>(representation_.SAT);
+    }
+    if (variable == representation_.SAT || variable == representation_.UNSAT) {
+      LOG_DEBUG(logger, "%d ", (literal.negated ? -1 : 1) * variable);
+      return (literal.negated ? -1 : 1) * static_cast<int>(variable);
     }
     LOG_DEBUG(logger, "%d ",
               (literal.negated ? -1 : 1) *
