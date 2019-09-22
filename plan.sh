@@ -2,8 +2,11 @@
 
 set -euo pipefail
 
-DOMAIN=$1
-PROBLEM=$2
+PROG=$1
+LIST=$2
+MODE=$3
 
-./bin/rantanplan_glucose $DOMAIN $PROBLEM -x $3 -o
+while read DOMAIN PROBLEM;do
+./$PROG $DOMAIN $PROBLEM -x $MODE -o
 ./../master_thesis/VAL/Validate $DOMAIN $PROBLEM plan.txt
+done < $LIST|grep -E "Found plan|valid"
