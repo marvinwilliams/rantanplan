@@ -36,22 +36,29 @@ set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 set(SAT_SOLVER_DIR "${THIRD_PARTY_DIR}/sat_solvers")
 
 add_custom_command(
-  OUTPUT "${SAT_SOLVER_DIR}/glucose4/libipasirglucose4.a"
-  COMMAND make all
+  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a"
+  COMMAND BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR} make all
   WORKING_DIRECTORY "${SAT_SOLVER_DIR}/glucose4"
   )
+# set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES "release" "ipasirglucoseglue.o")
+
+link_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(rantanplan_glucose
   "src/rantanplan.cpp"
   "lib/logging/src/logging/logging.cpp"
-  "${SAT_SOLVER_DIR}/glucose4/libipasirglucose4.a"
+  "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a"
   )
 
-target_link_directories(rantanplan_glucose PRIVATE "${SAT_SOLVER_DIR}/glucose4")
 target_link_libraries(rantanplan_glucose PRIVATE "ipasirglucose4")
 
+option(STATIC_GLIBC "Link statically against glibc" OFF)
 option(DEBUG_BUILD "Compile in debug mode" OFF)
 option(DEBUG_LOG "Compile with debug logging capability" OFF)
+
+if (STATIC_GLIBC)
+  target_link_libraries(rantanplan_glucose PRIVATE -static-libgcc -static-libstdc++)
+endif()
 
 if(DEBUG_BUILD)
   set(CMAKE_BUILD_TYPE "Debug")
@@ -62,8 +69,13 @@ if(DEBUG_BUILD)
 else()
   set(CMAKE_BUILD_TYPE "Release")
   add_compile_options(
-    -O3 -march=native
+    -O3
     )
+  if (NOT STATIC_GLIBC)
+    add_compile_options(
+      -march=native
+      )
+  endif()
 endif()
 
 if(DEBUG_LOG)

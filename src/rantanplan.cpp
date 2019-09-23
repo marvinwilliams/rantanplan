@@ -1,7 +1,9 @@
 #include "config.hpp"
 #include "encoding/encoding.hpp"
 #include "encoding/foreach.hpp"
-#include "encoding/sequential.hpp"
+#include "encoding/sequential_1.hpp"
+#include "encoding/sequential_2.hpp"
+#include "encoding/sequential_3.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/rule_set.hpp"
 #include "logging/logging.hpp"
@@ -125,9 +127,15 @@ int main(int argc, char *argv[]) {
     auto problem = model::normalize(abstract_problem);
     PRINT_DEBUG(to_string(problem).c_str());
     std::unique_ptr<encoding::Encoder> encoder;
-    if (config.planner == "sequential") {
-      PRINT_INFO("Using sequential encoding");
-      encoder = std::make_unique<encoding::SequentialEncoder>(problem);
+    if (config.planner == "seq1") {
+      PRINT_INFO("Using sequential encoding 1");
+      encoder = std::make_unique<encoding::Sequential1Encoder>(problem);
+    } else if (config.planner == "seq2") {
+      PRINT_INFO("Using sequential encoding 2");
+      encoder = std::make_unique<encoding::Sequential2Encoder>(problem);
+    } else if (config.planner == "seq3") {
+      PRINT_INFO("Using sequential encoding 3");
+      encoder = std::make_unique<encoding::Sequential3Encoder>(problem);
     } else if (config.planner == "foreach") {
       PRINT_INFO("Using foreach encoding");
       encoder = std::make_unique<encoding::ForeachEncoder>(problem);

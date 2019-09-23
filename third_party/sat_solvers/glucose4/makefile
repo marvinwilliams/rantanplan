@@ -21,9 +21,10 @@ VERSION=4
 # differentiate between with (directory / package name) and without
 # dash (the signature).
 
+BUILD_DIR ?= build
 SIG=$(NAME)$(VERSION)
 DIR=$(NAME)-$(VERSION)
-TARGET=libipasir$(SIG).a
+TARGET=$(BUILD_DIR)/libipasir$(SIG).a
 
 #-----------------------------------------------------------------------#
 
@@ -44,32 +45,32 @@ clean:
 #- INVISIBLE INTERNAL SUB RULES ----------------------------------------#
 #-----------------------------------------------------------------------#
 
-libipasir$(SIG).a: .FORCE
+$(TARGET): .FORCE
 	@#
 	@# extract library
 	@#
 	@#
 	@# configure and build library
 	@#
-	make -C $(DIR) lr
+	$(MAKE) -C $(DIR) lr
 	@#
 	@# compile glue code
 	@#
-	make ipasir$(NAME)glue.o
+	$(MAKE) $(BUILD_DIR)/ipasir$(NAME)glue.o
 	@#
 	@# merge library and glue code into target
 	@#
-	cp $(DIR)/build/release/lib/lib$(NAME).a $(TARGET)
-	ar r $(TARGET) ipasir$(NAME)glue.o
+	cp $(BUILD_DIR)/release/lib/lib$(NAME).a $(TARGET)
+	ar r $(TARGET) $(BUILD_DIR)/ipasir$(NAME)glue.o
 
 #-----------------------------------------------------------------------#
 #- LOCAL GLUE RULES ----------------------------------------------------#
 #-----------------------------------------------------------------------#
 
-ipasir$(NAME)glue.o: ipasir$(NAME)glue.cc ipasir.h makefile
+$(BUILD_DIR)/ipasir$(NAME)glue.o: ipasir$(NAME)glue.cc ipasir.h makefile
 	$(CXX) -g  -std=c++11 $(CXXLAGS) \
 	  -DVERSION=\"$(VERSION)\" \
-	  -I$(DIR) -I$(DIR)/core -c ipasir$(NAME)glue.cc
+	  -I$(DIR) -I$(DIR)/core -c ipasir$(NAME)glue.cc -o $(BUILD_DIR)/ipasir$(NAME)glue.o
 
 #-----------------------------------------------------------------------#
 

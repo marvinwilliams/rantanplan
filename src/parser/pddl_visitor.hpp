@@ -84,11 +84,11 @@ private:
   bool visit_begin(const ast::SingleTypeIdentifierList &list) {
     if (list.type) {
       const auto p = find(problem_.types, *list.type);
-      if (list.type->name == "object") {
-        context_.type_ptr = 0;
-        return true;
-      }
       if (p == problem_.types.cend()) {
+        if (list.type->name == "object") {
+          context_.type_ptr = 0;
+          return true;
+        }
         std::string msg = "Type \"" + list.type->name + "\" undefined";
         throw ParserException(list.type->location, msg.c_str());
       }
@@ -126,10 +126,8 @@ private:
   bool visit_begin(const ast::IdentifierList &list) {
     if (context_.state == State::Types) {
       for (const auto &name : *list.elements) {
-        if (name->name == "object" ||
-            find(problem_.types, *name) != problem_.types.cend()) {
-          std::string msg = "Type \"" + name->name +
-                            "\" already defined (\"object\" not allowed)";
+        if (find(problem_.types, *name) != problem_.types.cend()) {
+          std::string msg = "Type \"" + name->name + "\" already defined";
           throw ParserException(name->location, msg.c_str());
         }
         problem_.types.emplace_back(name->name, context_.type_ptr);
@@ -169,7 +167,7 @@ private:
           throw ParserException(variable->location, msg.c_str());
         }
         problem_.actions.back().parameters.emplace_back(variable->name,
-                                                       context_.type_ptr);
+                                                        context_.type_ptr);
       }
     } else {
       throw ParserException("Internal error occurred while parsing");
@@ -399,7 +397,8 @@ private:
         throw ParserException("Internal error occurred while parsing");
       }
     } else {
-      auto junction_ptr = std::get_if<model::Junction>(&condition_stack_.back());
+      auto junction_ptr =
+          std::get_if<model::Junction>(&condition_stack_.back());
       if (junction_ptr == nullptr) {
         throw ParserException("Internal error occurred while parsing");
       }

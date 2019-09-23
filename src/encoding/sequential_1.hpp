@@ -1,5 +1,5 @@
-#ifndef SEQUENTIAL_HPP
-#define SEQUENTIAL_HPP
+#ifndef SEQUENTIAL_1_HPP
+#define SEQUENTIAL_1_HPP
 
 #include "config.hpp"
 #include "encoding/encoding.hpp"
@@ -23,7 +23,7 @@
 
 namespace encoding {
 
-class SequentialEncoder : public Encoder {
+class Sequential1Encoder : public Encoder {
 
 public:
   using Variable =
@@ -41,7 +41,7 @@ public:
     size_t num_vars;
   };
 
-  explicit SequentialEncoder(const model::Problem &problem)
+  explicit Sequential1Encoder(const model::Problem &problem)
       : Encoder{problem} {}
 
   void plan(const Config &config) override {
@@ -347,4 +347,4 @@ private:
 
 } // namespace encoding
 
-#endif /* end of include guard: SEQUENTIAL_HPP */
+#endif /* end of include guard: SEQUENTIAL_1_HPP */
