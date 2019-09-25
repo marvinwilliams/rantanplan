@@ -37,7 +37,7 @@ struct BaseOption {
   std::optional<char> short_name;
   std::string description;
   std::string default_value;
-  bool is_present = false;
+  unsigned int count = 0;
 
 protected:
   explicit BaseOption(std::string name, std::optional<char> short_name,
@@ -67,14 +67,10 @@ public:
                    std::move(default_value)} {}
 
   void parse(std::string_view value) override {
-    if (is_present) {
-      throw OptionException{"Option \'" + std::string{name} +
-                            "\' already specified"};
-    }
     std::stringstream ss;
     ss << value;
     ss >> t_;
-    is_present = true;
+    ++count;
   }
 
   [[nodiscard]] inline const T &get() const { return t_; }
@@ -186,8 +182,8 @@ public:
   }
 
   template <typename T>
-  [[nodiscard]] bool is_present(std::string_view name) const {
-    return find_option_<T>(name).is_present;
+  [[nodiscard]] unsigned int count(std::string_view name) const {
+    return find_option_<T>(name).count;
   }
 
   void print_usage() const noexcept {

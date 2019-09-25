@@ -33,6 +33,37 @@ template <typename T> struct Primitive {
   unsigned int index = 0;
 };
 
+struct Number {
+  using TokenType = tokens::Number;
+  bool accepts(char c) {
+    if (first) {
+      first = false;
+      if (c == '-') {
+        return true;
+      }
+      valid = std::isdigit(c);
+      return valid;
+    } else {
+      valid = std::isdigit(c);
+      return valid;
+    }
+  }
+
+  bool matches() const { return valid; }
+
+  tokens::Number get_token(const std::string &token) const {
+    tokens::Number number{};
+    number.value = std::stoi(token);
+    return number;
+  }
+  void reset() {
+    valid = false;
+    first = true;
+  }
+  bool valid = false;
+  bool first = true;
+};
+
 struct Section {
   using TokenType = tokens::Section;
   bool accepts(char c) {

@@ -57,6 +57,21 @@ struct Problem {
   static constexpr auto primitive = "problem";
 };
 
+struct Increase {
+  static constexpr auto printable_name = "increase";
+  static constexpr auto primitive = "increase";
+};
+
+struct Decrease {
+  static constexpr auto printable_name = "decrease";
+  static constexpr auto primitive = "decrease";
+};
+
+struct Metric {
+  static constexpr auto printable_name = "metric";
+  static constexpr auto primitive = "metric";
+};
+
 struct Section {
   static constexpr auto printable_name = "Section";
   std::string name;
@@ -70,6 +85,11 @@ struct Identifier {
 struct Variable {
   static constexpr auto printable_name = "Variable";
   std::string name;
+};
+
+struct Number {
+  static constexpr auto printable_name = "Number";
+  int value;
 };
 
 struct Comment {

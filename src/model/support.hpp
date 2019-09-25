@@ -13,6 +13,10 @@
 
 namespace model {
 
+namespace support {
+
+logging::Logger logger{"Support"};
+
 class ArgumentMapping {
 public:
   ArgumentMapping(const std::vector<Parameter> &parameters,
@@ -64,9 +68,14 @@ private:
 
 class Support {
 public:
-  Support(const Problem &problem) {
+  explicit Support(const Problem &problem) {
+    LOG_DEBUG(logger, "Sort constants by type...");
     sort_constants(problem);
+    LOG_DEBUG(logger, "Ground all predicates...");
     ground_predicates(problem);
+    LOG_DEBUG(logger, "The problem has %u grounded predicates",
+              ground_predicates_.size());
+    LOG_DEBUG(logger, "Compute predicate support...");
     set_predicate_support(problem);
     initial_state_.reserve(problem.initial_state.size());
     for (const auto &predicate : problem.initial_state) {
@@ -88,6 +97,7 @@ public:
     return ground_predicates_;
   }
 
+  // TODO use hashmap for faster indexing
   GroundPredicatePtr get_predicate_index(const GroundPredicate &predicate) {
     auto it = std::find(ground_predicates_.cbegin(), ground_predicates_.cend(),
                         predicate);
@@ -247,7 +257,11 @@ private:
       pos_effect_support_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
       neg_effect_support_;
-}; // namespace model
+};
+
+} // namespace support
+
+using support::Support;
 
 } // namespace model
 

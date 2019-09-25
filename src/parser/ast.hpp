@@ -236,11 +236,20 @@ struct GoalDef : Node {
   Condition goal;
 };
 
+struct FunctionsDef : Node {
+  FunctionsDef(const lexer::Location &location) : Node{location} {}
+};
+
+struct MetricDef : Node {
+  MetricDef(const lexer::Location &location) : Node{location} {}
+};
+
 using Element =
     std::variant<std::unique_ptr<RequirementsDef>, std::unique_ptr<TypesDef>,
                  std::unique_ptr<ConstantsDef>, std::unique_ptr<PredicatesDef>,
                  std::unique_ptr<ActionDef>, std::unique_ptr<ObjectsDef>,
-                 std::unique_ptr<InitDef>, std::unique_ptr<GoalDef>>;
+                 std::unique_ptr<InitDef>, std::unique_ptr<GoalDef>,
+                 std::unique_ptr<FunctionsDef>, std::unique_ptr<MetricDef>>;
 using ElementList = detail::List<Element>;
 
 struct Domain : Node {

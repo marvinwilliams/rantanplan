@@ -1,6 +1,7 @@
 #ifndef NORMALIZE_HPP
 #define NORMALIZE_HPP
 
+#include "logging/logging.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
 
@@ -10,6 +11,10 @@
 #include <vector>
 
 namespace model {
+
+namespace normalizing {
+
+logging::Logger logger{"Normalizing"};
 
 Condition normalize_condition(const Condition &condition) {
   const auto junction = std::get_if<Junction>(&condition);
@@ -102,7 +107,7 @@ std::vector<Action> normalize_action(const AbstractAction &action) {
 
   const auto effects = to_list(normalize_condition(action.effect));
 
-  if (effects.size() == 0) {
+  if (effects.empty()) {
     return new_actions;
   }
 
@@ -136,7 +141,9 @@ Problem normalize(const AbstractProblem &abstract_problem) {
   problem.predicates = abstract_problem.predicates;
 
   for (auto &action : abstract_problem.actions) {
+    LOG_DEBUG(logger, "Normalizing action \'%s\'...", action.name.c_str());
     auto new_actions = normalize_action(action);
+    LOG_DEBUG(logger, "resulted in %u STRIPS actions", new_actions.size());
     problem.actions.insert(problem.actions.cend(), new_actions.begin(),
                            new_actions.end());
   }
@@ -153,6 +160,10 @@ Problem normalize(const AbstractProblem &abstract_problem) {
   problem.goal = to_list(abstract_problem.goal);
   return problem;
 }
+
+} // namespace normalizing
+
+using normalizing::normalize;
 
 } // namespace model
 

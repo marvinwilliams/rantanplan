@@ -28,8 +28,11 @@ using Rules = lexer::RuleSet<parser::rules::Primitive<parser::tokens::LParen>,
                              parser::rules::Primitive<parser::tokens::Define>,
                              parser::rules::Primitive<parser::tokens::Domain>,
                              parser::rules::Primitive<parser::tokens::Problem>,
-                             parser::rules::Section, parser::rules::Identifier,
-                             parser::rules::Variable, parser::rules::Comment>;
+                             parser::rules::Primitive<parser::tokens::Increase>,
+                             parser::rules::Primitive<parser::tokens::Decrease>,
+                             parser::rules::Number, parser::rules::Section,
+                             parser::rules::Identifier, parser::rules::Variable,
+                             parser::rules::Comment>;
 
 template <typename TokenType, typename TokenIterator>
 [[nodiscard]] inline bool
@@ -96,7 +99,7 @@ parse_identifier_list(TokenIterator &token_iterator) {
     token_iterator++;
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of identifier list (%u elements)", names->size());
+  LOG_DEBUG(logger, "End of identifier list (%u element(s))", names->size());
   return std::make_unique<ast::IdentifierList>(begin + end, std::move(names));
 }
 
@@ -115,7 +118,7 @@ parse_variable_list(TokenIterator &token_iterator) {
     token_iterator++;
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of variable list (%u elements)", names->size());
+  LOG_DEBUG(logger, "End of variable list (%u element(s))", names->size());
   return std::make_unique<ast::VariableList>(begin + end, std::move(names));
 }
 
@@ -143,7 +146,7 @@ parse_argument_list(TokenIterator &token_iterator) {
     token_iterator++;
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of argument list (%u elements)", arguments->size());
+  LOG_DEBUG(logger, "End of argument list (%u element(s))", arguments->size());
   return std::make_unique<ast::ArgumentList>(begin + end, std::move(arguments));
 }
 
@@ -247,7 +250,7 @@ parse_requirement_list(TokenIterator &token_iterator) {
     token_iterator++;
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of requirements list (%u elements)",
+  LOG_DEBUG(logger, "End of requirements list (%u element(s))",
             requirements->size());
   return std::make_unique<ast::RequirementList>(begin + end,
                                                 std::move(requirements));
@@ -320,7 +323,8 @@ parse_predicate_list(TokenIterator &token_iterator) {
     skip_comments(token_iterator);
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of predicate list (%u elements)", predicates->size());
+  LOG_DEBUG(logger, "End of predicate list (%u element(s))",
+            predicates->size());
   return std::make_unique<ast::PredicateList>(begin + end,
                                               std::move(predicates));
 }
@@ -375,7 +379,7 @@ parse_conjunction(TokenIterator &token_iterator) {
     skip_comments(token_iterator);
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of conjunction (%u elements)", arguments->size());
+  LOG_DEBUG(logger, "End of conjunction (%u element(s))", arguments->size());
   auto condition_list =
       std::make_unique<ast::ConditionList>(begin + end, std::move(arguments));
   return std::make_unique<ast::Conjunction>(condition_list->location,
@@ -397,7 +401,7 @@ parse_disjunction(TokenIterator &token_iterator) {
     skip_comments(token_iterator);
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of disjunction (%u elements)", arguments->size());
+  LOG_DEBUG(logger, "End of disjunction (%u element(s))", arguments->size());
   auto condition_list =
       std::make_unique<ast::ConditionList>(begin + end, std::move(arguments));
   return std::make_unique<ast::Disjunction>(condition_list->location,
@@ -425,6 +429,17 @@ ast::Condition parse_condition(TokenIterator &token_iterator) {
     const auto &end = token_iterator.location();
     LOG_DEBUG(logger, "End of negation");
     return std::make_unique<ast::Negation>(begin + end, std::move(condition));
+  } else if (has_type<tokens::Increase>(token_iterator) ||
+             has_type<tokens::Decrease>(token_iterator)) {
+    int count = 0;
+    while (count >= 0) {
+      advance(token_iterator);
+      if (has_type<tokens::LParen>(token_iterator)) {
+        ++count;
+      } else if (has_type<tokens::RParen>(token_iterator)) {
+        --count;
+      }
+    }
   }
   LOG_WARN(logger, "Parsing empty condition");
   return std::make_unique<ast::Empty>();
@@ -452,6 +467,16 @@ parse_init_list(TokenIterator &token_iterator) {
                                                       std::move(argument));
       arguments->push_back(std::move(negation));
       LOG_DEBUG(logger, "End of negation");
+    } else if (has_type<tokens::Equality>(token_iterator)) {
+      int count = 0;
+      while (count >= 0) {
+        advance(token_iterator);
+        if (has_type<tokens::LParen>(token_iterator)) {
+          ++count;
+        } else if (has_type<tokens::RParen>(token_iterator)) {
+          --count;
+        }
+      }
     } else {
       auto argument = parse_predicate_evaluation(token_iterator);
       arguments->push_back(std::move(argument));
@@ -460,7 +485,7 @@ parse_init_list(TokenIterator &token_iterator) {
     skip_comments(token_iterator);
   }
   const auto &end = token_iterator.location();
-  LOG_DEBUG(logger, "End of init list (%u elements)", arguments->size());
+  LOG_DEBUG(logger, "End of init list (%u element(s))", arguments->size());
   auto condition_list =
       std::make_unique<ast::ConditionList>(begin + end, std::move(arguments));
   return std::make_unique<ast::Conjunction>(condition_list->location,
@@ -561,6 +586,50 @@ std::unique_ptr<ast::GoalDef> parse_goal(TokenIterator &token_iterator) {
   return std::make_unique<ast::GoalDef>(begin + end, std::move(condition));
 }
 
+// TODO function support
+template <typename TokenIterator>
+std::unique_ptr<ast::FunctionsDef>
+parse_functions(TokenIterator &token_iterator) {
+  LOG_WARN(logger,
+           "Functions will be ignored and have limited parsing support");
+  LOG_DEBUG(logger, "Parsing functions definition");
+  const auto begin = token_iterator.location();
+  int count = 0;
+  while (count >= 0) {
+    advance(token_iterator);
+    if (has_type<tokens::LParen>(token_iterator)) {
+      ++count;
+    } else if (has_type<tokens::RParen>(token_iterator)) {
+      --count;
+    }
+  }
+  LOG_DEBUG(logger, "End of functions definition");
+  const auto &end = token_iterator.location();
+  return std::make_unique<ast::FunctionsDef>(begin + end);
+}
+
+// TODO metric support
+template <typename TokenIterator>
+std::unique_ptr<ast::MetricDef>
+parse_metric(TokenIterator &token_iterator) {
+  LOG_WARN(logger,
+           "Metrics will be ignored and have limited parsing support");
+  LOG_DEBUG(logger, "Parsing metric definition");
+  const auto begin = token_iterator.location();
+  int count = 0;
+  while (count >= 0) {
+    advance(token_iterator);
+    if (has_type<tokens::LParen>(token_iterator)) {
+      ++count;
+    } else if (has_type<tokens::RParen>(token_iterator)) {
+      --count;
+    }
+  }
+  LOG_DEBUG(logger, "End of metric definition");
+  const auto &end = token_iterator.location();
+  return std::make_unique<ast::MetricDef>(begin + end);
+}
+
 template <bool is_domain, typename TokenIterator>
 ast::Element parse_element(TokenIterator &token_iterator) {
   const auto &section = get<tokens::Section>(token_iterator).name;
@@ -580,6 +649,10 @@ ast::Element parse_element(TokenIterator &token_iterator) {
     return parse_init(token_iterator);
   } else if (!is_domain && section == "goal") {
     return parse_goal(token_iterator);
+  } else if (section == "functions") {
+    return parse_functions(token_iterator);
+  } else if (section == "metric") {
+    return parse_metric(token_iterator);
   } else {
     throw ParserException(token_iterator.location(),
                           "Unknown section: \'" + section + "\'");
