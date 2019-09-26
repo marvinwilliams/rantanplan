@@ -6,6 +6,7 @@
 #include "lexer/location.hpp"
 #include "lexer/rule_set.hpp"
 
+#include <cctype>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -122,7 +123,7 @@ private:
 
     // Read the next char until it cannot be part of any token
     while (rules_.accepts() && current_iterator != token_iterator.end_) {
-      char_type current_char = *current_iterator;
+      char_type current_char = std::tolower(*current_iterator);
       if (Traits::end_at_newline && Traits::is_newline(current_char)) {
         break;
       }
