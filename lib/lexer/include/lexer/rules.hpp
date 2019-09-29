@@ -1,8 +1,10 @@
 #ifndef RULES_HPP
 #define RULES_HPP
 
-#include "lexer/token.hpp"
 #include "lexer/rule_matcher.hpp"
+#include "lexer/token.hpp"
+
+#include <string>
 
 namespace lexer {
 
@@ -15,6 +17,8 @@ struct Empty : basic_rule {
   static constexpr bool match(CharProvider &) noexcept {
     return true;
   }
+
+  static constexpr auto printable_name = "<empty>";
 };
 
 template <char c> struct Literal : basic_rule {
@@ -27,6 +31,8 @@ template <char c> struct Literal : basic_rule {
     provider.reset();
     return false;
   }
+
+  static constexpr auto printable_name = "<literal>";
 };
 
 template <typename Predicate> struct LiteralIf : basic_rule {
@@ -39,6 +45,8 @@ template <typename Predicate> struct LiteralIf : basic_rule {
     provider.reset();
     return false;
   }
+
+  static constexpr auto printable_name = "<literalif>";
 };
 
 template <size_t N> struct Any : basic_rule {
@@ -51,6 +59,8 @@ template <size_t N> struct Any : basic_rule {
     provider.bump();
     return true;
   }
+
+  static constexpr auto printable_name = "<any>";
 };
 
 template <typename Rule> struct Optional : basic_rule {
@@ -59,6 +69,7 @@ template <typename Rule> struct Optional : basic_rule {
     Rule::match(provider);
     return true;
   }
+  static constexpr auto printable_name = "<optional>";
 };
 
 template <typename... Rules> struct Sequence : basic_rule {
@@ -71,6 +82,8 @@ template <typename... Rules> struct Sequence : basic_rule {
     }
     return result;
   }
+
+  static constexpr auto printable_name = "<sequence>";
 };
 
 template <typename... Rules> struct Choice : basic_rule {
@@ -78,6 +91,8 @@ template <typename... Rules> struct Choice : basic_rule {
   static constexpr bool match(CharProvider &provider) noexcept {
     return (Rules::match(provider) || ...);
   }
+
+  static constexpr auto printable_name = "<choice>";
 };
 
 template <typename Rule> struct Star : basic_rule {
@@ -87,9 +102,13 @@ template <typename Rule> struct Star : basic_rule {
     }
     return true;
   }
+
+  static constexpr auto printable_name = "<star>";
 };
 
-template <typename Rule> struct Plus : Sequence<Rule, Star<Rule>> {};
+template <typename Rule> struct Plus : Sequence<Rule, Star<Rule>> {
+  static constexpr auto printable_name = "<plus>";
+};
 
 template <typename Rule> struct And : basic_rule {
   template <typename CharProvider>
@@ -99,6 +118,8 @@ template <typename Rule> struct And : basic_rule {
     provider.set_pos(current);
     return result;
   }
+
+  static constexpr auto printable_name = "<And>";
 };
 
 template <typename Rule> struct Not : basic_rule {
@@ -109,6 +130,8 @@ template <typename Rule> struct Not : basic_rule {
     provider.set_pos(current);
     return !result;
   }
+
+  static constexpr auto printable_name = "<Not>";
 };
 
 template <typename... Rules> struct RuleSet {

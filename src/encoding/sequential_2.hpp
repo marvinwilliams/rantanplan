@@ -78,21 +78,17 @@ public:
 
 private:
   void encode_initial_state() {
-    for (model::GroundPredicatePtr predicate_ptr = 0;
-         predicate_ptr < support_.get_ground_predicates().size();
-         ++predicate_ptr) {
-      const model::GroundPredicate &predicate =
-          support_.get_ground_predicates()[predicate_ptr];
+    for (const auto& kv_pair : support_.get_ground_predicates()) {
       bool is_init = std::any_of(
           problem_.initial_state.cbegin(), problem_.initial_state.cend(),
-          [&predicate](const auto &init_predicate) {
+          [&kv_pair](const auto &init_predicate) {
             if (init_predicate.negated) {
               // This does assume a non conflicting initial state
               return false;
             }
-            return predicate == model::GroundPredicate(init_predicate);
+            return kv_pair.first == model::GroundPredicate(init_predicate);
           });
-      initial_state_ << Literal{PredicateVariable{predicate_ptr, true},
+      initial_state_ << Literal{PredicateVariable{kv_pair.second, true},
                                 !is_init}
                      << sat::EndClause;
     }

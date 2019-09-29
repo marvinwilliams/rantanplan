@@ -16,7 +16,7 @@ namespace lexer {
 
 template <typename Rules, typename Traits = LexerTraits> class Lexer {
 public:
-  using char_type = typename LexerTraits::char_type;
+  using char_type = char;
   using Token = typename Rules::Token;
 
   // This iterator is used to extract the tokens. New tokens will be read when

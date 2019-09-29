@@ -8,8 +8,12 @@
 
 #include <algorithm>
 #include <sstream>
+#include <type_traits>
+#include <variant>
 
 namespace lexer {
+
+template <typename T> void apply(char *, char *, T &) {}
 
 template <typename RuleSet, typename Traits = LexerTraits> class Lexer {
 public:
@@ -17,7 +21,7 @@ public:
   using Matcher = typename RuleSet::Matcher;
 
   struct Provider {
-    explicit Provider(char *begin, char *end)
+    explicit Provider(char *begin, char *end) noexcept
         : begin_{begin}, current_{begin}, end_{end} {}
 
     constexpr char get() noexcept { return *(current_ + delta_++); }
@@ -47,14 +51,17 @@ public:
     char *end_{};
   };
 
-  explicit Lexer(const std::string name, char *begin, char *end) noexcept
-      : location_{name}, begin_{begin}, current_{begin}, end_{end} {
+  explicit Lexer(const std::string &name, char *begin, char *end)
+      : name_{name}, location_{name_}, begin_{begin}, current_{begin},
+        end_{end} {
     get_next_token();
   }
 
-  constexpr void set_source(const std::string &name, char *begin,
-                            char *end) noexcept {
-    location_ = Location{name};
+  explicit Lexer() noexcept : Lexer{"", nullptr, nullptr} {}
+
+  void set_source(const std::string &name, char *begin, char *end) {
+    name_ = name;
+    location_ = Location{name_};
     begin_ = begin;
     current_ = begin;
     end_ = end;
@@ -76,7 +83,7 @@ public:
 
   const Token &get() const noexcept { return token_; }
 
-  constexpr void next() { get_next_token(); }
+  void next() { get_next_token(); }
 
 private:
   void get_next_token() {
@@ -110,6 +117,9 @@ private:
     }
     Provider provider{current_, token_end};
     auto result = Matcher::match(provider);
+    auto next = current_ + (result.end - result.begin);
+    std::visit([this, &next](auto &t) { apply(current_, next, t); },
+               result.token);
 
     // If no rule matched and no rule accepts chars, emit an error
     if (result.begin == result.end) {
@@ -119,11 +129,10 @@ private:
       current_ = end_;
 
       // Location is one off because of early exit
-      throw LexerException(location_, std::move(ss).str());
+      throw LexerException(location_ + 1, std::move(ss).str());
     }
     token_ = std::move(result.token);
-    auto new_current = current_ + (result.end - result.begin);
-    while (current_ != new_current) {
+    while (current_ != next) {
       location_.advance_column();
       if (Traits::is_newline(*current_)) {
         location_.advance_line();
@@ -133,10 +142,11 @@ private:
   }
 
   Token token_{ErrorToken{}};
+  std::string name_ = "";
   Location location_{};
-  char *begin_{};
-  char *current_{};
-  char *end_{};
+  char *begin_ = nullptr;
+  char *current_ = nullptr;
+  char *end_ = nullptr;
 };
 
 } // namespace lexer

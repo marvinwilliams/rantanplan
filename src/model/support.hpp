@@ -17,8 +17,7 @@ namespace support {
 
 logging::Logger logger{"Support"};
 
-class ArgumentMapping {
-public:
+struct ArgumentMapping {
   ArgumentMapping(const std::vector<Parameter> &parameters,
                   const std::vector<Argument> &arguments) {
     for (size_t i = 0; i < parameters.size(); ++i) {
@@ -30,40 +29,38 @@ public:
         }
       }
       if (!parameter_matches.empty()) {
-        matches_.emplace_back(i, std::move(parameter_matches));
+        matches.emplace_back(i, std::move(parameter_matches));
       }
     }
   }
 
-  size_t size() const { return matches_.size(); }
+  size_t size() const { return matches.size(); }
 
-  size_t get_parameter_index(size_t pos) const { return matches_[pos].first; }
+  size_t get_parameter_index(size_t pos) const { return matches[pos].first; }
 
   const std::vector<size_t> &get_argument_matches(size_t pos) const {
-    return matches_[pos].second;
+    return matches[pos].second;
   }
 
-private:
-  std::vector<std::pair<size_t, std::vector<size_t>>> matches_;
+  std::vector<std::pair<size_t, std::vector<size_t>>> matches;
 };
 
-class ArgumentAssignment {
-public:
+struct ArgumentAssignment {
   ArgumentAssignment(const ArgumentMapping &mapping,
                      const std::vector<size_t> &arguments) {
     assert(arguments.size() == mapping.size());
-    arguments_.reserve(mapping.size());
+    this->arguments.reserve(mapping.size());
     for (size_t i = 0; i < mapping.size(); ++i) {
-      arguments_.emplace_back(mapping.get_parameter_index(i), arguments[i]);
+      this->arguments.emplace_back(mapping.get_parameter_index(i),
+                                   arguments[i]);
     }
   }
 
   const std::vector<std::pair<size_t, size_t>> &get_arguments() const {
-    return arguments_;
+    return arguments;
   }
 
-private:
-  std::vector<std::pair<size_t, size_t>> arguments_;
+  std::vector<std::pair<size_t, size_t>> arguments;
 };
 
 class Support {
@@ -93,16 +90,12 @@ public:
     return constants_of_type[type];
   }
 
-  const std::vector<GroundPredicate> &get_ground_predicates() const {
-    return ground_predicates_;
-  }
+  const auto &get_ground_predicates() const { return ground_predicates_; }
 
   // TODO use hashmap for faster indexing
   GroundPredicatePtr get_predicate_index(const GroundPredicate &predicate) {
-    auto it = std::find(ground_predicates_.cbegin(), ground_predicates_.cend(),
-                        predicate);
-    assert(it != ground_predicates_.cend());
-    return std::distance(ground_predicates_.cbegin(), it);
+    assert(ground_predicates_.count(predicate) > 0);
+    return ground_predicates_[predicate];
   }
 
   const std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>> &
@@ -183,7 +176,9 @@ private:
           auto constant = constants_of_type[type][combination[j]];
           arguments.push_back(constant);
         }
-        ground_predicates_.emplace_back(predicate_ptr, std::move(arguments));
+        ground_predicates_.emplace(
+            GroundPredicate{predicate_ptr, std::move(arguments)},
+            ground_predicates_.size());
       }
     }
   }
@@ -245,10 +240,86 @@ private:
     }
   }
 
+  /* void set_predicate_support_alt(const Problem &problem) { */
+  /*   auto pos_precondition_support = */
+  /*       std::vector<std::vector<std::pair<ActionPtr, ArgumentMapping>>>( */
+  /*           problem.predicates.size()); */
+  /*   auto neg_precondition_support = */
+  /*       std::vector<std::vector<std::pair<ActionPtr, ArgumentMapping>>>( */
+  /*           problem.predicates.size()); */
+  /*   auto pos_effect_support = */
+  /*       std::vector<std::vector<std::pair<ActionPtr, ArgumentMapping>>>( */
+  /*           problem.predicates.size()); */
+  /*   auto neg_effect_support = */
+  /*       std::vector<std::vector<std::pair<ActionPtr, ArgumentMapping>>>( */
+  /*           problem.predicates.size()); */
+  /*   for (ActionPtr action_ptr = 0; action_ptr < problem.actions.size(); */
+  /*        ++action_ptr) { */
+  /*     const auto &action = problem.actions[action_ptr]; */
+  /*     for (const auto &predicate : action.preconditions) { */
+  /*       auto &predicate_support = predicate.negated ?
+   * neg_precondition_support */
+  /*                                                   :
+   * pos_precondition_support; */
+  /*       predicate_support[predicate.definition].emplace_back( */
+  /*           action_ptr, */
+  /*           ArgumentMapping{action.parameters, predicate.arguments}); */
+  /*     } */
+  /*     for (const auto &predicate : action.effects) { */
+  /*       auto &predicate_support = */
+  /*           predicate.negated ? neg_effect_support : pos_effect_support; */
+  /*       predicate_support[predicate.definition].emplace_back( */
+  /*           action_ptr, */
+  /*           ArgumentMapping{action.parameters, predicate.arguments}); */
+  /*     } */
+  /*   } */
+  /*   pos_precondition_support_.resize(ground_predicates_.size()); */
+  /*   neg_precondition_support_.resize(ground_predicates_.size()); */
+  /*   pos_effect_support_.resize(ground_predicates_.size()); */
+  /*   neg_effect_support_.resize(ground_predicates_.size()); */
+  /*   for (GroundPredicatePtr predicate_ptr = 0; */
+  /*        predicate_ptr < ground_predicates_.size(); ++predicate_ptr) { */
+  /*     const auto & ground_predicate = ground_predicates_[predicate_ptr]; */
+  /*     for (const auto &[action_ptr, mapping] : */
+  /*          pos_precondition_support[ground_predicates_[predicate_ptr] */
+  /*                                       .definition]) { */
+  /*       const auto &action = problem.actions[action_ptr]; */
+  /*       bool all_subtype = true; */
+  /*       std::vector<size_t> arguments(mapping.size()); */
+  /*       for (const auto &[parameter_pos, predicate_pos_list] : */
+  /*            mapping.matches) { */
+  /*         for (auto predicate_pos : predicate_pos_list) { */
+  /*           if (!is_subtype( */
+  /*                   problem.types, */
+  /*                   problem.constants[ground_predicate.arguments[predicate_pos]]
+   */
+  /*                       .type, */
+  /*                   action.parameters[parameter_pos].type)) { */
+  /*             all_subtype = false; */
+  /*             break; */
+  /*           } */
+  /*         } */
+  /*         if (!all_subtype) { */
+  /*           break; */
+  /*         } */
+
+  /*       } */
+  /*       if (all_subtype) { */
+  /*           for (size_t i = 0; i < mapping.size(); ++i) { */
+
+  /*           } */
+  /*           pos_precondition_support_[predicate_ptr].emplace_back(action_ptr,
+   */
+  /*       } */
+  /*     } */
+  /*   } */
+  /* } */
+
   std::vector<std::pair<GroundPredicatePtr, bool>> initial_state_;
   std::vector<std::pair<GroundPredicatePtr, bool>> goal_;
   std::vector<std::vector<ConstantPtr>> constants_of_type;
-  std::vector<GroundPredicate> ground_predicates_;
+  std::unordered_map<GroundPredicate, GroundPredicatePtr, GroundPredicateHash>
+      ground_predicates_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
       pos_precondition_support_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
