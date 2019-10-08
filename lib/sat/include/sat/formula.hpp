@@ -1,9 +1,10 @@
 #ifndef FORMULA_HPP
 #define FORMULA_HPP
 
-#include "algorithm"
+#include "util/combinatorics.hpp"
 #include <type_traits>
 #include <vector>
+#include <cstdio>
 
 namespace sat {
 
@@ -54,6 +55,7 @@ template <typename Variable> struct Formula {
     }
 
     auto combinations = all_combinations(list_sizes);
+    /* fprintf(stderr, "Dimension: %lu\n", combinations.size()); */
 
     for (const auto &combination : combinations) {
       for (size_t i = 0; i < combination.size(); ++i) {
@@ -64,7 +66,7 @@ template <typename Variable> struct Formula {
   }
 
   void at_most_one(std::vector<Variable> group) {
-    for (size_t i = 0; i < group.size() - 1; ++i) {
+    for (size_t i = 0; i + 1 < group.size(); ++i) {
       for (size_t j = i + 1; j < group.size(); ++j) {
         *this << Literal{group[i], true} << Literal{group[j], true}
               << EndClause;

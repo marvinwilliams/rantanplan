@@ -8,11 +8,11 @@ set(CMAKE_CXX_STANDARD 17)
 add_compile_options(
   -Wall
   -Wextra
+  -Wpedantic
   -Wnon-virtual-dtor
   -Wcast-align
   -Wunused
   -Woverloaded-virtual
-  -Wpedantic
   -Wconversion
   -Wsign-conversion
   -Wnull-dereference
@@ -47,6 +47,12 @@ link_directories("${CMAKE_CURRENT_BINARY_DIR}")
 add_executable(rantanplan_glucose
   "src/rantanplan.cpp"
   "lib/logging/src/logging/logging.cpp"
+  "src/model/normalize.cpp"
+  "src/model/support_logger.cpp"
+  "src/model/to_string.cpp"
+  "src/pddl/parser_logger.cpp"
+  "src/util/combinatorics.cpp"
+  "src/encoding/encoding_logger.cpp"
   "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a"
   )
 

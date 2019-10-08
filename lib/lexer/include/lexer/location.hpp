@@ -52,7 +52,7 @@ inline bool operator==(const Position &first, const Position &second) {
          first.line() == second.line() && first.column() == second.column();
 }
 
-std::ostream &operator<<(std::ostream &out, const Position &position) {
+inline std::ostream &operator<<(std::ostream &out, const Position &position) {
   if (!position.filename().empty()) {
     out << position.filename() << ':';
   }
@@ -115,7 +115,7 @@ inline bool operator==(const Location &first, const Location &second) {
   return first.begin() == second.begin() && first.end() == second.end();
 }
 
-std::ostream &operator<<(std::ostream &out, const Location &location) {
+inline std::ostream &operator<<(std::ostream &out, const Location &location) {
   out << location.begin();
   if (location.begin().filename() != location.end().filename()) {
     out << '-' << location.end().filename() << ':' << location.end().line()

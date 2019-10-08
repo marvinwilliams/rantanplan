@@ -7,6 +7,7 @@
 #include "model/to_string.hpp"
 
 #include <cassert>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -15,11 +16,11 @@ namespace model {
 
 namespace support {
 
-logging::Logger logger{"Support"};
+extern logging::Logger logger;
 
 struct ArgumentMapping {
-  ArgumentMapping(const std::vector<Parameter> &parameters,
-                  const std::vector<Argument> &arguments) {
+  explicit ArgumentMapping(const std::vector<Parameter> &parameters,
+                           const std::vector<Argument> &arguments) noexcept {
     for (size_t i = 0; i < parameters.size(); ++i) {
       std::vector<size_t> parameter_matches;
       for (size_t j = 0; j < arguments.size(); ++j) {
@@ -34,11 +35,16 @@ struct ArgumentMapping {
     }
   }
 
-  size_t size() const { return matches.size(); }
+  inline size_t size() const noexcept { return matches.size(); }
 
-  size_t get_parameter_index(size_t pos) const { return matches[pos].first; }
+  inline size_t get_parameter_index(size_t pos) const noexcept {
+    assert(pos < matches.size());
+    return matches[pos].first;
+  }
 
-  const std::vector<size_t> &get_argument_matches(size_t pos) const {
+  inline const std::vector<size_t> &get_argument_matches(size_t pos) const
+      noexcept {
+    assert(pos < matches.size());
     return matches[pos].second;
   }
 
@@ -46,8 +52,8 @@ struct ArgumentMapping {
 };
 
 struct ArgumentAssignment {
-  ArgumentAssignment(const ArgumentMapping &mapping,
-                     const std::vector<size_t> &arguments) {
+  explicit ArgumentAssignment(const ArgumentMapping &mapping,
+                              const std::vector<size_t> &arguments) noexcept {
     assert(arguments.size() == mapping.size());
     this->arguments.reserve(mapping.size());
     for (size_t i = 0; i < mapping.size(); ++i) {
@@ -56,7 +62,8 @@ struct ArgumentAssignment {
     }
   }
 
-  const std::vector<std::pair<size_t, size_t>> &get_arguments() const {
+  inline const std::vector<std::pair<size_t, size_t>> &get_arguments() const
+      noexcept {
     return arguments;
   }
 
@@ -65,74 +72,114 @@ struct ArgumentAssignment {
 
 class Support {
 public:
-  explicit Support(const Problem &problem) {
+  explicit Support(const Problem &problem) noexcept {
+    initial_state_.reserve(problem.initial_state.size());
+    for (const PredicateEvaluation &predicate : problem.initial_state) {
+      assert(!predicate.negated);
+      initial_state_.emplace(predicate);
+    }
     LOG_DEBUG(logger, "Sort constants by type...");
     sort_constants(problem);
     LOG_DEBUG(logger, "Ground all predicates...");
     ground_predicates(problem);
+    ground_predicates_constructed_ = true;
     LOG_DEBUG(logger, "The problem has %u grounded predicates",
               ground_predicates_.size());
     LOG_DEBUG(logger, "Compute predicate support...");
     set_predicate_support(problem);
-    initial_state_.reserve(problem.initial_state.size());
-    for (const auto &predicate : problem.initial_state) {
-      auto predicate_ptr = get_predicate_index(GroundPredicate(predicate));
-      initial_state_.push_back({predicate_ptr, predicate.negated});
+    predicate_support_constructed_ = true;
+    for (size_t i = 0; i < problem.predicates.size(); ++i) {
+      LOG_DEBUG(logger, "%s %s\n",
+                model::to_string(problem.predicates[i], problem).c_str(),
+                is_rigid(i) ? "rigid" : "not rigid");
     }
-    goal_.reserve(problem.goal.size());
-    for (const auto &predicate : problem.goal) {
-      auto predicate_ptr = get_predicate_index(GroundPredicate{predicate});
-      goal_.push_back({predicate_ptr, predicate.negated});
+    LOG_DEBUG(logger, "");
+    for (const auto &predicate : ground_predicates_) {
+      LOG_DEBUG(logger, "%s %s\n",
+                model::to_string(predicate.first, problem).c_str(),
+                is_rigid(predicate.first, false) ? "rigid" : "not rigid");
+      LOG_DEBUG(logger, "!%s %s\n",
+                model::to_string(predicate.first, problem).c_str(),
+                is_rigid(predicate.first, true) ? "rigid" : "not rigid");
     }
   }
 
-  const std::vector<ConstantPtr> &get_constants_of_type(TypePtr type) {
+  inline const std::vector<ConstantPtr> &
+  get_constants_of_type(TypePtr type) const noexcept {
+    assert(type < constants_of_type.size());
     return constants_of_type[type];
   }
 
-  const auto &get_ground_predicates() const { return ground_predicates_; }
+  inline const auto &get_ground_predicates() const noexcept {
+    assert(ground_predicates_constructed_);
+    return ground_predicates_;
+  }
 
-  // TODO use hashmap for faster indexing
-  GroundPredicatePtr get_predicate_index(const GroundPredicate &predicate) {
-    assert(ground_predicates_.count(predicate) > 0);
+  inline GroundPredicatePtr
+  get_predicate_index(const GroundPredicate &predicate) noexcept {
+    assert(ground_predicates_constructed_ &&
+           ground_predicates_.count(predicate) > 0);
     return ground_predicates_[predicate];
   }
 
-  const std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>> &
-  get_predicate_support(bool is_negated, bool is_effect) {
+  inline const std::vector<
+      std::vector<std::pair<ActionPtr, ArgumentAssignment>>> &
+  get_predicate_support(bool is_negated, bool is_effect) noexcept {
+    assert(predicate_support_constructed_);
     return select_support(is_negated, is_effect);
   }
 
-  bool is_relevant(GroundPredicatePtr predicate) {
-    // Predicate is in any precondition
-    bool as_precondition = !select_support(true, false)[predicate].empty() ||
-                           !select_support(false, false)[predicate].empty();
-    if (as_precondition) {
-      return true;
-    }
-    // Predicate is in goal
-    return std::any_of(goal_.cbegin(), goal_.cend(),
-                       [&predicate](const auto &goal_predicate) {
-                         return predicate == goal_predicate.first;
-                       });
+  inline bool is_rigid(PredicatePtr predicate_ptr) const noexcept {
+    assert(predicate_ptr < predicate_in_effect_.size());
+    return predicate_in_effect_[predicate_ptr].empty();
   }
 
-  bool is_rigid(GroundPredicatePtr predicate, bool negated) {
+  /* bool is_relevant(const GroundPredicate& predicate) { */
+  /*   if (is_rigid(predicate.definition)) { */
+  /*     return true; */
+  /*   } */
+  /*   // Predicate is in any precondition */
+  /*   bool as_precondition = !select_support(true, false)[predicate].empty() ||
+   */
+  /*                          !select_support(false, false)[predicate].empty();
+   */
+  /*   if (as_precondition) { */
+  /*     return true; */
+  /*   } */
+  /*   // Predicate is in goal */
+  /*   return std::any_of(goal_.cbegin(), goal_.cend(), */
+  /*                      [&predicate](const auto &goal_predicate) { */
+  /*                        return predicate == goal_predicate.first; */
+  /*                      }); */
+  /* } */
+
+  inline bool is_init(const GroundPredicate &predicate) const noexcept {
+    return initial_state_.count(predicate) > 0;
+  }
+
+  bool is_rigid(const GroundPredicate &predicate, bool negated) noexcept {
+    assert(predicate_support_constructed_);
     // Is in initial state
-    bool in_init = std::any_of(initial_state_.cbegin(), initial_state_.cend(),
-                               [&predicate](const auto &initial_predicate) {
-                                 return predicate == initial_predicate.first;
-                               });
-    if (in_init == negated) {
+    if (is_init(predicate) == negated) {
       return false;
     }
+    if (is_rigid(predicate.definition)) {
+      return true;
+    }
     // Opposite predicate is in any effect
-    return select_support(!negated, true)[predicate].empty();
+    return select_support(!negated, true)[get_predicate_index(predicate)]
+        .empty();
+  }
+
+  inline const std::vector<std::pair<ActionPtr, ArgumentAssignment>> &
+  get_forbidden_assignments() noexcept {
+    assert(predicate_support_constructed_);
+    return forbidden_assignments;
   }
 
 private:
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>> &
-  select_support(bool is_negated, bool is_effect) {
+  select_support(bool is_negated, bool is_effect) noexcept {
     if (is_negated) {
       return is_effect ? neg_effect_support_ : neg_precondition_support_;
     } else {
@@ -140,7 +187,7 @@ private:
     }
   }
 
-  void sort_constants(const Problem &problem) {
+  void sort_constants(const Problem &problem) noexcept {
     constants_of_type.resize(problem.types.size());
     for (ConstantPtr constant_ptr = 0; constant_ptr < problem.constants.size();
          ++constant_ptr) {
@@ -153,9 +200,21 @@ private:
     }
   }
 
-  void ground_predicates(const Problem &problem) {
+  void ground_predicates(const Problem &problem) noexcept {
+    predicate_in_effect_.resize(problem.predicates.size());
+    for (ActionPtr action_ptr = 0; action_ptr < problem.actions.size();
+         ++action_ptr) {
+      const auto &action = problem.actions[action_ptr];
+      for (const auto &effect : action.effects) {
+        predicate_in_effect_[effect.definition].emplace_back(
+            action_ptr, ArgumentMapping{action.parameters, effect.arguments});
+      }
+    }
     for (PredicatePtr predicate_ptr = 0;
          predicate_ptr < problem.predicates.size(); ++predicate_ptr) {
+      if (is_rigid(predicate_ptr)) {
+        continue;
+      }
       const PredicateDefinition &predicate = problem.predicates[predicate_ptr];
 
       std::vector<size_t> number_arguments;
@@ -185,7 +244,7 @@ private:
 
   void ground_action_predicate(const Problem &problem, ActionPtr action_ptr,
                                const PredicateEvaluation &predicate,
-                               bool is_effect) {
+                               bool is_effect) noexcept {
     const auto &action = problem.actions[action_ptr];
     ArgumentMapping mapping{action.parameters, predicate.arguments};
 
@@ -208,8 +267,6 @@ private:
 
     auto combinations{all_combinations(number_arguments)};
 
-    auto &predicate_support = select_support(predicate.negated, is_effect);
-
     for (const auto &combination : combinations) {
       for (size_t i = 0; i < mapping.size(); ++i) {
         auto type = action.parameters[mapping.get_parameter_index(i)].type;
@@ -218,13 +275,26 @@ private:
               get_constants_of_type(type)[combination[i]];
         }
       }
-      auto index = get_predicate_index(ground_predicate);
       ArgumentAssignment assignment{mapping, combination};
-      predicate_support[index].emplace_back(action_ptr, std::move(assignment));
+      if (is_rigid(predicate.definition)) {
+        if (is_init(ground_predicate) == predicate.negated) {
+          // This predicate is never satisfiable
+          LOG_DEBUG(logger, "Forbid assignment for %s :%s %s\n",
+                    model::to_string(action, problem).c_str(),
+                    predicate.negated ? "!" : "",
+                    model::to_string(ground_predicate, problem).c_str());
+          forbidden_assignments.emplace_back(action_ptr, std::move(assignment));
+        }
+      } else {
+        auto &predicate_support = select_support(predicate.negated, is_effect);
+        auto index = get_predicate_index(ground_predicate);
+        predicate_support[index].emplace_back(action_ptr,
+                                              std::move(assignment));
+      }
     }
   }
 
-  void set_predicate_support(const Problem &problem) {
+  void set_predicate_support(const Problem &problem) noexcept {
     pos_precondition_support_.resize(ground_predicates_.size());
     neg_precondition_support_.resize(ground_predicates_.size());
     pos_effect_support_.resize(ground_predicates_.size());
@@ -235,6 +305,7 @@ private:
         ground_action_predicate(problem, action_ptr, predicate, false);
       }
       for (const auto &predicate : problem.actions[action_ptr].effects) {
+        assert(!is_rigid(predicate.definition));
         ground_action_predicate(problem, action_ptr, predicate, true);
       }
     }
@@ -315,11 +386,12 @@ private:
   /*   } */
   /* } */
 
-  std::vector<std::pair<GroundPredicatePtr, bool>> initial_state_;
-  std::vector<std::pair<GroundPredicatePtr, bool>> goal_;
+  std::unordered_set<GroundPredicate, GroundPredicateHash> initial_state_;
   std::vector<std::vector<ConstantPtr>> constants_of_type;
   std::unordered_map<GroundPredicate, GroundPredicatePtr, GroundPredicateHash>
       ground_predicates_;
+  std::vector<std::vector<std::pair<ActionPtr, ArgumentMapping>>>
+      predicate_in_effect_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
       pos_precondition_support_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
@@ -328,6 +400,9 @@ private:
       pos_effect_support_;
   std::vector<std::vector<std::pair<ActionPtr, ArgumentAssignment>>>
       neg_effect_support_;
+  std::vector<std::pair<ActionPtr, ArgumentAssignment>> forbidden_assignments;
+  bool ground_predicates_constructed_ = false;
+  bool predicate_support_constructed_ = false;
 };
 
 } // namespace support

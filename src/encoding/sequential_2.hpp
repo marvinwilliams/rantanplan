@@ -32,9 +32,9 @@ public:
   using Literal = Formula::Literal;
 
   struct Representation {
-    const unsigned int DONTCARE = 0;
-    const unsigned int SAT = 1;
-    const unsigned int UNSAT = 2;
+    static constexpr unsigned int DONTCARE = 0;
+    static constexpr unsigned int SAT = 1;
+    static constexpr unsigned int UNSAT = 2;
     std::vector<unsigned int> predicates;
     std::vector<unsigned int> actions;
     std::vector<std::vector<unsigned int>> parameters;
@@ -45,15 +45,28 @@ public:
       : Encoder{problem} {}
 
   void plan(const Config &config) override {
+    if (std::any_of(
+            problem_.goal.begin(), problem_.goal.end(), [this](const auto &p) {
+              return support_.is_rigid(p.definition) &&
+                     support_.is_init(model::GroundPredicate{p}) == p.negated;
+            })) {
+      PRINT_INFO("Problem is trivially unsolvable");
+      return;
+    }
     *solver_ << static_cast<int>(representation_.SAT) << 0;
     *solver_ << -static_cast<int>(representation_.UNSAT) << 0;
+    LOG_DEBUG(logger, "Initial state");
     add_formula(initial_state_, 0);
+    LOG_DEBUG(logger, "Universal clauses");
     add_formula(universal_clauses_, 0);
+    LOG_DEBUG(logger, "Transition clauses");
     add_formula(transition_clauses_, 0);
     unsigned int step = 1;
     while (true) {
+      LOG_DEBUG(logger, "Universal clauses");
       add_formula(universal_clauses_, step);
       PRINT_INFO("Solving step %u", step);
+      LOG_DEBUG(logger, "Goal clauses");
       for (const auto &clause : goal_.clauses) {
         for (const auto &literal : clause.literals) {
           solver_->assume(get_sat_var(literal, step));
@@ -71,6 +84,7 @@ public:
         }
         return;
       }
+      LOG_DEBUG(logger, "Transition clauses");
       add_formula(transition_clauses_, step);
       ++step;
     }
@@ -78,18 +92,10 @@ public:
 
 private:
   void encode_initial_state() {
-    for (const auto& kv_pair : support_.get_ground_predicates()) {
-      bool is_init = std::any_of(
-          problem_.initial_state.cbegin(), problem_.initial_state.cend(),
-          [&kv_pair](const auto &init_predicate) {
-            if (init_predicate.negated) {
-              // This does assume a non conflicting initial state
-              return false;
-            }
-            return kv_pair.first == model::GroundPredicate(init_predicate);
-          });
-      initial_state_ << Literal{PredicateVariable{kv_pair.second, true},
-                                !is_init}
+    for (const auto &[predicate, predicate_ptr] :
+         support_.get_ground_predicates()) {
+      initial_state_ << Literal{PredicateVariable{predicate_ptr, true},
+                                !support_.is_init(predicate)}
                      << sat::EndClause;
     }
   }
@@ -140,9 +146,8 @@ private:
     const auto &predicate_support =
         support_.get_predicate_support(is_negated, is_effect);
     auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
-    for (model::GroundPredicatePtr predicate_ptr = 0;
-         predicate_ptr < support_.get_ground_predicates().size();
-         ++predicate_ptr) {
+    for (const auto &[predicate, predicate_ptr] :
+         support_.get_ground_predicates()) {
       for (const auto &[action_ptr, assignment] :
            predicate_support[predicate_ptr]) {
         formula << Literal{ActionVariable{action_ptr}, true};
@@ -158,10 +163,22 @@ private:
     }
   }
 
+  void forbid_assignments() noexcept {
+    for (const auto &[action_ptr, assignment] :
+         support_.get_forbidden_assignments()) {
+      universal_clauses_ << Literal{ActionVariable{action_ptr}, true};
+      for (auto [parameter_index, constant_index] :
+           assignment.get_arguments()) {
+        universal_clauses_ << Literal{
+            GlobalParameterVariable{parameter_index, constant_index}, true};
+      }
+      universal_clauses_ << sat::EndClause;
+    }
+  }
+
   void frame_axioms(bool is_negated) {
-    for (model::GroundPredicatePtr predicate_ptr = 0;
-         predicate_ptr < support_.get_ground_predicates().size();
-         ++predicate_ptr) {
+    for (const auto &[predicate, predicate_ptr] :
+         support_.get_ground_predicates()) {
       Formula dnf;
       dnf << Literal{PredicateVariable{predicate_ptr, true}, is_negated}
           << sat::EndClause;
@@ -183,10 +200,14 @@ private:
 
   void assume_goal() {
     for (const auto &predicate : problem_.goal) {
-      model::GroundPredicatePtr index =
-          support_.get_predicate_index(model::GroundPredicate{predicate});
-      goal_ << Literal{PredicateVariable{index, true}, predicate.negated}
-            << sat::EndClause;
+      if (!support_.is_rigid(predicate.definition)) {
+        // If it was rigid and unsatisfiable, the problem would be trivially
+        // unsatisfiable, which is checked beforehand
+        model::GroundPredicatePtr index =
+            support_.get_predicate_index(model::GroundPredicate{predicate});
+        goal_ << Literal{PredicateVariable{index, true}, predicate.negated}
+              << sat::EndClause;
+      }
     }
   }
 
@@ -207,16 +228,17 @@ private:
       }
     }
 
-    representation_.predicates.reserve(support_.get_ground_predicates().size());
-    for (size_t i = 0; i < support_.get_ground_predicates().size(); ++i) {
-      if (!support_.is_relevant(i)) {
-        representation_.predicates.push_back(representation_.DONTCARE);
-      } else if (support_.is_rigid(i, false)) {
-        representation_.predicates.push_back(representation_.SAT);
-      } else if (support_.is_rigid(i, true)) {
-        representation_.predicates.push_back(representation_.UNSAT);
+    representation_.predicates.resize(support_.get_ground_predicates().size());
+    for (const auto &[predicate, predicate_ptr] :
+         support_.get_ground_predicates()) {
+      if (support_.is_rigid(predicate, false)) {
+        /* assert(false); */
+        representation_.predicates[predicate_ptr] = representation_.SAT;
+      } else if (support_.is_rigid(predicate, true)) {
+        /* assert(false); */
+        representation_.predicates[predicate_ptr] = representation_.UNSAT;
       } else {
-        representation_.predicates.push_back(variable_counter++);
+        representation_.predicates[predicate_ptr] = variable_counter++;
       }
     }
 
@@ -246,6 +268,7 @@ private:
     parameter_implies_predicate(false, true);
     parameter_implies_predicate(true, false);
     parameter_implies_predicate(true, true);
+    forbid_assignments();
     frame_axioms(false);
     frame_axioms(true);
     assume_goal();
@@ -262,7 +285,7 @@ private:
                p) {
       variable = representation_.predicates[p->predicate_ptr];
       if (!p->this_step && variable > representation_.UNSAT) {
-        variable += static_cast<unsigned int>(representation_.num_vars);
+        variable += static_cast<size_t>(representation_.num_vars);
       }
     } else if (const GlobalParameterVariable *p =
                    std::get_if<GlobalParameterVariable>(&literal.variable);
@@ -276,21 +299,21 @@ private:
       return static_cast<int>(representation_.SAT);
     }
     if (variable == representation_.SAT || variable == representation_.UNSAT) {
-      LOG_DEBUG(logger, "%d ", (literal.negated ? -1 : 1) * variable);
       return (literal.negated ? -1 : 1) * static_cast<int>(variable);
     }
-    LOG_DEBUG(logger, "%d ",
-              (literal.negated ? -1 : 1) *
-                  (variable + step * representation_.num_vars));
     return (literal.negated ? -1 : 1) *
            static_cast<int>(variable + step * representation_.num_vars);
   }
 
   void add_formula(const Formula &formula, unsigned int step) {
+    LOG_DEBUG(logger, "Formula:");
     for (const auto &clause : formula.clauses) {
+      LOG_DEBUG(logger, "Clause:");
       for (const auto &literal : clause.literals) {
+        LOG_DEBUG(logger, "%d", get_sat_var(literal, step));
         *solver_ << get_sat_var(literal, step);
       }
+      LOG_DEBUG(logger, "\n");
       *solver_ << 0;
     }
   }

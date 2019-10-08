@@ -132,7 +132,7 @@ struct GroundPredicate {
   std::vector<ConstantPtr> arguments;
 };
 
-bool operator==(const GroundPredicate &first, const GroundPredicate &second) {
+inline bool operator==(const GroundPredicate &first, const GroundPredicate &second) {
   return first.definition == second.definition &&
          first.arguments == second.arguments;
 }
@@ -161,7 +161,7 @@ struct Action {
   std::vector<PredicateEvaluation> effects;
 };
 
-bool operator==(const Action &first, const Action &second) {
+inline bool operator==(const Action &first, const Action &second) {
   return first.name == second.name;
 }
 

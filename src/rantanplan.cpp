@@ -4,13 +4,14 @@
 #include "encoding/sequential_1.hpp"
 #include "encoding/sequential_2.hpp"
 #include "encoding/sequential_3.hpp"
-#include "lexer/lexer.hpp"
-#include "lexer/rule_set.hpp"
+#include "lexer/lexer_new.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
 #include "options/options.hpp"
-#include "parser/parser.hpp"
-#include "parser/pddl_visitor.hpp"
+#include "pddl/ast.hpp"
+#include "pddl/parser.hpp"
+#include "pddl/pddl_visitor.hpp"
+#include "pddl/tokens.hpp"
 
 #include <climits>
 #include <string>
@@ -85,10 +86,10 @@ int main(int argc, char *argv[]) {
   logging::default_appender.set_level(config.log_level);
 
   if (config.log_parser) {
-    parser::logger.add_appender(logging::default_appender);
+    pddl::logger.add_appender(logging::default_appender);
   }
   if (config.log_normalize) {
-    model::normalizing::logger.add_appender(logging::default_appender);
+    model::normalize_logger.add_appender(logging::default_appender);
   }
   if (config.log_support) {
     model::support::logger.add_appender(logging::default_appender);
@@ -99,31 +100,11 @@ int main(int argc, char *argv[]) {
 
   print_version();
 
-  std::ifstream domain(config.domain_file);
-  std::ifstream problem(config.problem_file);
-  if (!domain.is_open()) {
-    PRINT_ERROR("Failed to open: %s", config.domain_file.c_str());
-    return 1;
-  }
-  if (!problem.is_open()) {
-    PRINT_ERROR("Failed to open: %s", config.problem_file.c_str());
-    return 1;
-  }
-
-  lexer::Lexer<parser::Rules> lexer;
-  parser::ast::AST ast;
   try {
     PRINT_INFO("Parsing problem...");
-    auto domain_tokens =
-        lexer.lex(config.domain_file, std::istreambuf_iterator<char>(domain),
-                  std::istreambuf_iterator<char>());
-    parser::parse_domain(domain_tokens, ast);
-    auto problem_tokens =
-        lexer.lex(config.problem_file, std::istreambuf_iterator<char>(problem),
-                  std::istreambuf_iterator<char>());
-
-    parser::parse_problem(problem_tokens, ast);
-    parser::PddlAstParser visitor;
+    pddl::Parser parser;
+    auto ast = parser.parse(config.domain_file, config.problem_file);
+    pddl::PddlAstParser visitor;
     auto abstract_problem = visitor.parse(ast);
     PRINT_DEBUG("Abstract problem:\n%s", to_string(abstract_problem).c_str());
     PRINT_INFO("Normalizing problem...");
@@ -142,13 +123,16 @@ int main(int argc, char *argv[]) {
     } else if (config.planner == "foreach") {
       PRINT_INFO("Using foreach encoding");
       encoder = std::make_unique<encoding::ForeachEncoder>(problem);
+    } else if (config.planner == "parse") {
+      PRINT_INFO("Parsing successful");
+      return 0;
     } else {
       PRINT_ERROR("Unknown planner type \'%s\'", config.planner.c_str());
       return 1;
     }
     encoder->encode();
     encoder->plan(config);
-  } catch (const parser::ParserException &e) {
+  } catch (const pddl::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
       ss << *e.location();

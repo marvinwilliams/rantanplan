@@ -15,7 +15,7 @@ namespace encoding {
 
 using namespace std::chrono_literals;
 
-static logging::Logger logger{"Encoding"};
+extern logging::Logger logger;
 
 struct ActionVariable {
   model::ActionPtr action_ptr;
@@ -47,30 +47,30 @@ public:
       : solver_{std::make_unique<sat::IpasirSolver>()}, problem_{problem},
         support_{problem} {}
 
-  virtual ~Encoder() = default;
+virtual ~Encoder() = default;
 
-  void encode() {
-    generate_formula_();
-    init_vars_();
-  }
+void encode() {
+  generate_formula_();
+  init_vars_();
+}
 
-  virtual void plan(const Config &) = 0;
+virtual void plan(const Config &) = 0;
 
 protected:
-  Encoder(const Encoder &) = delete;
-  Encoder(Encoder &&) = default;
-  Encoder &operator=(const Encoder &) = delete;
-  Encoder &operator=(Encoder &&) = delete;
+Encoder(const Encoder &) = delete;
+Encoder(Encoder &&) = default;
+Encoder &operator=(const Encoder &) = delete;
+Encoder &operator=(Encoder &&) = delete;
 
-  std::unique_ptr<sat::Solver> solver_;
+std::unique_ptr<sat::Solver> solver_;
 
-  const model::Problem &problem_;
-  model::Support support_;
+const model::Problem &problem_;
+model::Support support_;
 
 private:
-  virtual void generate_formula_() = 0;
-  virtual void init_vars_() = 0;
-};
+virtual void generate_formula_() = 0;
+virtual void init_vars_() = 0;
+}; // namespace encoding
 
 } // namespace encoding
 

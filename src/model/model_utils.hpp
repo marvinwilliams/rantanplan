@@ -10,7 +10,7 @@
 
 namespace model {
 
-bool is_subtype(const std::vector<Type> &types, TypePtr type,
+inline bool is_subtype(const std::vector<Type> &types, TypePtr type,
                 TypePtr supertype) {
   if (type == supertype) {
     return true;
@@ -24,7 +24,7 @@ bool is_subtype(const std::vector<Type> &types, TypePtr type,
   return false;
 }
 
-bool is_unifiable(const GroundPredicate &grounded_predicate,
+inline bool is_unifiable(const GroundPredicate &grounded_predicate,
                   const PredicateEvaluation &predicate) {
   if (grounded_predicate.definition != predicate.definition) {
     return false;
@@ -39,7 +39,7 @@ bool is_unifiable(const GroundPredicate &grounded_predicate,
              .first == grounded_predicate.arguments.cend();
 }
 
-bool holds(const State &state, const GroundPredicate &predicate,
+inline bool holds(const State &state, const GroundPredicate &predicate,
            bool negated = false) {
   bool in_state =
       std::any_of(state.predicates.cbegin(), state.predicates.cend(),
@@ -49,7 +49,7 @@ bool holds(const State &state, const GroundPredicate &predicate,
   return negated != in_state;
 }
 
-bool holds(const State &state, const PredicateEvaluation &predicate) {
+inline bool holds(const State &state, const PredicateEvaluation &predicate) {
   bool in_state =
       std::any_of(state.predicates.cbegin(), state.predicates.cend(),
                   [&predicate](const auto &state_predicate) {
@@ -58,7 +58,7 @@ bool holds(const State &state, const PredicateEvaluation &predicate) {
   return predicate.negated != in_state;
 }
 
-bool holds(const RelaxedState &state, const GroundPredicate &predicate,
+inline bool holds(const RelaxedState &state, const GroundPredicate &predicate,
            bool negated) {
   if (state.predicates.find(predicate) == state.predicates.end()) {
     return holds(state.initial_state, predicate, negated);
