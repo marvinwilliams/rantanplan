@@ -41,15 +41,16 @@ public:
     size_t num_vars;
   };
 
-  explicit Sequential3Encoder(const model::Problem &problem)
-      : Encoder{problem} {}
+  explicit Sequential3Encoder(const model::Support &support)
+      : Encoder{support} {}
 
   void plan(const Config &config) override {
-    if (std::any_of(
-            problem_.goal.begin(), problem_.goal.end(), [this](const auto &p) {
-              return support_.is_rigid(p.definition) &&
-                     support_.is_init(model::GroundPredicate{p}) == p.negated;
-            })) {
+    if (std::any_of(support_.get_problem().goal.begin(),
+                    support_.get_problem().goal.end(), [this](const auto &p) {
+                      return support_.is_rigid(p.definition) &&
+                             support_.is_init(model::GroundPredicate{p}) ==
+                                 p.negated;
+                    })) {
       PRINT_INFO("Problem is trivially unsolvable");
       return;
     }
@@ -104,9 +105,10 @@ private:
     for (size_t parameter_pos = 0; parameter_pos < max_parameters_;
          ++parameter_pos) {
       std::vector<Variable> all_arguments;
-      all_arguments.reserve(problem_.constants.size());
+      all_arguments.reserve(support_.get_problem().constants.size());
       for (model::ConstantPtr constant_ptr = 0;
-           constant_ptr < problem_.constants.size(); ++constant_ptr) {
+           constant_ptr < support_.get_problem().constants.size();
+           ++constant_ptr) {
         all_arguments.emplace_back(
             GlobalParameterVariable{parameter_pos, constant_ptr});
       }
@@ -116,16 +118,16 @@ private:
 
   void encode_actions() {
     std::vector<Variable> all_actions;
-    all_actions.reserve(problem_.actions.size());
-    for (model::ActionPtr action_ptr = 0; action_ptr < problem_.actions.size();
-         ++action_ptr) {
+    all_actions.reserve(support_.get_problem().actions.size());
+    for (model::ActionPtr action_ptr = 0;
+         action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
       all_actions.emplace_back(ActionVariable{action_ptr});
     }
     universal_clauses_.at_most_one(all_actions);
 
-    for (model::ActionPtr action_ptr = 0; action_ptr < problem_.actions.size();
-         ++action_ptr) {
-      const auto &action = problem_.actions[action_ptr];
+    for (model::ActionPtr action_ptr = 0;
+         action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
+      const auto &action = support_.get_problem().actions[action_ptr];
       for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
            ++parameter_pos) {
         const auto &parameter = action.parameters[parameter_pos];
@@ -149,7 +151,8 @@ private:
       for (const auto &[action_ptr, assignment] :
            predicate_support[predicate_ptr]) {
         formula << Literal{ActionVariable{action_ptr}, true};
-        const auto &parameters = problem_.actions[action_ptr].parameters;
+        const auto &parameters =
+            support_.get_problem().actions[action_ptr].parameters;
         for (auto [parameter_index, constant_index] :
              assignment.get_arguments()) {
           const auto &constants_of_type =
@@ -170,7 +173,8 @@ private:
     for (const auto &[action_ptr, assignment] :
          support_.get_forbidden_assignments()) {
       universal_clauses_ << Literal{ActionVariable{action_ptr}, true};
-      const auto &parameters = problem_.actions[action_ptr].parameters;
+      const auto &parameters =
+          support_.get_problem().actions[action_ptr].parameters;
       for (auto [parameter_index, constant_index] :
            assignment.get_arguments()) {
         const auto &constants_of_type =
@@ -195,7 +199,8 @@ private:
       for (const auto &[action_ptr, assignment] :
            support_.get_predicate_support(is_negated, true)[predicate_ptr]) {
         dnf << Literal{ActionVariable{action_ptr}, false};
-        const auto &parameters = problem_.actions[action_ptr].parameters;
+        const auto &parameters =
+            support_.get_problem().actions[action_ptr].parameters;
         for (auto [parameter_index, constant_index] :
              assignment.get_arguments()) {
           const auto &constants_of_type =
@@ -212,7 +217,7 @@ private:
   }
 
   void assume_goal() {
-    for (const auto &predicate : problem_.goal) {
+    for (const auto &predicate : support_.get_problem().goal) {
       if (!support_.is_rigid(predicate.definition)) {
         // If it was rigid and unsatisfiable, the problem would be trivially
         // unsatisfiable, which is checked beforehand
@@ -228,15 +233,16 @@ private:
     PRINT_INFO("Initializing sat variables...");
     unsigned int variable_counter = representation_.UNSAT + 1;
 
-    representation_.actions.reserve(problem_.actions.size());
-    for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    representation_.actions.reserve(support_.get_problem().actions.size());
+    for (size_t i = 0; i < support_.get_problem().actions.size(); ++i) {
       representation_.actions.push_back(variable_counter++);
     }
 
     representation_.parameters.resize(max_parameters_);
     for (size_t i = 0; i < max_parameters_; ++i) {
-      representation_.parameters[i].reserve(problem_.constants.size());
-      for (size_t j = 0; j < problem_.constants.size(); ++j) {
+      representation_.parameters[i].reserve(
+          support_.get_problem().constants.size());
+      for (size_t j = 0; j < support_.get_problem().constants.size(); ++j) {
         representation_.parameters[i].push_back(variable_counter++);
       }
     }
@@ -261,7 +267,7 @@ private:
 
   void generate_formula_() override {
     max_parameters_ = 0;
-    for (const auto &action : problem_.actions) {
+    for (const auto &action : support_.get_problem().actions) {
       if (action.parameters.size() > max_parameters_) {
         max_parameters_ = action.parameters.size();
       }
@@ -327,17 +333,18 @@ private:
     Plan plan;
     for (unsigned int s = 0; s < step; ++s) {
       for (model::ActionPtr action_ptr = 0;
-           action_ptr < problem_.actions.size(); ++action_ptr) {
+           action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
         if (model[representation_.actions[action_ptr] +
                   s * representation_.num_vars]) {
-          const auto &action = problem_.actions[action_ptr];
+          const auto &action = support_.get_problem().actions[action_ptr];
           std::vector<model::ConstantPtr> arguments;
           arguments.reserve(action.parameters.size());
           for (size_t parameter_pos = 0;
                parameter_pos < action.parameters.size(); ++parameter_pos) {
             [[maybe_unused]] bool found = false;
             for (model::ConstantPtr constant_ptr = 0;
-                 constant_ptr < problem_.constants.size(); ++constant_ptr) {
+                 constant_ptr < support_.get_problem().constants.size();
+                 ++constant_ptr) {
               if (model[representation_
                             .parameters[parameter_pos][constant_ptr] +
                         s * representation_.num_vars]) {
@@ -347,6 +354,9 @@ private:
               }
             }
             assert(found);
+          }
+          for (const auto &[parameter_pos, argument] : action.arguments) {
+            arguments[parameter_pos] = argument;
           }
           plan.emplace_back(action_ptr, std::move(arguments));
           break;
@@ -360,12 +370,13 @@ private:
     std::stringstream ss;
     unsigned int step = 0;
     for (const auto &[action_ptr, arguments] : plan) {
-      ss << step << ": " << '(' << problem_.actions[action_ptr].name << ' ';
+      ss << step << ": " << '('
+         << support_.get_problem().actions[action_ptr].name << ' ';
       for (auto it = arguments.cbegin(); it != arguments.cend(); ++it) {
         if (it != arguments.cbegin()) {
           ss << ' ';
         }
-        ss << problem_.constants[*it].name;
+        ss << support_.get_problem().constants[*it].name;
       }
       ss << ')' << '\n';
       ++step;

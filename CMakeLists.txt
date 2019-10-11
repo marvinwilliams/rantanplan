@@ -53,6 +53,7 @@ add_executable(rantanplan_glucose
   "src/pddl/parser_logger.cpp"
   "src/util/combinatorics.cpp"
   "src/encoding/encoding_logger.cpp"
+  "src/model/preprocess.cpp"
   "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a"
   )
 

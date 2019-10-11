@@ -7,6 +7,7 @@
 #include "lexer/lexer_new.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
+#include "model/preprocess.hpp"
 #include "options/options.hpp"
 #include "pddl/ast.hpp"
 #include "pddl/parser.hpp"
@@ -111,21 +112,24 @@ int main(int argc, char *argv[]) {
     auto problem = model::normalize(abstract_problem);
     PRINT_DEBUG("Normalized problem:\n%s", to_string(problem).c_str());
     std::unique_ptr<encoding::Encoder> encoder;
-    if (config.planner == "seq1") {
-      PRINT_INFO("Using sequential encoding 1");
-      encoder = std::make_unique<encoding::Sequential1Encoder>(problem);
-    } else if (config.planner == "seq2") {
-      PRINT_INFO("Using sequential encoding 2");
-      encoder = std::make_unique<encoding::Sequential2Encoder>(problem);
-    } else if (config.planner == "seq3") {
-      PRINT_INFO("Using sequential encoding 3");
-      encoder = std::make_unique<encoding::Sequential3Encoder>(problem);
-    } else if (config.planner == "foreach") {
-      PRINT_INFO("Using foreach encoding");
-      encoder = std::make_unique<encoding::ForeachEncoder>(problem);
-    } else if (config.planner == "parse") {
+    if (config.planner == "parse") {
       PRINT_INFO("Parsing successful");
       return 0;
+    }
+    auto support = model::preprocess(problem);
+    PRINT_DEBUG("Preprocessed:\n%s", model::to_string(problem).c_str());
+    if (config.planner == "seq1") {
+      PRINT_INFO("Using sequential encoding 1");
+      encoder = std::make_unique<encoding::Sequential1Encoder>(support);
+    } else if (config.planner == "seq2") {
+      PRINT_INFO("Using sequential encoding 2");
+      encoder = std::make_unique<encoding::Sequential2Encoder>(support);
+    } else if (config.planner == "seq3") {
+      PRINT_INFO("Using sequential encoding 3");
+      encoder = std::make_unique<encoding::Sequential3Encoder>(support);
+    } else if (config.planner == "foreach") {
+      PRINT_INFO("Using foreach encoding");
+      encoder = std::make_unique<encoding::ForeachEncoder>(support);
     } else {
       PRINT_ERROR("Unknown planner type \'%s\'", config.planner.c_str());
       return 1;

@@ -1,11 +1,14 @@
 #ifndef PREPROCESS_HPP
 #define PREPROCESS_HPP
 
+#include "model/model.hpp"
+#include "model/support.hpp"
+
 namespace model {
 
-namespace preprocess {
+Support ground_rigid(float ratio, Problem &problem) noexcept;
 
-}
+Support preprocess(Problem &problem);
 
 } // namespace model
 

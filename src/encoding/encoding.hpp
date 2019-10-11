@@ -4,7 +4,9 @@
 #include "config.hpp"
 #include "logging/logging.hpp"
 #include "model/model.hpp"
+#include "model/preprocess.hpp"
 #include "model/support.hpp"
+#include "model/to_string.hpp"
 #include "sat/formula.hpp"
 #include "sat/ipasir_solver.hpp"
 
@@ -43,33 +45,31 @@ public:
   using Plan =
       std::vector<std::pair<model::ActionPtr, std::vector<model::ConstantPtr>>>;
 
-  explicit Encoder(const model::Problem &problem)
-      : solver_{std::make_unique<sat::IpasirSolver>()}, problem_{problem},
-        support_{problem} {}
+  explicit Encoder(const model::Support &support)
+      : solver_{std::make_unique<sat::IpasirSolver>()}, support_{support} {}
 
-virtual ~Encoder() = default;
+  virtual ~Encoder() = default;
 
-void encode() {
-  generate_formula_();
-  init_vars_();
-}
+  void encode() {
+    generate_formula_();
+    init_vars_();
+  }
 
-virtual void plan(const Config &) = 0;
+  virtual void plan(const Config &) = 0;
 
 protected:
-Encoder(const Encoder &) = delete;
-Encoder(Encoder &&) = default;
-Encoder &operator=(const Encoder &) = delete;
-Encoder &operator=(Encoder &&) = delete;
+  Encoder(const Encoder &) = delete;
+  Encoder(Encoder &&) = default;
+  Encoder &operator=(const Encoder &) = delete;
+  Encoder &operator=(Encoder &&) = delete;
 
-std::unique_ptr<sat::Solver> solver_;
+  std::unique_ptr<sat::Solver> solver_;
 
-const model::Problem &problem_;
-model::Support support_;
+  model::Support support_;
 
 private:
-virtual void generate_formula_() = 0;
-virtual void init_vars_() = 0;
+  virtual void generate_formula_() = 0;
+  virtual void init_vars_() = 0;
 }; // namespace encoding
 
 } // namespace encoding

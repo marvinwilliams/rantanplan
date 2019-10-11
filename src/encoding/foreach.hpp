@@ -41,14 +41,15 @@ public:
     size_t num_vars;
   };
 
-  explicit ForeachEncoder(const model::Problem &problem) : Encoder{problem} {}
+  explicit ForeachEncoder(model::Support &support) : Encoder{support} {}
 
   void plan(const Config &config) override {
-    if (std::any_of(
-            problem_.goal.begin(), problem_.goal.end(), [this](const auto &p) {
-              return support_.is_rigid(p.definition) &&
-                     support_.is_init(model::GroundPredicate{p}) == p.negated;
-            })) {
+    if (std::any_of(support_.get_problem().goal.begin(),
+                    support_.get_problem().goal.end(), [this](const auto &p) {
+                      return support_.is_rigid(p.definition) &&
+                             support_.is_init(model::GroundPredicate{p}) ==
+                                 p.negated;
+                    })) {
       PRINT_INFO("Problem is trivially unsolvable");
       return;
     }
@@ -100,9 +101,9 @@ private:
   }
 
   void encode_actions() {
-    for (model::ActionPtr action_ptr = 0; action_ptr < problem_.actions.size();
-         ++action_ptr) {
-      const auto &action = problem_.actions[action_ptr];
+    for (model::ActionPtr action_ptr = 0;
+         action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
+      const auto &action = support_.get_problem().actions[action_ptr];
       for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
            ++parameter_pos) {
         const auto &parameter = action.parameters[parameter_pos];
@@ -221,7 +222,7 @@ private:
   }
 
   void assume_goal() {
-    for (const auto &predicate : problem_.goal) {
+    for (const auto &predicate : support_.get_problem().goal) {
       if (!support_.is_rigid(predicate.definition)) {
         // If it was rigid and unsatisfiable, the problem would be trivially
         // unsatisfiable, which is checked beforehand
@@ -237,10 +238,11 @@ private:
     PRINT_INFO("Initializing sat variables...");
     unsigned int variable_counter = representation_.UNSAT + 1;
 
-    representation_.actions.reserve(problem_.actions.size());
-    representation_.parameters.reserve(problem_.actions.size());
-    for (const auto &action : problem_.actions) {
-      LOG_DEBUG(logger, "%s: %u", model::to_string(action, problem_).c_str(),
+    representation_.actions.reserve(support_.get_problem().actions.size());
+    representation_.parameters.reserve(support_.get_problem().actions.size());
+    for (const auto &action : support_.get_problem().actions) {
+      LOG_DEBUG(logger, "%s: %u",
+                model::to_string(action, support_.get_problem()).c_str(),
                 variable_counter);
       representation_.actions.push_back(variable_counter++);
 
@@ -344,10 +346,10 @@ private:
     Plan plan;
     for (unsigned int s = 0; s < step; ++s) {
       for (model::ActionPtr action_ptr = 0;
-           action_ptr < problem_.actions.size(); ++action_ptr) {
+           action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
         if (model[representation_.actions[action_ptr] +
                   s * representation_.num_vars]) {
-          const auto &action = problem_.actions[action_ptr];
+          const auto &action = support_.get_problem().actions[action_ptr];
           std::vector<model::ConstantPtr> arguments;
           arguments.reserve(action.parameters.size());
           for (size_t parameter_pos = 0;
@@ -368,6 +370,9 @@ private:
             }
             assert(found);
           }
+          for (const auto &[parameter_pos, argument] : action.arguments) {
+            arguments[parameter_pos] = argument;
+          }
           plan.emplace_back(action_ptr, std::move(arguments));
         }
       }
@@ -379,12 +384,13 @@ private:
     std::stringstream ss;
     unsigned int step = 0;
     for (const auto &[action_ptr, arguments] : plan) {
-      ss << step << ": " << '(' << problem_.actions[action_ptr].name << ' ';
+      ss << step << ": " << '('
+         << support_.get_problem().actions[action_ptr].name << ' ';
       for (auto it = arguments.cbegin(); it != arguments.cend(); ++it) {
         if (it != arguments.cbegin()) {
           ss << ' ';
         }
-        ss << problem_.constants[*it].name;
+        ss << support_.get_problem().constants[*it].name;
       }
       ss << ')' << '\n';
       ++step;
