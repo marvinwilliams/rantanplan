@@ -6,9 +6,7 @@
 
 namespace model {
 
-Support ground_rigid(float ratio, Problem &problem) noexcept;
-
-Support preprocess(Problem &problem);
+void preprocess(Problem &problem, Support &support);
 
 } // namespace model
 

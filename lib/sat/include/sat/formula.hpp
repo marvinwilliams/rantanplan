@@ -2,9 +2,9 @@
 #define FORMULA_HPP
 
 #include "util/combinatorics.hpp"
+#include <cstdio>
 #include <type_traits>
 #include <vector>
-#include <cstdio>
 
 namespace sat {
 
@@ -54,14 +54,15 @@ template <typename Variable> struct Formula {
       list_sizes.push_back(clause.literals.size());
     }
 
-    auto combinations = all_combinations(list_sizes);
-    /* fprintf(stderr, "Dimension: %lu\n", combinations.size()); */
+    auto combination_iterator = CombinationIterator{list_sizes};
 
-    for (const auto &combination : combinations) {
+    while (!combination_iterator.end()) {
+      const auto &combination = *combination_iterator;
       for (size_t i = 0; i < combination.size(); ++i) {
         *this << formula.clauses[i].literals[combination[i]];
       }
       *this << EndClause;
+      ++combination_iterator;
     }
   }
 

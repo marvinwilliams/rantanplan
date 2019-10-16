@@ -5,8 +5,6 @@ namespace model {
 
 namespace support {
 
-logging::Logger logger{"Support"};
-
 }
 
 } // namespace model

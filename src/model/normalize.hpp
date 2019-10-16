@@ -10,13 +10,13 @@ namespace model {
 
 extern logging::Logger normalize_logger;
 
-Condition normalize_condition(const Condition &condition) ;
+Condition normalize_condition(const Condition &condition) noexcept;
 
-std::vector<PredicateEvaluation> to_list(const Condition &condition) ;
+std::vector<PredicateEvaluation> to_list(const Condition &condition) noexcept;
 
-std::vector<Action> normalize_action(const AbstractAction &action) ;
+std::vector<Action> normalize_action(const AbstractAction &action) noexcept;
 
-Problem normalize(const AbstractProblem &abstract_problem) ;
+Problem normalize(const AbstractProblem &abstract_problem) noexcept;
 
 } // namespace model
 

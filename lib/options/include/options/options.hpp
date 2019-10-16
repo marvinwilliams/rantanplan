@@ -81,7 +81,7 @@ private:
 
 class Options {
 public:
-  explicit Options(std::string name) noexcept : name_{std::move(name)} {}
+  explicit Options(const std::string &name) noexcept : name_{name} {}
 
   template <typename T>
   void add_option(std::string name, char short_name,
@@ -187,41 +187,38 @@ public:
   }
 
   void print_usage() const noexcept {
-    std::cout << "Synopsis:\n\t" << name_ << " ";
+    std::cout << "Synopsis:\n\t" << name_ << ' ';
     for (auto it = positional_options_.cbegin();
          it != positional_options_.cend(); ++it) {
-      if (it != positional_options_.cbegin()) {
-        std::cout << ' ';
-      }
       std::cout << (*it)->name;
+      std::cout << ' ';
     }
-    for (auto it = options_.cbegin(); it != options_.cend(); ++it) {
-      if (it != positional_options_.cbegin()) {
-        std::cout << ' ';
-      }
-      std::cout << "[--" << (*it)->name;
-      if ((*it)->short_name) {
-        std::cout << ", -" << *(*it)->short_name;
-      }
-      std::cout << ']';
+    if (options_.size() > 0) {
+      std::cout << "[OPTION...]";
     }
-    std::cout << "\n\nOptions:\n\t";
+    if (positional_options_.size() > 0) {
+      std::cout << "\n\n";
+      std::cout << "Positional arguments:\n\t";
+    }
     for (auto it = positional_options_.cbegin();
          it != positional_options_.cend(); ++it) {
       if (it != positional_options_.cbegin()) {
-        std::cout << '\n' << '\t';
+        std::cout << "\n\t";
       }
-      std::cout << (*it)->name << '\t' << '\t' << (*it)->description;
+      std::cout << (*it)->name << "\n\t\t" << (*it)->description;
       if ((*it)->default_value != "") {
         std::cout << " (Default: \'" << (*it)->default_value << "\')";
       }
     }
-    std::cout << '\n';
+    if (options_.size() > 0) {
+      std::cout << "\n\n";
+      std::cout << "Options:\n\t";
+    }
     for (auto it = options_.cbegin(); it != options_.cend(); ++it) {
-      if (it != options_.cbegin() || !positional_options_.empty()) {
-        std::cout << '\n' << '\t';
+      if (it != options_.cbegin()) {
+        std::cout << "\n\t";
       }
-      std::cout << "--" << (*it)->name << '\t' << '\t' << (*it)->description;
+      std::cout << "--" << (*it)->name << "\n\t\t" << (*it)->description;
       if ((*it)->default_value != "") {
         std::cout << " (Default: \'" << (*it)->default_value << "\')";
       }

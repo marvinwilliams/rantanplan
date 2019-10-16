@@ -1,28 +1,45 @@
 #include "util/combinatorics.hpp"
 
-#include <cstdio>
 #include <algorithm>
 #include <functional>
-#include <vector>
 #include <numeric>
+#include <vector>
 
-std::vector<std::vector<size_t>>
-all_combinations(const std::vector<size_t> &list_sizes) {
-  std::vector<std::vector<size_t>> combinations;
-  size_t number_combinations = std::accumulate(
-      list_sizes.cbegin(), list_sizes.cend(), 1ul, std::multiplies<>());
-  combinations.reserve(number_combinations);
-  std::vector<size_t> combination(list_sizes.size());
-  for (size_t i = 0; i < number_combinations; ++i) {
-    combinations.push_back(combination);
-    for (size_t j = 0; j < list_sizes.size(); ++j) {
-      combination[j]++;
-      if (combination[j] < list_sizes[j]) {
-        break;
-      } else {
-        combination[j] = 0;
-      }
+CombinationIterator::CombinationIterator(
+    const std::vector<size_t> &list_sizes) noexcept
+    : list_sizes_{list_sizes}, current_combination_(list_sizes_.size()) {
+  number_combinations_ = std::accumulate(
+      list_sizes_.cbegin(), list_sizes_.cend(), 1ul, std::multiplies<>());
+  if (number_combinations_ == 0) {
+    is_end_ = true;
+  }
+}
+
+CombinationIterator &CombinationIterator::operator++() noexcept {
+  if (is_end_) {
+    return *this;
+  }
+  for (size_t i = 0; i < list_sizes_.size(); ++i) {
+    current_combination_[i]++;
+    if (current_combination_[i] < list_sizes_[i]) {
+      return *this;
+    } else {
+      current_combination_[i] = 0;
     }
   }
-  return combinations;
+  is_end_ = true;
+  return *this;
+}
+
+CombinationIterator CombinationIterator::operator++(int) noexcept {
+  CombinationIterator old = *this;
+  ++(*this);
+  return old;
+}
+
+void CombinationIterator::reset() noexcept {
+  if (!is_end_) {
+    std::fill(current_combination_.begin(), current_combination_.end(), 0);
+  }
+  is_end_ = (number_combinations_ == 0);
 }

@@ -5,8 +5,7 @@
 
 namespace model {
 
-Support ground_rigid(float ratio, Problem &problem) noexcept {
-  Support support{problem};
+void ground_rigid(Problem &problem, Support &support) noexcept {
   bool found_rigid;
   do {
     found_rigid = false;
@@ -20,7 +19,7 @@ Support ground_rigid(float ratio, Problem &problem) noexcept {
                                            predicate.arguments);
           size_t grounded_size = std::accumulate(
               mapping.matches.begin(), mapping.matches.end(), 1ul,
-              [&action, support](size_t product, const auto &m) {
+              [&action, &support](size_t product, const auto &m) {
                 return product * support
                                      .get_constants_of_type(
                                          action.parameters[m.first].type)
@@ -32,31 +31,31 @@ Support ground_rigid(float ratio, Problem &problem) noexcept {
                 return p.definition == predicate.definition;
               }));
           if (predicate.negated) {
-            if (1 - (static_cast<float>(in_init) /
-                     static_cast<float>(grounded_size)) <=
-                ratio) {
-              if (grounded_size - in_init < min_grounded_size) {
-                min_grounded_size = grounded_size - in_init;
-                to_ground.clear();
-                to_ground.reserve(mapping.matches.size());
-                std::transform(mapping.matches.begin(), mapping.matches.end(),
-                               std::back_inserter(to_ground),
-                               [](const auto &m) { return m.first; });
-              }
+            /* if (1 - (static_cast<float>(in_init) / */
+            /*          static_cast<float>(grounded_size)) <= */
+            /*     ratio) { */
+            if (grounded_size - in_init < min_grounded_size) {
+              min_grounded_size = grounded_size - in_init;
+              to_ground.clear();
+              to_ground.reserve(mapping.matches.size());
+              std::transform(mapping.matches.begin(), mapping.matches.end(),
+                             std::back_inserter(to_ground),
+                             [](const auto &m) { return m.first; });
             }
+            /* } */
           } else {
-            if (static_cast<float>(in_init) /
-                    static_cast<float>(grounded_size) <=
-                ratio) {
-              if (in_init < min_grounded_size) {
-                min_grounded_size = in_init;
-                to_ground.clear();
-                to_ground.reserve(mapping.matches.size());
-                std::transform(mapping.matches.begin(), mapping.matches.end(),
-                               std::back_inserter(to_ground),
-                               [](const auto &m) { return m.first; });
-              }
+            /* if (static_cast<float>(in_init) / */
+            /*         static_cast<float>(grounded_size) <= */
+            /*     ratio) { */
+            if (in_init < min_grounded_size) {
+              min_grounded_size = in_init;
+              to_ground.clear();
+              to_ground.reserve(mapping.matches.size());
+              std::transform(mapping.matches.begin(), mapping.matches.end(),
+                             std::back_inserter(to_ground),
+                             [](const auto &m) { return m.first; });
             }
+            /* } */
           }
         }
       }
@@ -73,9 +72,10 @@ Support ground_rigid(float ratio, Problem &problem) noexcept {
         number_arguments.push_back(support.get_constants_of_type(type).size());
       }
 
-      auto combinations{all_combinations(number_arguments)};
+      auto combination_iterator = CombinationIterator{number_arguments};
 
-      for (const auto &combination : combinations) {
+      while (!combination_iterator.end()) {
+        const auto &combination = *combination_iterator;
         model::Action new_action{action.name};
         new_action.arguments.reserve(to_ground.size());
         for (size_t i = 0; i < to_ground.size(); ++i) {
@@ -108,6 +108,7 @@ Support ground_rigid(float ratio, Problem &problem) noexcept {
           new_action.preconditions.push_back(std::move(new_predicate));
         }
         if (!valid) {
+          ++combination_iterator;
           continue;
         }
         for (const auto &predicate : action.effects) {
@@ -130,18 +131,17 @@ Support ground_rigid(float ratio, Problem &problem) noexcept {
         /* PRINT_DEBUG("Added action %s", */
         /*             model::to_string(new_action, problem).c_str()); */
         new_actions.push_back(std::move(new_action));
+        ++combination_iterator;
       }
     }
     problem.actions = std::move(new_actions);
     /* PRINT_DEBUG("This iteration:\n%s", model::to_string(problem).c_str()); */
     support.update();
   } while (found_rigid);
-  return support;
 }
 
-Support preprocess(Problem &problem) {
-  /* return Support{problem}; */
-  return ground_rigid(0.5, problem);
+void preprocess(Problem &problem, Support &support) {
+  ground_rigid(problem, support);
 }
 
 } // namespace model

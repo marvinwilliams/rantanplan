@@ -1,7 +1,8 @@
 #ifndef IPASIR_SOLVER_HPP
 #define IPASIR_SOLVER_HPP
 
-#include "solver.hpp"
+#include "sat/solver.hpp"
+#include "sat/model.hpp"
 
 extern "C" {
 #include "ipasir.h"
@@ -16,11 +17,13 @@ namespace sat {
 
 class IpasirSolver : public Solver {
 public:
-  IpasirSolver() : handle_{ipasir_init()}, num_vars{0} {
+  IpasirSolver() noexcept : handle_{ipasir_init()}, num_vars{0} {
     ipasir_set_learn(handle_, NULL, 0, NULL);
   }
 
-  IpasirSolver &operator<<(int i) {
+  ~IpasirSolver() noexcept { ipasir_release(handle_); }
+
+  IpasirSolver &operator<<(int i) noexcept {
     ipasir_add(handle_, i);
     if (static_cast<unsigned int>(std::abs(i)) > num_vars) {
       num_vars = static_cast<unsigned int>(std::abs(i));
@@ -28,9 +31,9 @@ public:
     return *this;
   }
 
-  void assume(int i) { ipasir_assume(handle_, i); }
+  void assume(int i) noexcept { ipasir_assume(handle_, i); }
 
-  std::optional<Model> solve(std::chrono::milliseconds timeout) {
+  std::optional<Model> solve(std::chrono::milliseconds timeout) noexcept {
     using clock = std::chrono::steady_clock;
     auto end_time = clock::now() + timeout;
     if (timeout != timeout.zero()) {
@@ -55,8 +58,6 @@ public:
     }
     return std::nullopt;
   }
-
-  ~IpasirSolver() { ipasir_release(handle_); }
 
 private:
   void *handle_;

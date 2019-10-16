@@ -23,6 +23,8 @@
 
 namespace encoding {
 
+extern logging::Logger logger;
+
 class ForeachEncoder : public Encoder {
 
 public:
@@ -44,6 +46,11 @@ public:
   explicit ForeachEncoder(model::Support &support) : Encoder{support} {}
 
   void plan(const Config &config) override {
+    auto solver = get_solver(config);
+    if (!solver) {
+      PRINT_ERROR("Unknown solver type \'%s\'", config.encoder.c_str());
+    }
+
     if (std::any_of(support_.get_problem().goal.begin(),
                     support_.get_problem().goal.end(), [this](const auto &p) {
                       return support_.is_rigid(p.definition) &&

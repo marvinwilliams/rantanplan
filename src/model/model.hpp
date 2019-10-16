@@ -189,7 +189,7 @@ protected:
 };
 
 struct Problem : ProblemBase {
-  Problem(ProblemHeader header) : header{std::move(header)} {}
+  explicit Problem(ProblemHeader header) : header{std::move(header)} {}
 
   ProblemHeader header;
   std::vector<Action> actions;

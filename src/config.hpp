@@ -10,8 +10,11 @@ struct Config {
   std::string problem_file;
 
   // Planning
+  bool preprocess = true;
   std::string planner = "foreach";
+  std::string solver = "ipasir";
   std::string plan_output_file = "";
+  unsigned int max_steps = 0; // 0: Infinity
 
   // Logging
   logging::Level log_level =

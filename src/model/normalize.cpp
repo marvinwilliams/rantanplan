@@ -12,7 +12,7 @@ namespace model {
 
 logging::Logger normalize_logger{"Normalize"};
 
-Condition normalize_condition(const Condition &condition) {
+Condition normalize_condition(const Condition &condition) noexcept {
   const auto junction = std::get_if<Junction>(&condition);
   if (junction == nullptr) {
     return condition;
@@ -77,7 +77,7 @@ Condition normalize_condition(const Condition &condition) {
   return new_junction;
 }
 
-std::vector<PredicateEvaluation> to_list(const Condition &condition) {
+std::vector<PredicateEvaluation> to_list(const Condition &condition) noexcept {
   std::vector<PredicateEvaluation> list;
   const auto junction = std::get_if<Junction>(&condition);
   if (junction) {
@@ -93,7 +93,7 @@ std::vector<PredicateEvaluation> to_list(const Condition &condition) {
   return list;
 }
 
-std::vector<Action> normalize_action(const AbstractAction &action) {
+std::vector<Action> normalize_action(const AbstractAction &action) noexcept {
   std::vector<Action> new_actions;
 
   const auto precondition = normalize_condition(action.precondition);
@@ -130,16 +130,18 @@ std::vector<Action> normalize_action(const AbstractAction &action) {
   return new_actions;
 }
 
-Problem normalize(const AbstractProblem &abstract_problem) {
+Problem normalize(const AbstractProblem &abstract_problem) noexcept {
   Problem problem{abstract_problem.header};
   problem.types = abstract_problem.types;
   problem.constants = abstract_problem.constants;
   problem.predicates = abstract_problem.predicates;
 
   for (auto &action : abstract_problem.actions) {
-    LOG_DEBUG(normalize_logger, "Normalizing action \'%s\'...", action.name.c_str());
+    LOG_DEBUG(normalize_logger, "Normalizing action \'%s\'...",
+              action.name.c_str());
     auto new_actions = normalize_action(action);
-    LOG_DEBUG(normalize_logger, "resulted in %u STRIPS actions", new_actions.size());
+    LOG_DEBUG(normalize_logger, "resulted in %u STRIPS actions",
+              new_actions.size());
     problem.actions.insert(problem.actions.cend(), new_actions.begin(),
                            new_actions.end());
   }
