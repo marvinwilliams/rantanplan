@@ -51,7 +51,7 @@ inline bool operator!=(const Index<T> &first, const Index<T> &second) {
 }
 
 template <typename T> struct IndexHash {
-  size_t operator()(const Index<T> &index) {
+  size_t operator()(const Index<T> &index) const {
     return std::hash<size_t>{}(index.i);
   }
 };
@@ -81,6 +81,7 @@ struct Parameter {
       : name{name}, type{type} {}
   std::string name;
   TypePtr type;
+  std::optional<ConstantPtr> constant;
 };
 
 struct PredicateDefinition {
@@ -116,15 +117,48 @@ struct PredicateEvaluation {
   bool negated = false;
 };
 
+struct Junction {
+  enum class Connective { And, Or };
+  Connective connective;
+  std::vector<Condition> arguments;
+};
+
+struct Action {
+  explicit Action(const std::string &name) : name{name} {}
+  std::string name;
+  std::vector<Parameter> parameters;
+  std::vector<PredicateEvaluation> preconditions;
+  std::vector<PredicateEvaluation> effects;
+};
+
+inline bool operator==(const Action &first, const Action &second) {
+  return first.name == second.name;
+}
+
 struct GroundPredicate {
   GroundPredicate(PredicatePtr definition, std::vector<ConstantPtr> arguments)
       : definition{definition}, arguments(std::move(arguments)) {}
 
   GroundPredicate(const PredicateEvaluation &predicate) {
+    /* assert(is_grounded(predicate)); */
     definition = predicate.definition;
     arguments.reserve(predicate.arguments.size());
     for (const auto &argument : predicate.arguments) {
       arguments.push_back(std::get<ConstantPtr>(argument));
+    }
+  }
+
+  GroundPredicate(const PredicateEvaluation &predicate, const Action &action) {
+    /* assert(is_grounded(predicate, action)); */
+    definition = predicate.definition;
+    arguments.reserve(predicate.arguments.size());
+    for (const auto &argument : predicate.arguments) {
+      if (const ConstantPtr *p = std::get_if<ConstantPtr>(&argument)) {
+        arguments.push_back(*p);
+      } else {
+        arguments.push_back(
+            *(action.parameters[std::get<ParameterPtr>(argument)].constant));
+      }
     }
   }
 
@@ -147,25 +181,6 @@ struct GroundPredicateHash {
     return hash;
   }
 };
-
-struct Junction {
-  enum class Connective { And, Or };
-  Connective connective;
-  std::vector<Condition> arguments;
-};
-
-struct Action {
-  explicit Action(const std::string &name) : name{name} {}
-  std::string name;
-  std::vector<Parameter> parameters;
-  std::vector<PredicateEvaluation> preconditions;
-  std::vector<PredicateEvaluation> effects;
-  std::vector<std::pair<size_t, ConstantPtr>> arguments;
-};
-
-inline bool operator==(const Action &first, const Action &second) {
-  return first.name == second.name;
-}
 
 struct ProblemHeader {
   std::string domain_name;
@@ -190,7 +205,6 @@ protected:
 
 struct Problem : ProblemBase {
   explicit Problem(ProblemHeader header) : header{std::move(header)} {}
-
   ProblemHeader header;
   std::vector<Action> actions;
   std::vector<PredicateEvaluation> initial_state;

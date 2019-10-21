@@ -122,7 +122,9 @@ std::vector<Action> normalize_action(const AbstractAction &action) noexcept {
     }
   } else {
     Action new_action{action.name};
-    new_action.parameters = action.parameters;
+    std::transform(action.parameters.cbegin(), action.parameters.cend(),
+                   std::back_inserter(new_action.parameters),
+                   [](const auto &p) { return p; });
     new_action.preconditions = to_list(precondition);
     new_action.effects = effects;
     new_actions.push_back(std::move(new_action));

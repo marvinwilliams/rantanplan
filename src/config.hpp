@@ -18,7 +18,7 @@ struct Config {
 
   // Logging
   logging::Level log_level =
-      DEBUG_MODE ? logging::Level::DEBUG : logging::Level::INFO;
+      DEBUG_MODE && DEBUG_LOG_ACTIVE ? logging::Level::DEBUG : logging::Level::INFO;
   bool log_parser = false;
   bool log_normalize = false;
   bool log_support = false;

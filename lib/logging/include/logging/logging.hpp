@@ -1,6 +1,8 @@
 #ifndef LOGGING_HPP
 #define LOGGING_HPP
 
+#include "build_config.hpp"
+
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -11,11 +13,7 @@ namespace logging {
 enum class Level { ERROR, WARN, INFO, DEBUG };
 
 inline constexpr bool has_debug_log() noexcept {
-#ifdef DEBUG_LOG
-  return true;
-#else
-  return false;
-#endif
+  return DEBUG_LOG_ACTIVE;
 }
 
 inline constexpr const char *level_name(Level level) noexcept {

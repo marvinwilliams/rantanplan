@@ -10,27 +10,29 @@
 #include <variant>
 #include <vector>
 
-namespace planning {
+namespace encoding {
 
-  struct ActionVariable {
-    model::ActionPtr action_ptr;
-  };
+extern logging::Logger logger;
 
-  struct PredicateVariable {
-    model::GroundPredicatePtr predicate_ptr;
-    bool this_step;
-  };
+struct ActionVariable {
+  model::ActionPtr action_ptr;
+};
 
-  struct ParameterVariable {
-    model::ActionPtr action_ptr;
-    size_t parameter_index;
-    size_t constant_index;
-  };
+struct PredicateVariable {
+  model::GroundPredicatePtr predicate_ptr;
+  bool this_step;
+};
 
-  struct GlobalParameterVariable {
-    size_t parameter_index;
-    size_t constant_index;
-  };
+struct ParameterVariable {
+  model::ActionPtr action_ptr;
+  size_t parameter_index;
+  size_t constant_index;
+};
+
+struct GlobalParameterVariable {
+  size_t parameter_index;
+  size_t constant_index;
+};
 
 class Encoder {
 
@@ -43,7 +45,7 @@ public:
   explicit Encoder() : solver_{std::make_unique<sat::IpasirSolver>()} {}
   virtual ~Encoder() = default;
 
-  void encode() {
+  void encode(const model::Problem &problem) {
     generate_formula_();
     init_vars_();
   }
@@ -60,6 +62,6 @@ private:
   virtual void init_vars_() = 0;
 };
 
-} // namespace planning
+} // namespace encoding
 
 #endif /* end of include guard: ENCODING_HPP */

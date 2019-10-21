@@ -86,8 +86,14 @@ std::string to_string(const PredicateEvaluation &predicate,
     if (std::holds_alternative<ConstantPtr>(*it)) {
       ss << problem.constants[std::get<ConstantPtr>(*it)].name;
     } else {
+      auto parameter_ptr = std::get<ParameterPtr>(*it);
       /* ss << '?' << action.parameters[std::get<ParameterPtr>(*it)].name; */
-      ss << action.parameters[std::get<ParameterPtr>(*it)].name;
+      if (action.parameters[parameter_ptr].constant) {
+        ss << problem.constants[*(action.parameters[parameter_ptr].constant)]
+                  .name;
+      } else {
+        ss << action.parameters[parameter_ptr].name;
+      }
     }
   }
   ss << ')';
@@ -213,10 +219,14 @@ std::string to_string(const Action &action, const ProblemBase &problem) {
     if (it != action.parameters.cbegin()) {
       ss << ", ";
     }
-    /* ss << '?' << it->name; */
-    ss << it->name;
-    if (it->type != 0) {
-      ss << " - " << problem.types[it->type].name;
+    if (it->constant) {
+      ss << problem.constants[*(it->constant)].name;
+    } else {
+      /* ss << '?' << it->name; */
+      ss << it->name;
+      if (it->type != 0) {
+        ss << " - " << problem.types[it->type].name;
+      }
     }
   }
   ss << ')' << '\n';

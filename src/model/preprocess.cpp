@@ -77,12 +77,10 @@ void ground_rigid(Problem &problem, Support &support) noexcept {
       while (!combination_iterator.end()) {
         const auto &combination = *combination_iterator;
         model::Action new_action{action.name};
-        new_action.arguments.reserve(to_ground.size());
         for (size_t i = 0; i < to_ground.size(); ++i) {
           auto type = action.parameters[to_ground[i]].type;
-          new_action.arguments.emplace_back(
-              to_ground[i],
-              support.get_constants_of_type(type)[combination[i]]);
+          new_action.parameters.(to_ground[i], support.get_constants_of_type(
+                                                   type)[combination[i]]);
         }
         bool valid = true;
         for (const auto &predicate : action.preconditions) {
@@ -141,6 +139,11 @@ void ground_rigid(Problem &problem, Support &support) noexcept {
 }
 
 void preprocess(Problem &problem, Support &support) {
+  for (auto a = problem.actions.begin(); a != problem.actions.end(); ++a) {
+    if (!support.simplify_action(*a)) {
+      problem.actions.erase(a);
+    }
+  }
   ground_rigid(problem, support);
 }
 

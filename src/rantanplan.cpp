@@ -1,17 +1,18 @@
 #include "build_config.hpp"
 #include "config.hpp"
 /* #include "encoding/encoding.hpp" */
-/* #include "encoding/foreach.hpp" */
+#include "encoding/foreach.hpp"
 /* #include "encoding/sequential_1.hpp" */
 /* #include "encoding/sequential_2.hpp" */
 /* #include "encoding/sequential_3.hpp" */
 #include "lexer/lexer_new.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
-#include "model/preprocess.hpp"
 #include "model/to_string.hpp"
 #include "options/options.hpp"
 #include "pddl/ast.hpp"
+#include "model/preprocess.hpp"
+#include "model/support.hpp"
 #include "pddl/parser.hpp"
 #include "pddl/pddl_visitor.hpp"
 #include "pddl/tokens.hpp"
@@ -26,8 +27,9 @@
 void print_version() noexcept {
   char hostname[HOST_NAME_MAX];
   gethostname(hostname, HOST_NAME_MAX);
-  PRINT_INFO("Rantanplan v%u.%u %srunning on %s", VERSION_MAJOR, VERSION_MINOR,
-             DEBUG_MODE ? "debug build " : "", hostname);
+  PRINT_INFO("Rantanplan v%u.%u %s%srunning on %s", VERSION_MAJOR,
+             VERSION_MINOR, DEBUG_MODE ? "debug build " : "",
+             DEBUG_LOG_ACTIVE ? "with debug log " : "", hostname);
 }
 
 options::Options set_options(const std::string &name) {
@@ -78,7 +80,6 @@ Config get_config(const options::Options &options) {
 
 std::unique_ptr<planning::Planner> get_planner(const Config &config,
                                                const model::Problem &problem) {
-  std::unique_ptr<planning::Planner> planner;
   if (config.planner == "seq1") {
     PRINT_INFO("Using sequential encoding 1");
     /* planner = */
@@ -99,11 +100,11 @@ std::unique_ptr<planning::Planner> get_planner(const Config &config,
     /*         problem); */
   } else if (config.planner == "foreach") {
     PRINT_INFO("Using foreach encoding");
-    /* planner =
-     * std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>( */
-    /*     problem); */
+    /* auto t = planning::SatPlanner<encoding::ForeachEncoder>{problem}; */
+    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+        problem);
   }
-  return planner;
+  return std::unique_ptr<planning::Planner>{};
 }
 
 int main(int argc, char *argv[]) {
@@ -179,13 +180,30 @@ int main(int argc, char *argv[]) {
   auto problem = model::normalize(*abstract_problem);
   PRINT_DEBUG("Normalized problem:\n%s", model::to_string(problem).c_str());
 
+  if (config.planner == "preprocess") {
+    auto support = model::Support{problem};
+    model::preprocess(problem, support);
+    PRINT_INFO("Preprocessing successful");
+    PRINT_DEBUG("Preprocessed problem:\n%s", model::to_string(problem).c_str());
+    return 0;
+  }
+
   auto planner = get_planner(config, problem);
   if (!planner) {
     PRINT_ERROR("Unknown planner type \'%s\'", config.planner.c_str());
     return 1;
   }
 
-  planner->plan(config);
+  auto plan = planner->plan(config);
+  if (plan.empty()) {
+    return 1;
+  }
+  if (config.plan_output_file == "") {
+    std::cout << planner->to_string(plan) << std::endl;
+  } else {
+    std::ofstream s{config.plan_output_file};
+    s << planner->to_string(plan);
+  }
 
   return 0;
 }
