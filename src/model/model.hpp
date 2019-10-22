@@ -50,11 +50,15 @@ inline bool operator!=(const Index<T> &first, const Index<T> &second) {
   return !(first == second);
 }
 
-template <typename T> struct IndexHash {
-  size_t operator()(const Index<T> &index) const {
+namespace hash {
+
+template <typename T> struct Index {
+  size_t operator()(const ::model::Index<T> &index) const {
     return std::hash<size_t>{}(index.i);
   }
 };
+
+}
 
 struct Type;
 struct Constant;
@@ -172,15 +176,19 @@ inline bool operator==(const GroundPredicate &first,
          first.arguments == second.arguments;
 }
 
-struct GroundPredicateHash {
-  size_t operator()(const GroundPredicate &predicate) const noexcept {
-    size_t hash = IndexHash<PredicateDefinition>{}(predicate.definition);
+namespace hash {
+
+struct GroundPredicate {
+  size_t operator()(const ::model::GroundPredicate &predicate) const noexcept {
+    size_t hash = Index<PredicateDefinition>{}(predicate.definition);
     for (ConstantPtr p : predicate.arguments) {
-      hash ^= IndexHash<Constant>{}(p);
+      hash ^= Index<Constant>{}(p);
     }
     return hash;
   }
 };
+
+}
 
 struct ProblemHeader {
   std::string domain_name;
@@ -232,7 +240,7 @@ struct State {
 // A relaxed state holds the initial state as well as each predicate which is
 // either present or not
 struct RelaxedState {
-  std::unordered_set<GroundPredicate, GroundPredicateHash> predicates;
+  std::unordered_set<GroundPredicate, hash::GroundPredicate> predicates;
   State initial_state;
 };
 

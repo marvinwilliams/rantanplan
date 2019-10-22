@@ -1,13 +1,17 @@
 #ifndef PREPROCESS_HPP
 #define PREPROCESS_HPP
 
+#include "config.hpp"
 #include "model/model.hpp"
 #include "model/support.hpp"
+#include "logging/logging.hpp"
 
-namespace model {
+namespace preprocess {
 
-void preprocess(Problem &problem, Support &support);
+extern logging::Logger logger;
 
-} // namespace model
+void preprocess(model::Problem &problem, support::Support &support, const Config& config);
+
+} // namespace preprocess
 
 #endif /* end of include guard: PREPROCESS_HPP */

@@ -24,16 +24,20 @@ public:
 
   static std::unique_ptr<sat::Solver>
   get_solver(const Config &config) noexcept {
-    if (config.solver == "ipasir") {
-      return std::make_unique<sat::IpasirSolver>();
+    switch(config.solver) {
+      case Config::Solver::Ipasir:
+        return std::make_unique<sat::IpasirSolver>();
+      default:
+        return std::unique_ptr<sat::Solver>{};
     }
-    return std::unique_ptr<sat::Solver>{};
   }
 
   Plan plan(const Config &config) noexcept final {
-    if (config.preprocess) {
+    if (config.preprocess != Config::Preprocess::None) {
       PRINT_INFO("Preprocessing...");
-      model::preprocess(problem_, support_);
+      preprocess::preprocess(problem_, support_, config);
+      PRINT_DEBUG("Preprocessed problem:\n%s",
+                model::to_string(problem_).c_str());
     }
     if (std::any_of(support_.get_problem().goal.begin(),
                     support_.get_problem().goal.end(), [this](const auto &p) {
@@ -44,7 +48,7 @@ public:
       return {};
     }
     PRINT_INFO("Encoding...");
-    Encoding encoding{support_};
+    Encoding encoding{support_, config};
     return solve(config, encoding);
   }
 
@@ -62,10 +66,7 @@ protected:
 private:
   static Plan solve(const Config &config, const Encoding &encoding) noexcept {
     auto solver = get_solver(config);
-    if (!solver) {
-      PRINT_ERROR("Unknown solver type \'%s\'", config.planner.c_str());
-      return {};
-    }
+    assert(solver);
     *solver << static_cast<int>(Encoding::SAT) << 0;
     *solver << -static_cast<int>(Encoding::UNSAT) << 0;
     LOG_DEBUG(logger, "Initial state");
@@ -120,7 +121,7 @@ private:
     }
   }
 
-  model::Support support_;
+  support::Support support_;
 };
 
 } // namespace planning

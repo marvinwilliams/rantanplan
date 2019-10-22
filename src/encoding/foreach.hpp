@@ -47,12 +47,16 @@ public:
     size_t constant_index;
   };
 
+  struct HelperVariable {
+    size_t value;
+  };
+
   using Variable =
-      std::variant<ActionVariable, PredicateVariable, ParameterVariable>;
+      std::variant<ActionVariable, PredicateVariable, ParameterVariable, HelperVariable>;
   using Formula = sat::Formula<Variable>;
   using Literal = Formula::Literal;
 
-  explicit ForeachEncoder(const model::Support &support) noexcept
+  explicit ForeachEncoder(const support::Support &support, const Config& config) noexcept
       : support_{support} {
     encode_initial_state();
     encode_actions();
@@ -63,8 +67,8 @@ public:
     /* forbid_assignments(); */
     interference(false);
     interference(true);
-    frame_axioms(false);
-    frame_axioms(true);
+    frame_axioms(false, config.dnf_threshold);
+    frame_axioms(true, config.dnf_threshold);
     assume_goal();
     init_sat_vars();
   }
@@ -87,6 +91,8 @@ public:
                p) {
       variable =
           parameters_[p->action_ptr][p->parameter_index][p->constant_index];
+    } else if (const HelperVariable *p = std::get_if<HelperVariable>(&literal.variable)) {
+      variable = helpers_[p->value];
     } else {
       assert(false);
     }
@@ -174,12 +180,16 @@ private:
             support_.get_constants_of_type(parameter.type).size();
         std::vector<Variable> all_arguments;
         all_arguments.reserve(number_arguments);
+        auto action_var = ActionVariable{action_ptr};
         for (size_t constant_index = 0; constant_index < number_arguments;
              ++constant_index) {
-          all_arguments.emplace_back(
-              ParameterVariable{action_ptr, parameter_pos, constant_index});
+          auto parameter_var = ParameterVariable{action_ptr, parameter_pos, constant_index};
+          universal_clauses_ << Literal{parameter_var, true};
+          universal_clauses_ << Literal{action_var, false};
+          universal_clauses_ << sat::EndClause;
+          all_arguments.push_back(parameter_var);
         }
-        universal_clauses_ << Literal{ActionVariable{action_ptr}, true};
+        universal_clauses_ << Literal{action_var, true};
         for (const auto &argument : all_arguments) {
           universal_clauses_ << Literal{argument, false};
         }
@@ -199,11 +209,14 @@ private:
            support_.get_ground_predicates(predicate_ptr)) {
         for (const auto &[action_ptr, assignment] :
              predicate_support[ground_predicate_ptr]) {
+          if (assignment.arguments.empty()) {
           formula << Literal{ActionVariable{action_ptr}, true};
-          for (auto [parameter_index, constant_index] : assignment.arguments) {
-            formula << Literal{
-                ParameterVariable{action_ptr, parameter_index, constant_index},
-                true};
+          } else {
+            for (auto [parameter_index, constant_index] : assignment.arguments) {
+              formula << Literal{
+                  ParameterVariable{action_ptr, parameter_index, constant_index},
+                  true};
+            }
           }
           formula << Literal{PredicateVariable{predicate_ptr,
                                                ground_predicate_ptr,
@@ -246,21 +259,27 @@ private:
             if (p_action_ptr == e_action_ptr) {
               continue;
             }
-            universal_clauses_ << Literal{ActionVariable{p_action_ptr}, true};
-            universal_clauses_ << Literal{ActionVariable{e_action_ptr}, true};
-            for (auto [parameter_index, constant_index] :
-                 p_assignment.arguments) {
-              universal_clauses_
-                  << Literal{ParameterVariable{p_action_ptr, parameter_index,
-                                               constant_index},
-                             true};
+            if (p_assignment.arguments.empty()) {
+              universal_clauses_ << Literal{ActionVariable{p_action_ptr}, true};
+            } else {
+              for (auto [parameter_index, constant_index] :
+                   p_assignment.arguments) {
+                universal_clauses_
+                    << Literal{ParameterVariable{p_action_ptr, parameter_index,
+                                                 constant_index},
+                               true};
+              }
             }
-            for (auto [parameter_index, constant_index] :
-                 e_assignment.arguments) {
-              universal_clauses_
-                  << Literal{ParameterVariable{e_action_ptr, parameter_index,
-                                               constant_index},
-                             true};
+            if (e_assignment.arguments.empty()) {
+              universal_clauses_ << Literal{ActionVariable{e_action_ptr}, true};
+            } else {
+              for (auto [parameter_index, constant_index] :
+                   e_assignment.arguments) {
+                universal_clauses_
+                    << Literal{ParameterVariable{e_action_ptr, parameter_index,
+                                                 constant_index},
+                               true};
+              }
             }
             universal_clauses_ << sat::EndClause;
           }
@@ -269,28 +288,50 @@ private:
     }
   }
 
-  void frame_axioms(bool is_negated) {
+  void frame_axioms(bool is_negated, unsigned int dnf_threshold) {
+    num_helpers_ = 0;
     for (model::PredicatePtr predicate_ptr = 0;
-         predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
+        predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
       for (const auto &[ground_predicate, ground_predicate_ptr] :
-           support_.get_ground_predicates(predicate_ptr)) {
+          support_.get_ground_predicates(predicate_ptr)) {
         Formula dnf;
         dnf << Literal{PredicateVariable{predicate_ptr, ground_predicate_ptr,
-                                         true},
-                       is_negated}
-            << sat::EndClause;
+          true},
+            is_negated}
+        << sat::EndClause;
         dnf << Literal{PredicateVariable{predicate_ptr, ground_predicate_ptr,
-                                         false},
-                       !is_negated}
-            << sat::EndClause;
+          false},
+            !is_negated}
+        << sat::EndClause;
+        const auto& predicate_support = support_.get_predicate_support(predicate_ptr, is_negated,
+            true)[ground_predicate_ptr];
+        bool need_indirection =
+          static_cast<size_t>(std::count_if(predicate_support.begin(),
+                predicate_support.end(), [](const auto& s) { return
+                s.second.arguments.size() > 1;})) > dnf_threshold;
+
         for (const auto &[action_ptr, assignment] :
-             support_.get_predicate_support(predicate_ptr, is_negated,
-                                            true)[ground_predicate_ptr]) {
-          dnf << Literal{ActionVariable{action_ptr}, false};
-          for (auto [parameter_index, constant_index] : assignment.arguments) {
-            dnf << Literal{
-                ParameterVariable{action_ptr, parameter_index, constant_index},
-                false};
+            predicate_support) {
+          if (assignment.arguments.empty()) {
+            dnf << Literal{ActionVariable{action_ptr}, false};
+          } else {
+            if (assignment.arguments.size() == 1 || !need_indirection) {
+              for (auto [parameter_index, constant_index] : assignment.arguments) {
+                dnf << Literal{
+                  ParameterVariable{action_ptr, parameter_index, constant_index},
+                    false};
+              }
+            } else {
+              for (auto [parameter_index, constant_index] : assignment.arguments) {
+                transition_clauses_ << Literal{
+                  ParameterVariable{action_ptr, parameter_index, constant_index},
+                    true};
+              }
+              transition_clauses_ << Literal{HelperVariable{num_helpers_}, false};
+              transition_clauses_ << sat::EndClause;
+              dnf << Literal{HelperVariable{num_helpers_}, false};
+              ++num_helpers_;
+            }
           }
           dnf << sat::EndClause;
         }
@@ -361,15 +402,21 @@ private:
         }
       }
     }
+    helpers_.resize(num_helpers_);
+    for (size_t i = 0; i < num_helpers_; ++i) {
+      helpers_[i] = variable_counter++;
+    }
     num_vars_ = variable_counter - 3;
     PRINT_INFO("Representation uses %u variables", num_vars_);
   }
 
-  const model::Support &support_;
+  const support::Support &support_;
   size_t num_vars_;
+  size_t num_helpers_;
   std::vector<std::vector<unsigned int>> predicates_;
   std::vector<unsigned int> actions_;
   std::vector<std::vector<std::vector<unsigned int>>> parameters_;
+  std::vector<unsigned int> helpers_;
   Formula initial_state_;
   Formula universal_clauses_;
   Formula transition_clauses_;

@@ -8,11 +8,11 @@
 #include <cassert>
 #include <variant>
 
-namespace model {
-
 namespace support {
 
 logging::Logger logger{"Support"};
+
+using namespace model;
 
 ArgumentMapping::ArgumentMapping(
     const std::vector<Parameter> &parameters,
@@ -201,8 +201,28 @@ void Support::set_predicate_support() noexcept {
       }
     }
   }
-} // namespace support
+}
+
+bool Support::simplify_action(model::Action &action) noexcept {
+  bool valid = true;
+  auto end =
+      std::remove_if(action.preconditions.begin(), action.preconditions.end(),
+                     [&](const auto &p) {
+                       if (is_grounded(p, action)) {
+                         model::GroundPredicate ground_predicate{p, action};
+                         if (is_rigid(ground_predicate, p.negated)) {
+                           return true;
+                         } else if (is_rigid(ground_predicate, !p.negated)) {
+                           valid = false;
+                         }
+                       }
+                       return false;
+                     });
+  if (!valid) {
+    return false;
+  }
+  action.preconditions.erase(end, action.preconditions.end());
+  return true;
+}
 
 } // namespace support
-
-} // namespace model
