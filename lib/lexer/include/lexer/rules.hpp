@@ -3,7 +3,6 @@
 
 #include "lexer/char_provider.hpp"
 #include "lexer/literal_class.hpp"
-#include "lexer/rule_matcher.hpp"
 #include "lexer/token.hpp"
 
 #include <string>
@@ -63,7 +62,7 @@ template <char c> struct ILiteral : basic_rule {
     return false;
   }
 
-  static constexpr auto printable_name = "<ci_literal>";
+  static constexpr auto printable_name = "<i_literal>";
 };
 
 struct Whitespace : basic_rule {
@@ -184,7 +183,7 @@ template <char... cs> struct IWord : basic_rule {
     return false;
   }
 
-  static constexpr auto printable_name = "<ci_word>";
+  static constexpr auto printable_name = "<i_word>";
 };
 
 template <size_t N> struct Any : basic_rule {

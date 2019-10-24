@@ -5,7 +5,7 @@
 /* #include "encoding/sequential_1.hpp" */
 /* #include "encoding/sequential_2.hpp" */
 /* #include "encoding/sequential_3.hpp" */
-#include "lexer/lexer_new.hpp"
+#include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
 #include "model/to_string.hpp"
@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
   logging::default_appender.set_level(config.log_level);
 
   if (config.log_parser) {
-    pddl::logger.add_appender(logging::default_appender);
+    pddl::Parser::logger.add_appender(logging::default_appender);
   }
   if (config.log_normalize) {
     model::normalize_logger.add_appender(logging::default_appender);
@@ -154,7 +154,9 @@ int main(int argc, char *argv[]) {
   }
 
   print_version();
+
   std::unique_ptr<model::AbstractProblem> abstract_problem;
+
   try {
     PRINT_INFO("Parsing problem...");
     pddl::Parser parser;

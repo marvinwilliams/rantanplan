@@ -11,12 +11,12 @@
 
 namespace planning {
 
-extern logging::Logger logger;
-
 using Plan = std::vector<model::Action>;
 
 class Planner {
 public:
+  static logging::Logger logger;
+
   explicit Planner(const model::Problem &problem) : problem_{problem} {}
   explicit Planner(model::Problem &&problem) : problem_{std::move(problem)} {}
 

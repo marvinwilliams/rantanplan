@@ -1,166 +1,152 @@
 #ifndef LEXER_HPP
 #define LEXER_HPP
 
+#include "lexer/char_provider.hpp"
 #include "lexer/lexer_exception.hpp"
 #include "lexer/lexer_traits.hpp"
+#include "lexer/literal_class.hpp"
 #include "lexer/location.hpp"
-#include "lexer/rule_set.hpp"
+#include "lexer/rules.hpp"
 
-#include <cctype>
-#include <iterator>
+#include <cassert>
+#include <algorithm>
 #include <sstream>
-#include <string>
+#include <type_traits>
 #include <variant>
 
 namespace lexer {
 
-template <typename Rules, typename Traits = LexerTraits> class Lexer {
+namespace detail {
+
+struct DefaultAction {};
+
+template <typename, typename, typename = void>
+struct has_action : std::false_type {};
+
+template <typename Token, typename Action>
+struct has_action<Token, Action,
+                  std::void_t<decltype(Action::apply(std::declval<char *>(),
+                                                     std::declval<char *>(),
+                                                     std::declval<Token>()))>>
+    : std::true_type {};
+
+template <typename Token, typename Action>
+constexpr inline bool has_action_v = has_action<Token, Action, void>::value;
+
+} // namespace detail
+
+template <typename RuleSet, typename Action = detail::DefaultAction,
+          typename Traits = LexerTraits>
+class Lexer {
 public:
-  using char_type = char;
-  using Token = typename Rules::Token;
+  using Token = typename RuleSet::Token;
 
-  // This iterator is used to extract the tokens. New tokens will be read when
-  // incrementing the iterator.
-  template <typename CharIterator> class TokenIterator {
-  public:
-    using iterator_category = std::input_iterator_tag;
-    using value_type = Token;
-    using difference_type = std::ptrdiff_t;
-    using pointer = const Token *;
-    using reference = const Token &;
-
-    friend class Lexer;
-
-    TokenIterator(Lexer *lexer, const CharIterator &from,
-                  const CharIterator &to, const CharIterator &end,
-                  const value_type &token, const Location &location)
-        : lexer_{lexer}, from_{from}, to_{to}, end_{end}, token_{token},
-          location_{location} {}
-
-    TokenIterator &operator++() {
-      lexer_->get_next_token(*this);
-      return *this;
-    }
-
-    TokenIterator operator++(int) {
-      TokenIterator old = *this;
-      lexer_->get_next_token(*this);
-      return old;
-    }
-
-    bool operator==(const TokenIterator &other) const {
-      return lexer_ == other.lexer_ && from_ == other.from_ &&
-             to_ == other.to_ && end_ == other.end_;
-    }
-
-    bool operator!=(const TokenIterator &other) const {
-      return !(*this == other);
-    }
-
-    template <typename TokenType> bool has_type() const {
-      return std::holds_alternative<TokenType>(token_);
-    }
-
-    std::string to_string() const {
-      return std::visit(
-          [](const auto &t) { return std::string(t.printable_name); }, token_);
-    }
-
-    reference token() const { return token_; }
-    const Location &location() const { return location_; }
-    reference operator*() const { return token(); }
-    bool end() const { return from_ == end_; }
-
-  private:
-    Lexer *lexer_;
-    CharIterator from_;
-    CharIterator to_;
-    const CharIterator end_;
-    value_type token_;
-    Location location_;
-  };
-
-  Lexer() {}
-
-  template <typename CharIterator>
-  TokenIterator<CharIterator> lex(const std::string &name, CharIterator begin,
-                                  CharIterator end) {
-    TokenIterator<CharIterator> iterator{this, begin,        begin,
-                                         end,  ErrorToken{}, Location{name}};
-    get_next_token(iterator);
-    return iterator;
+  explicit Lexer(const std::string &name, char *begin, char *end)
+      : name_{name}, location_{name_}, begin_{begin}, current_{begin},
+        end_{end} {
+    get_next_token();
   }
 
+  explicit Lexer() noexcept : Lexer{"", nullptr, nullptr} {}
+
+  void set_source(const std::string &name, char *begin, char *end) {
+    name_ = name;
+    location_ = Location{name_};
+    begin_ = begin;
+    current_ = begin;
+    end_ = end;
+    get_next_token();
+  }
+
+  std::string to_string() noexcept {
+    return std::visit(
+        [](const auto &t) { return std::string{t.printable_name}; }, token_);
+  }
+
+  template <typename TokenType> bool has_type() const noexcept {
+    return std::holds_alternative<TokenType>(token_);
+  }
+
+  const Location &location() const noexcept { return location_; }
+
+  bool at_end() const noexcept { return has_type<EndToken>(); }
+
+  template <typename TokenType> const TokenType &get() const {
+    return std::get<TokenType>(token_);
+  }
+
+  void next() { get_next_token(); }
+
 private:
-  template <typename CharIterator>
-  void get_next_token(TokenIterator<CharIterator> &token_iterator) {
+  void get_next_token() {
     // Skip blanks
-    while (token_iterator.to_ != token_iterator.end_) {
-      char_type current_char = *token_iterator.to_;
-      if (Traits::is_blank(current_char)) {
-        token_iterator.location_.advance_column();
-      } else if (Traits::is_newline(current_char)) {
-        token_iterator.location_.advance_line();
+    while (current_ != end_) {
+      char current_char = *current_;
+      if (LiteralClass::blank(current_char)) {
+        location_.advance_column();
+      } else if (LiteralClass::newline(current_char)) {
+        location_.advance_line();
       } else {
         break;
       }
-      token_iterator.to_++;
+      ++current_;
     }
-    token_iterator.from_ = token_iterator.to_;
-    token_iterator.location_.step();
+    location_.step();
 
-    token_iterator.token_ = ErrorToken{};
+    token_ = ErrorToken{};
 
-    // Check if end is reached
-    if (token_iterator.end()) {
+    if (current_ == end_) {
+      token_ = EndToken{};
       return;
     }
 
-    rules_.reset();
-    std::basic_string<char_type> current_string;
-    CharIterator current_iterator = token_iterator.to_;
-    Location current_location = token_iterator.location_;
-
-    // Read the next char until it cannot be part of any token
-    while (rules_.accepts() && current_iterator != token_iterator.end_) {
-      char_type current_char = std::tolower(*current_iterator);
-      if (Traits::end_at_newline && Traits::is_newline(current_char)) {
-        break;
-      }
-      if (Traits::end_at_blank && Traits::is_blank(current_char)) {
-        break;
-      }
-      rules_.next(current_char);
-      current_string.push_back(current_char);
-      current_location.advance_column();
-      if (Traits::is_newline(current_char)) {
-        current_location.advance_line();
-      }
-      if (!rules_.matching() && !rules_.accepts()) {
-        break;
-      }
-      current_iterator++;
-      if (rules_.matching()) {
-        token_iterator.to_ = current_iterator;
-        token_iterator.location_ = current_location;
-        token_iterator.token_ = rules_.get_token(current_string);
-      }
+    char *token_end = end_;
+    if (Traits::end_at_newline || Traits::end_at_blank) {
+      token_end = std::find_if(current_, end_, [](char c) {
+        return (Traits::end_at_newline && LiteralClass::newline(c)) ||
+               (Traits::end_at_blank && LiteralClass::blank(c));
+      });
     }
-    // If no rule matched and no rule accepts chars, emit an error
-    if (std::holds_alternative<ErrorToken>(token_iterator.token_)) {
-      token_iterator.from_ = token_iterator.end_;
-      token_iterator.to_ = token_iterator.end_;
-      token_iterator.location_ = current_location;
-      std::stringstream ss;
 
-      ss << "Could not match token: \'" << current_string << '\'';
+    CharProvider provider{current_, token_end};
+    auto result = RuleSet::match(provider);
+    auto next = current_ + (result.end - result.begin);
+
+    std::visit(
+        [this, next](auto &t) {
+          if constexpr (detail::has_action_v<decltype(t), Action>) {
+            Action::apply(current_, next, t);
+          }
+        },
+        result.token);
+
+    // If no rule matched and no rule accepts chars, emit an error
+    if (result.begin == result.end) {
+      assert(has_type<ErrorToken>());
+      std::stringstream ss;
+      ss << "Could not match token: \'" << *current_ << '\'';
+
+      current_ = end_;
+
       // Location is one off because of early exit
-      throw LexerException(current_location, std::move(ss).str());
+      throw LexerException(location_ + 1, std::move(ss).str());
+    }
+    token_ = std::move(result.token);
+    while (current_ != next) {
+      location_.advance_column();
+      if (LiteralClass::newline(*current_)) {
+        location_.advance_line();
+      }
+      ++current_;
     }
   }
 
-private:
-  Rules rules_;
+  Token token_ = ErrorToken{};
+  std::string name_;
+  Location location_;
+  char *begin_ = nullptr;
+  char *current_ = nullptr;
+  char *end_ = nullptr;
 };
 
 } // namespace lexer

@@ -1,6 +1,8 @@
 #ifndef CHAR_PROVIDER_HPP
 #define CHAR_PROVIDER_HPP
 
+#include <cstddef>
+
 namespace lexer {
 
 struct CharProvider {

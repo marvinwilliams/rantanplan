@@ -5,7 +5,8 @@
 #include <string>
 
 namespace planning {
-logging::Logger logger{"Planning"};
+
+logging::Logger Planner::logger{"Planning"};
 
 std::string Planner::to_string(const Plan &plan) const noexcept {
   std::stringstream ss;

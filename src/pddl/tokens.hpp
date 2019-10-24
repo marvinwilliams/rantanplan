@@ -1,7 +1,6 @@
 #ifndef TOKENS_HPP
 #define TOKENS_HPP
 
-#include "lexer/lexer_new.hpp"
 #include "lexer/rules.hpp"
 #include "lexer/token_set.hpp"
 
