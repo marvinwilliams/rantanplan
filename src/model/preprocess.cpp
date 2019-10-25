@@ -34,6 +34,11 @@ void preprocess(Problem &problem, support::Support &support, const Config& confi
     for (ActionPtr action_ptr = 0; action_ptr < problem.actions.size();
          ++action_ptr) {
       auto &action = problem.actions[action_ptr];
+      if (!support.simplify_action(action)) {
+        LOG_DEBUG(logger, "Action \'%s\' became unapplicable", action.name.c_str());
+        changed_actions = true;
+        continue;
+      }
       LOG_DEBUG(logger, "Ground action \'%s\'", action.name.c_str());
       size_t max_pruned_actions = 0;
       size_t min_new_actions = std::numeric_limits<size_t>::max();
