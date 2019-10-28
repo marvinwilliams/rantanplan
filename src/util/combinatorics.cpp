@@ -6,8 +6,9 @@
 #include <vector>
 
 CombinationIterator::CombinationIterator(
-    const std::vector<size_t> &list_sizes) noexcept
-    : list_sizes_{list_sizes}, current_combination_(list_sizes_.size()) {
+    std::vector<size_t> list_sizes) noexcept
+    : list_sizes_{std::move(list_sizes)},
+      current_combination_(list_sizes_.size()) {
   number_combinations_ = std::accumulate(
       list_sizes_.cbegin(), list_sizes_.cend(), 1ul, std::multiplies<>());
   if (number_combinations_ == 0) {

@@ -33,17 +33,17 @@ public:
   static logging::Logger logger;
 
   struct ActionVariable {
-    model::ActionPtr action_ptr;
+    model::ActionHandle action_handle;
   };
 
   struct PredicateVariable {
-    model::PredicatePtr predicate_ptr;
-    model::GroundPredicatePtr ground_predicate_ptr;
+    model::PredicateHandle predicate_handle;
+    model::GroundPredicateHandle ground_predicate_handle;
     bool this_step;
   };
 
   struct ParameterVariable {
-    model::ActionPtr action_ptr;
+    model::ActionHandle action_handle;
     size_t parameter_index;
     size_t constant_index;
   };
@@ -52,12 +52,13 @@ public:
     size_t value;
   };
 
-  using Variable =
-      std::variant<ActionVariable, PredicateVariable, ParameterVariable, HelperVariable>;
+  using Variable = std::variant<ActionVariable, PredicateVariable,
+                                ParameterVariable, HelperVariable>;
   using Formula = sat::Formula<Variable>;
   using Literal = Formula::Literal;
 
-  explicit ForeachEncoder(const support::Support &support, const Config& config) noexcept;
+  explicit ForeachEncoder(const support::Support &support,
+                          const Config &config) noexcept;
 
   int get_sat_var(Literal literal, unsigned int step) const;
   planning::Plan extract_plan(const sat::Model &model, unsigned int step) const
@@ -75,14 +76,13 @@ public:
 
   const auto &get_goal_clauses() const noexcept { return goal_; }
 
-
 private:
   void encode_initial_state() noexcept;
   void encode_actions();
   void parameter_implies_predicate(bool is_negated, bool is_effect);
   void interference(bool is_negated);
 
-  void frame_axioms(bool is_negated, unsigned int dnf_threshold);
+  void frame_axioms(bool is_negated, size_t dnf_threshold);
   void assume_goal();
   void init_sat_vars();
 

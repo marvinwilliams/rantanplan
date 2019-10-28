@@ -59,11 +59,11 @@ std::string to_string(const PredicateEvaluation &predicate,
     if (it != predicate.arguments.cbegin()) {
       ss << ", ";
     }
-    if (std::holds_alternative<ConstantPtr>(*it)) {
-      ss << problem.constants[std::get<ConstantPtr>(*it)].name;
+    if (std::holds_alternative<ConstantHandle>(*it)) {
+      ss << problem.constants[std::get<ConstantHandle>(*it)].name;
     } else {
-      /* ss << '?' << action.parameters[std::get<ParameterPtr>(*it)].name; */
-      ss << action.parameters[std::get<ParameterPtr>(*it)].name;
+      /* ss << '?' << action.parameters[std::get<ParameterHandle>(*it)].name; */
+      ss << action.parameters[std::get<ParameterHandle>(*it)].name;
     }
   }
   ss << ')';
@@ -83,16 +83,16 @@ std::string to_string(const PredicateEvaluation &predicate,
     if (it != predicate.arguments.cbegin()) {
       ss << ", ";
     }
-    if (std::holds_alternative<ConstantPtr>(*it)) {
-      ss << problem.constants[std::get<ConstantPtr>(*it)].name;
+    if (std::holds_alternative<ConstantHandle>(*it)) {
+      ss << problem.constants[std::get<ConstantHandle>(*it)].name;
     } else {
-      auto parameter_ptr = std::get<ParameterPtr>(*it);
-      /* ss << '?' << action.parameters[std::get<ParameterPtr>(*it)].name; */
-      if (action.parameters[parameter_ptr].constant) {
-        ss << problem.constants[*(action.parameters[parameter_ptr].constant)]
+      auto parameter_handle = std::get<ParameterHandle>(*it);
+      /* ss << '?' << action.parameters[std::get<ParameterHandle>(*it)].name; */
+      if (action.parameters[parameter_handle].constant) {
+        ss << problem.constants[*(action.parameters[parameter_handle].constant)]
                   .name;
       } else {
-        ss << action.parameters[parameter_ptr].name;
+        ss << action.parameters[parameter_handle].name;
       }
     }
   }
@@ -113,8 +113,8 @@ std::string to_string(const PredicateEvaluation &predicate,
     if (it != predicate.arguments.cbegin()) {
       ss << ", ";
     }
-    assert(std::holds_alternative<ConstantPtr>(*it));
-    ss << problem.constants[std::get<ConstantPtr>(*it)].name;
+    assert(std::holds_alternative<ConstantHandle>(*it));
+    ss << problem.constants[std::get<ConstantHandle>(*it)].name;
   }
   ss << ')';
   return ss.str();

@@ -3,23 +3,23 @@
 
 namespace encoding {
 
-  logging::Logger ForeachEncoder::logger{"Foreach"};
+logging::Logger ForeachEncoder::logger{"Foreach"};
 
-ForeachEncoder::ForeachEncoder(const support::Support &support, const Config& config) noexcept
+ForeachEncoder::ForeachEncoder(const support::Support &support,
+                               const Config &config) noexcept
     : support_{support} {
   if (config.log_encoding) {
     logger.add_appender(logging::default_appender);
   }
+  num_helpers_ = 0;
   encode_initial_state();
   encode_actions();
   parameter_implies_predicate(false, false);
   parameter_implies_predicate(false, true);
   parameter_implies_predicate(true, false);
   parameter_implies_predicate(true, true);
-  /* forbid_assignments(); */
   interference(false);
   interference(true);
-  num_helpers_ = 0;
   frame_axioms(false, config.dnf_threshold);
   frame_axioms(true, config.dnf_threshold);
   assume_goal();
@@ -28,14 +28,13 @@ ForeachEncoder::ForeachEncoder(const support::Support &support, const Config& co
 
 int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
   size_t variable = 0;
-  if (const ActionVariable *p =
-          std::get_if<ActionVariable>(&literal.variable);
+  if (const ActionVariable *p = std::get_if<ActionVariable>(&literal.variable);
       p) {
-    variable = actions_[p->action_ptr];
+    variable = actions_[p->action_handle];
   } else if (const PredicateVariable *p =
                  std::get_if<PredicateVariable>(&literal.variable);
              p) {
-    variable = predicates_[p->predicate_ptr][p->ground_predicate_ptr];
+    variable = predicates_[p->predicate_handle][p->ground_predicate_handle];
     if (!p->this_step && variable > UNSAT) {
       variable += static_cast<size_t>(num_vars_);
     }
@@ -43,8 +42,9 @@ int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
                  std::get_if<ParameterVariable>(&literal.variable);
              p) {
     variable =
-        parameters_[p->action_ptr][p->parameter_index][p->constant_index];
-  } else if (const HelperVariable *p = std::get_if<HelperVariable>(&literal.variable)) {
+        parameters_[p->action_handle][p->parameter_index][p->constant_index];
+  } else if (const HelperVariable *p =
+                 std::get_if<HelperVariable>(&literal.variable)) {
     variable = helpers_[p->value];
   } else {
     assert(false);
@@ -59,24 +59,23 @@ int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
          static_cast<int>(variable + step * num_vars_);
 }
 
-planning::Plan ForeachEncoder::extract_plan(const sat::Model &model, unsigned int step) const
-    noexcept {
+planning::Plan ForeachEncoder::extract_plan(const sat::Model &model,
+                                            unsigned int step) const noexcept {
   planning::Plan plan;
   for (unsigned int s = 0; s < step; ++s) {
-    for (model::ActionPtr action_ptr = 0;
-         action_ptr < support_.get_num_actions(); ++action_ptr) {
-      if (model[actions_[action_ptr] + s * num_vars_]) {
-        model::Action action = support_.get_problem().actions[action_ptr];
-        for (size_t parameter_pos = 0;
-             parameter_pos < action.parameters.size(); ++parameter_pos) {
+    for (model::ActionHandle action_handle = 0;
+         action_handle < support_.get_num_actions(); ++action_handle) {
+      if (model[actions_[action_handle] + s * num_vars_]) {
+        model::Action action = support_.get_problem().actions[action_handle];
+        for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
+             ++parameter_pos) {
           auto &parameter = action.parameters[parameter_pos];
           if (parameter.constant) {
             continue;
           }
           for (size_t i = 0;
-               i < support_.get_constants_of_type(parameter.type).size();
-               ++i) {
-            if (model[parameters_[action_ptr][parameter_pos][i] +
+               i < support_.get_constants_of_type(parameter.type).size(); ++i) {
+            if (model[parameters_[action_handle][parameter_pos][i] +
                       s * num_vars_]) {
               parameter.constant =
                   support_.get_constants_of_type(parameter.type)[i];
@@ -94,22 +93,22 @@ planning::Plan ForeachEncoder::extract_plan(const sat::Model &model, unsigned in
 }
 
 void ForeachEncoder::encode_initial_state() noexcept {
-  for (model::PredicatePtr predicate_ptr = 0;
-       predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
-    for (const auto &[ground_predicate, ground_predicate_ptr] :
-         support_.get_ground_predicates(predicate_ptr)) {
-      auto literal = Literal{
-          PredicateVariable{predicate_ptr, ground_predicate_ptr, true},
-          !support_.is_init(ground_predicate)};
+  for (model::PredicateHandle predicate_handle = 0;
+       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
+    for (const auto &[ground_predicate, ground_predicate_handle] :
+         support_.get_ground_predicates(predicate_handle)) {
+      auto literal =
+          Literal{PredicateVariable{predicate_handle, ground_predicate_handle, true},
+                  !support_.is_init(ground_predicate)};
       initial_state_ << literal << sat::EndClause;
     }
   }
 }
 
 void ForeachEncoder::encode_actions() {
-  for (model::ActionPtr action_ptr = 0;
-       action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
-    const auto &action = support_.get_problem().actions[action_ptr];
+  for (model::ActionHandle action_handle = 0;
+       action_handle < support_.get_problem().actions.size(); ++action_handle) {
+    const auto &action = support_.get_problem().actions[action_handle];
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
@@ -120,10 +119,11 @@ void ForeachEncoder::encode_actions() {
           support_.get_constants_of_type(parameter.type).size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
-      auto action_var = ActionVariable{action_ptr};
+      auto action_var = ActionVariable{action_handle};
       for (size_t constant_index = 0; constant_index < number_arguments;
            ++constant_index) {
-        auto parameter_var = ParameterVariable{action_ptr, parameter_pos, constant_index};
+        auto parameter_var =
+            ParameterVariable{action_handle, parameter_pos, constant_index};
         universal_clauses_ << Literal{parameter_var, true};
         universal_clauses_ << Literal{action_var, false};
         universal_clauses_ << sat::EndClause;
@@ -139,153 +139,153 @@ void ForeachEncoder::encode_actions() {
   }
 }
 
-void ForeachEncoder::parameter_implies_predicate(bool is_negated, bool is_effect) {
-  for (model::PredicatePtr predicate_ptr = 0;
-       predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
-    const auto &predicate_support =
-        support_.get_predicate_support(predicate_ptr, is_negated, is_effect);
-    auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
-    for (const auto &[ground_predicate, ground_predicate_ptr] :
-         support_.get_ground_predicates(predicate_ptr)) {
-      for (const auto &[action_ptr, assignment] :
-           predicate_support[ground_predicate_ptr]) {
-        if (assignment.arguments.empty()) {
-        formula << Literal{ActionVariable{action_ptr}, true};
-        } else {
-          for (auto [parameter_index, constant_index] : assignment.arguments) {
-            formula << Literal{
-                ParameterVariable{action_ptr, parameter_index, constant_index},
-                true};
+void ForeachEncoder::parameter_implies_predicate(bool is_negated,
+                                                 bool is_effect) {
+  const auto &predicate_support =
+      support_.get_predicate_support(is_negated, is_effect);
+  auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
+  for (model::PredicateHandle predicate_handle = 0;
+       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
+    for (const auto &[ground_predicate, ground_predicate_handle] :
+         support_.get_ground_predicates(predicate_handle)) {
+      for (const auto &[action_handle, assignments] :
+           predicate_support[predicate_handle][ground_predicate_handle]) {
+        for (const auto &assignment : assignments) {
+          if (assignment.arguments.empty()) {
+            formula << Literal{ActionVariable{action_handle}, true};
+          } else {
+            for (auto [parameter_index, constant_index] :
+                 assignment.arguments) {
+              formula << Literal{ParameterVariable{action_handle, parameter_index,
+                                                   constant_index},
+                                 true};
+            }
           }
+          formula << Literal{PredicateVariable{predicate_handle,
+                                               ground_predicate_handle,
+                                               !is_effect},
+                             is_negated}
+                  << sat::EndClause;
         }
-        formula << Literal{PredicateVariable{predicate_ptr,
-                                             ground_predicate_ptr,
-                                             !is_effect},
-                           is_negated}
-                << sat::EndClause;
       }
     }
   }
 }
 
 void ForeachEncoder::interference(bool is_negated) {
-  for (model::PredicatePtr predicate_ptr = 0;
-       predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
-    const auto &precondition_support =
-        support_.get_predicate_support(predicate_ptr, is_negated, false);
-    const auto &effect_support =
-        support_.get_predicate_support(predicate_ptr, !is_negated, true);
-    for (const auto &[ground_predicate, ground_predicate_ptr] :
-         support_.get_ground_predicates(predicate_ptr)) {
-      for (const auto &[p_action_ptr, p_assignment] :
-           precondition_support[ground_predicate_ptr]) {
-        for (const auto &[e_action_ptr, e_assignment] :
-             effect_support[ground_predicate_ptr]) {
-          if (p_action_ptr == e_action_ptr) {
+  const auto &precondition_support =
+      support_.get_predicate_support(is_negated, false);
+  const auto &effect_support =
+      support_.get_predicate_support(!is_negated, true);
+  for (model::PredicateHandle predicate_handle = 0;
+       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
+    for (const auto &[ground_predicate, ground_predicate_handle] :
+         support_.get_ground_predicates(predicate_handle)) {
+      for (const auto &[p_action_handle, p_assignments] :
+           precondition_support[predicate_handle][ground_predicate_handle]) {
+        for (const auto &[e_action_handle, e_assignments] :
+             effect_support[predicate_handle][ground_predicate_handle]) {
+          if (p_action_handle == e_action_handle) {
             continue;
           }
-          if (p_assignment.arguments.empty()) {
-            universal_clauses_ << Literal{ActionVariable{p_action_ptr}, true};
-          } else {
-            for (auto [parameter_index, constant_index] :
-                 p_assignment.arguments) {
-              universal_clauses_
-                  << Literal{ParameterVariable{p_action_ptr, parameter_index,
-                                               constant_index},
-                             true};
+          for (const auto &p_assignment : p_assignments) {
+            for (const auto &e_assignment : e_assignments) {
+              if (p_assignment.arguments.empty()) {
+                universal_clauses_
+                    << Literal{ActionVariable{p_action_handle}, true};
+              } else {
+                for (auto [parameter_index, constant_index] :
+                     p_assignment.arguments) {
+                  universal_clauses_ << Literal{
+                      ParameterVariable{p_action_handle, parameter_index,
+                                        constant_index},
+                      true};
+                }
+              }
+              if (e_assignment.arguments.empty()) {
+                universal_clauses_
+                    << Literal{ActionVariable{e_action_handle}, true};
+              } else {
+                for (auto [parameter_index, constant_index] :
+                     e_assignment.arguments) {
+                  universal_clauses_ << Literal{
+                      ParameterVariable{e_action_handle, parameter_index,
+                                        constant_index},
+                      true};
+                }
+              }
+              universal_clauses_ << sat::EndClause;
             }
           }
-          if (e_assignment.arguments.empty()) {
-            universal_clauses_ << Literal{ActionVariable{e_action_ptr}, true};
-          } else {
-            for (auto [parameter_index, constant_index] :
-                 e_assignment.arguments) {
-              universal_clauses_
-                  << Literal{ParameterVariable{e_action_ptr, parameter_index,
-                                               constant_index},
-                             true};
-            }
-          }
-          universal_clauses_ << sat::EndClause;
         }
       }
     }
   }
 }
 
-void ForeachEncoder::frame_axioms(bool is_negated, unsigned int dnf_threshold) {
-  for (model::PredicatePtr predicate_ptr = 0;
-      predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
-    for (const auto &[ground_predicate, ground_predicate_ptr] :
-        support_.get_ground_predicates(predicate_ptr)) {
-      const auto& predicate_support = support_.get_predicate_support(predicate_ptr, is_negated,
-          true)[ground_predicate_ptr];
-      bool need_indirection =
-        static_cast<size_t>(std::count_if(predicate_support.begin(),
-              predicate_support.end(), [](const auto& s) { return
-              s.second.arguments.size() > 1;})) > dnf_threshold;
-      if (need_indirection) {
-        LOG_DEBUG(logger, "Support for %s needs indirection", model::to_string(ground_predicate, support_.get_problem()).c_str());
-        Formula frame_axiom;
-        frame_axiom << Literal{PredicateVariable{predicate_ptr, ground_predicate_ptr,
-          true},
-            is_negated};
-        frame_axiom << Literal{PredicateVariable{predicate_ptr, ground_predicate_ptr,
-          false},
-            !is_negated};
-        for (const auto &[action_ptr, assignment] :
-            predicate_support) {
-          if (assignment.arguments.empty()) {
-            frame_axiom << Literal{ActionVariable{action_ptr}, false};
-          } else if (assignment.arguments.size() == 1) {
-            const auto&[parameter_index, constant_index] = assignment.arguments[0];
-            frame_axiom << Literal{ParameterVariable{action_ptr, parameter_index, constant_index}, false};
-          } else {
-            for (auto [parameter_index, constant_index] : assignment.arguments) {
-              universal_clauses_ << Literal{HelperVariable{num_helpers_}, true};
-              universal_clauses_ << Literal{
-                ParameterVariable{action_ptr, parameter_index, constant_index},
-                  false};
-              universal_clauses_ << sat::EndClause;
-            }
-            frame_axiom << Literal{HelperVariable{num_helpers_}, false};
-            ++num_helpers_;
+void ForeachEncoder::frame_axioms(bool is_negated, size_t dnf_threshold) {
+  for (model::PredicateHandle predicate_handle = 0;
+       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
+    for (const auto &[ground_predicate, ground_predicate_handle] :
+         support_.get_ground_predicates(predicate_handle)) {
+
+      const auto &predicate_support = support_.get_predicate_support(
+          is_negated, true)[predicate_handle][ground_predicate_handle];
+
+      size_t num_nontrivial_clauses = 0;
+      for (const auto &[action_handle, assignments] : predicate_support) {
+        for (const auto &assignment : assignments) {
+          if (assignment.arguments.size() > 1) {
+            ++num_nontrivial_clauses;
           }
         }
-        frame_axiom << sat::EndClause;
-        transition_clauses_.add_formula(frame_axiom);
-      } else {
-        Formula dnf;
-        dnf << Literal{PredicateVariable{predicate_ptr, ground_predicate_ptr,
-          true},
-            is_negated}
-        << sat::EndClause;
-        dnf << Literal{PredicateVariable{predicate_ptr, ground_predicate_ptr,
-          false},
-            !is_negated}
-        << sat::EndClause;
-        for (const auto &[action_ptr, assignment] :
-            predicate_support) {
+      }
+
+      Formula dnf;
+      dnf << Literal{PredicateVariable{predicate_handle, ground_predicate_handle,
+                                       true},
+                     is_negated}
+          << sat::EndClause;
+      dnf << Literal{PredicateVariable{predicate_handle, ground_predicate_handle,
+                                       false},
+                     !is_negated}
+          << sat::EndClause;
+      for (const auto &[action_handle, assignments] : predicate_support) {
+        for (const auto &assignment : assignments) {
           if (assignment.arguments.empty()) {
-            dnf << Literal{ActionVariable{action_ptr}, false};
+            dnf << Literal{ActionVariable{action_handle}, false};
+          } else if (assignment.arguments.size() == 1 ||
+                     num_nontrivial_clauses < dnf_threshold) {
+            for (auto [parameter_index, constant_index] :
+                 assignment.arguments) {
+              dnf << Literal{ParameterVariable{action_handle, parameter_index,
+                                               constant_index},
+                             false};
+            }
           } else {
-              for (auto [parameter_index, constant_index] : assignment.arguments) {
-                dnf << Literal{
-                  ParameterVariable{action_ptr, parameter_index, constant_index},
-                    false};
-              }
+            for (auto [parameter_index, constant_index] :
+                 assignment.arguments) {
+              universal_clauses_ << Literal{HelperVariable{num_helpers_}, true};
+              universal_clauses_
+                  << Literal{ParameterVariable{action_handle, parameter_index,
+                                               constant_index},
+                             false};
+              universal_clauses_ << sat::EndClause;
+            }
+            dnf << Literal{HelperVariable{num_helpers_}, false};
+            ++num_helpers_;
           }
           dnf << sat::EndClause;
         }
-        transition_clauses_.add_dnf(dnf);
       }
+      transition_clauses_.add_dnf(dnf);
     }
   }
 }
 
 void ForeachEncoder::assume_goal() {
   for (const auto &predicate : support_.get_problem().goal) {
-    model::GroundPredicatePtr index =
+    model::GroundPredicateHandle index =
         support_.get_predicate_index(model::GroundPredicate{predicate});
     goal_ << Literal{PredicateVariable{predicate.definition, index, true},
                      predicate.negated}
@@ -299,15 +299,15 @@ void ForeachEncoder::init_sat_vars() {
 
   actions_.reserve(support_.get_problem().actions.size());
   parameters_.resize(support_.get_problem().actions.size());
-  for (model::ActionPtr action_ptr = 0;
-       action_ptr < support_.get_problem().actions.size(); ++action_ptr) {
-    const auto &action = support_.get_problem().actions[action_ptr];
+  for (model::ActionHandle action_handle = 0;
+       action_handle < support_.get_problem().actions.size(); ++action_handle) {
+    const auto &action = support_.get_problem().actions[action_handle];
     /* LOG_DEBUG(logger, "%s: %u", */
     /*           model::to_string(action, support_.get_problem()).c_str(), */
     /*           variable_counter); */
     actions_.push_back(variable_counter++);
 
-    parameters_[action_ptr].resize(action.parameters.size());
+    parameters_[action_handle].resize(action.parameters.size());
 
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
@@ -315,33 +315,33 @@ void ForeachEncoder::init_sat_vars() {
       if (parameter.constant) {
         continue;
       }
-      parameters_[action_ptr][parameter_pos].reserve(
+      parameters_[action_handle][parameter_pos].reserve(
           support_.get_constants_of_type(parameter.type).size());
       for (size_t i = 0;
            i < support_.get_constants_of_type(parameter.type).size(); ++i) {
         /* LOG_DEBUG(logger, "Parameter %lu, index %lu: %u", */
-        /*           parameters_[action_ptr][parameter_pos].size(), i, */
+        /*           parameters_[action_handle][parameter_pos].size(), i, */
         /*           variable_counter); */
-        parameters_[action_ptr][parameter_pos].push_back(variable_counter++);
+        parameters_[action_handle][parameter_pos].push_back(variable_counter++);
       }
     }
   }
 
   predicates_.resize(support_.get_num_predicates());
-  for (model::PredicatePtr predicate_ptr = 0;
-       predicate_ptr < support_.get_num_predicates(); ++predicate_ptr) {
-    predicates_[predicate_ptr].resize(
-        support_.get_ground_predicates(predicate_ptr).size());
-    for (const auto &[ground_predicate, ground_predicate_ptr] :
-         support_.get_ground_predicates(predicate_ptr)) {
+  for (model::PredicateHandle predicate_handle = 0;
+       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
+    predicates_[predicate_handle].resize(
+        support_.get_ground_predicates(predicate_handle).size());
+    for (const auto &[ground_predicate, ground_predicate_handle] :
+         support_.get_ground_predicates(predicate_handle)) {
       if (support_.is_rigid(ground_predicate, false)) {
         /* assert(false); */
-        predicates_[predicate_ptr][ground_predicate_ptr] = SAT;
+        predicates_[predicate_handle][ground_predicate_handle] = SAT;
       } else if (support_.is_rigid(ground_predicate, true)) {
         /* assert(false); */
-        predicates_[predicate_ptr][ground_predicate_ptr] = UNSAT;
+        predicates_[predicate_handle][ground_predicate_handle] = UNSAT;
       } else {
-        predicates_[predicate_ptr][ground_predicate_ptr] = variable_counter++;
+        predicates_[predicate_handle][ground_predicate_handle] = variable_counter++;
       }
     }
   }

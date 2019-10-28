@@ -8,11 +8,11 @@
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
+#include "model/preprocess.hpp"
+#include "model/support.hpp"
 #include "model/to_string.hpp"
 #include "options/options.hpp"
 #include "pddl/ast.hpp"
-#include "model/preprocess.hpp"
-#include "model/support.hpp"
 #include "pddl/parser.hpp"
 #include "pddl/pddl_visitor.hpp"
 #include "pddl/tokens.hpp"
@@ -38,15 +38,17 @@ options::Options set_options(const std::string &name) {
   options.add_positional_option<std::string>("problem",
                                              "The pddl problem file");
   options.add_option<std::string>("planner", 'x', "Planner to use", "foreach");
-  options.add_option<std::string>("preprocess", 'p', "Select level of preprocessing", "rigid");
-  options.add_option<std::string>("solver", 's', "Select sat solver interface", "ipasir");
+  options.add_option<std::string>("preprocess", 'p',
+                                  "Select level of preprocessing", "rigid");
+  options.add_option<std::string>("solver", 's', "Select sat solver interface",
+                                  "ipasir");
   options.add_option<std::string>("plan-output", 'o',
                                   "File to output the plan to", "plan.txt");
   options.add_option<bool>("logging", 'v', "Enable debug logging", "0");
   options.add_option<bool>("log-parser", 'R', "Enable logging for the parser",
                            "1");
-  options.add_option<bool>("log-preprocess", 'P', "Enable logging for the problem preprocessor",
-                           "1");
+  options.add_option<bool>("log-preprocess", 'P',
+                           "Enable logging for the problem preprocessor", "1");
   options.add_option<bool>("log-normalize", 'N',
                            "Enable logging for normalizing", "1");
   options.add_option<bool>("log-support", 'S',
@@ -57,7 +59,7 @@ options::Options set_options(const std::string &name) {
   return options;
 }
 
-void get_config(const options::Options &options, Config& config) {
+void get_config(const options::Options &options, Config &config) {
   config.domain_file = options.get<std::string>("domain");
   config.problem_file = options.get<std::string>("problem");
 
@@ -91,26 +93,26 @@ void get_config(const options::Options &options, Config& config) {
 std::unique_ptr<planning::Planner> get_planner(const Config &config,
                                                const model::Problem &problem) {
   switch (config.planner) {
-    case Config::Planner::Sequential1:
-      PRINT_INFO("Using sequential encoding 1");
-      return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-          problem);
-    case Config::Planner::Sequential2:
-      PRINT_INFO("Using sequential encoding 2");
-      return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-          problem);
-    case Config::Planner::Sequential3:
-      PRINT_INFO("Using sequential encoding 3");
-      return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-          problem);
-    case Config::Planner::Foreach:
-      PRINT_INFO("Using foreach encoding");
-      return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-          problem);
-    case Config::Planner::Preprocess:
-      assert(false);
-    default:
-      return std::unique_ptr<planning::Planner>{};
+  case Config::Planner::Sequential1:
+    PRINT_INFO("Using sequential encoding 1");
+    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+        problem);
+  case Config::Planner::Sequential2:
+    PRINT_INFO("Using sequential encoding 2");
+    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+        problem);
+  case Config::Planner::Sequential3:
+    PRINT_INFO("Using sequential encoding 3");
+    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+        problem);
+  case Config::Planner::Foreach:
+    PRINT_INFO("Using foreach encoding");
+    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+        problem);
+  case Config::Planner::Preprocess:
+    assert(false);
+  default:
+    return std::unique_ptr<planning::Planner>{};
   }
 }
 
@@ -132,7 +134,7 @@ int main(int argc, char *argv[]) {
   Config config;
   try {
     get_config(options, config);
-  } catch (const ConfigException& e) {
+  } catch (const ConfigException &e) {
     PRINT_ERROR(e.what());
     PRINT_INFO("Try %s --help for further information", argv[0]);
     return 1;

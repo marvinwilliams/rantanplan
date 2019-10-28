@@ -133,10 +133,7 @@ std::vector<Action> normalize_action(const AbstractAction &action) noexcept {
 }
 
 Problem normalize(const AbstractProblem &abstract_problem) noexcept {
-  Problem problem{abstract_problem.header};
-  problem.types = abstract_problem.types;
-  problem.constants = abstract_problem.constants;
-  problem.predicates = abstract_problem.predicates;
+  Problem problem{abstract_problem};
 
   for (auto &action : abstract_problem.actions) {
     LOG_DEBUG(normalize_logger, "Normalizing action \'%s\'...",
@@ -153,7 +150,7 @@ Problem normalize(const AbstractProblem &abstract_problem) noexcept {
   problem.initial_state.reserve(problem.initial_state.size() +
                                 problem.constants.size());
   for (size_t i = 0; i < problem.constants.size(); ++i) {
-    std::vector<Argument> args{ConstantPtr{i}, ConstantPtr{i}};
+    std::vector<Argument> args{ConstantHandle{i}, ConstantHandle{i}};
     problem.initial_state.emplace_back(0, args);
   }
 

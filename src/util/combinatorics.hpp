@@ -12,7 +12,7 @@ public:
   using pointer = const std::vector<size_t> *;
   using reference = const std::vector<size_t> &;
 
-  explicit CombinationIterator(const std::vector<size_t> &list_sizes) noexcept;
+  explicit CombinationIterator(std::vector<size_t> list_sizes) noexcept;
 
   CombinationIterator &operator++() noexcept;
 

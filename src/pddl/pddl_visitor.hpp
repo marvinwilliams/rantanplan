@@ -28,7 +28,7 @@ public:
     };
 
     bool negated = false;
-    model::TypePtr type_ptr = 0;
+    model::TypeHandle type_handle{0};
     State state;
   };
 
@@ -87,19 +87,20 @@ private:
       const auto p = find(problem_->types, *list.type);
       if (p == problem_->types.cend()) {
         if (list.type->name == "object") {
-          context_.type_ptr = 0;
+          context_.type_handle = model::TypeHandle{0};
           return true;
         }
         std::string msg = "Type \"" + list.type->name + "\" undefined";
         throw ParserException(list.type->location, msg.c_str());
       }
-      context_.type_ptr = std::distance(problem_->types.cbegin(), p);
+      context_.type_handle =
+          model::TypeHandle{std::distance(problem_->types.cbegin(), p)};
     }
     return true;
   }
 
   bool visit_end(const ast::SingleTypeIdentifierList &) {
-    context_.type_ptr = 0;
+    context_.type_handle = model::TypeHandle{0};
     return true;
   }
 
@@ -107,20 +108,21 @@ private:
     if (list.type) {
       const auto p = find(problem_->types, *list.type);
       if (list.type->name == "object") {
-        context_.type_ptr = 0;
+        context_.type_handle = model::TypeHandle{0};
         return true;
       }
       if (p == problem_->types.cend()) {
         std::string msg = "Type \"" + list.type->name + "\" undefined";
         throw ParserException(list.type->location, msg.c_str());
       }
-      context_.type_ptr = std::distance(problem_->types.cbegin(), p);
+      context_.type_handle =
+          model::TypeHandle{std::distance(problem_->types.cbegin(), p)};
     }
     return true;
   }
 
   bool visit_end(const ast::SingleTypeVariableList &) {
-    context_.type_ptr = 0;
+    context_.type_handle = model::TypeHandle{0};
     return true;
   }
 
@@ -131,7 +133,7 @@ private:
           std::string msg = "Type \"" + name->name + "\" already defined";
           throw ParserException(name->location, msg.c_str());
         }
-        problem_->types.emplace_back(name->name, context_.type_ptr);
+        problem_->types.emplace_back(name->name, context_.type_handle);
       }
     } else if (context_.state == State::Constants) {
       for (const auto &name : *list.elements) {
@@ -139,7 +141,7 @@ private:
           std::string msg = "Constant \"" + name->name + "\" already defined";
           throw ParserException(name->location, msg.c_str());
         }
-        problem_->constants.emplace_back(name->name, context_.type_ptr);
+        problem_->constants.emplace_back(name->name, context_.type_handle);
       }
     } else {
       throw ParserException("Internal error occurred while parsing");
@@ -156,8 +158,8 @@ private:
               "Parameter \"" + variable->name + "\" already defined";
           throw ParserException(variable->location, msg.c_str());
         }
-        problem_->predicates.back().parameters.emplace_back(variable->name,
-                                                            context_.type_ptr);
+        problem_->predicates.back().parameters.emplace_back(
+            variable->name, context_.type_handle);
       }
     } else if (context_.state == State::Actions) {
       for (const auto &variable : *list.elements) {
@@ -168,7 +170,7 @@ private:
           throw ParserException(variable->location, msg.c_str());
         }
         problem_->actions.back().parameters.emplace_back(variable->name,
-                                                         context_.type_ptr);
+                                                         context_.type_handle);
       }
     } else {
       throw ParserException("Internal error occurred while parsing");
@@ -217,9 +219,9 @@ private:
           throw ParserException(name.location, msg.c_str());
         }
 
-        model::ConstantPtr constant_ptr =
-            std::distance(problem_->constants.cbegin(), p);
-        predicate.arguments.push_back(constant_ptr);
+        model::ConstantHandle constant_handle{
+            std::distance(problem_->constants.cbegin(), p)};
+        predicate.arguments.push_back(constant_handle);
       } else {
         const auto &variable =
             *std::get<std::unique_ptr<ast::Variable>>(argument);
@@ -246,9 +248,9 @@ private:
               "\" but got type \"" + problem_->types[p->type].name + "\"";
           throw ParserException(variable.location, msg.c_str());
         }
-        model::ParameterPtr parameter_ptr =
-            std::distance(problem_->actions.back().parameters.cbegin(), p);
-        predicate.arguments.push_back(std::move(parameter_ptr));
+        model::ParameterHandle parameter_handle{
+            std::distance(problem_->actions.back().parameters.cbegin(), p)};
+        predicate.arguments.push_back(std::move(parameter_handle));
       }
     }
     return true;
@@ -339,9 +341,9 @@ private:
           "Predicate \"" + ast_predicate.name->name + "\" not defined";
       throw ParserException(ast_predicate.name->location, msg.c_str());
     }
-    model::PredicatePtr predicate_ptr =
-        std::distance(problem_->predicates.cbegin(), p);
-    auto predicate = model::PredicateEvaluation{std::move(predicate_ptr)};
+    model::PredicateHandle predicate_handle{
+        std::distance(problem_->predicates.cbegin(), p)};
+    auto predicate = model::PredicateEvaluation{std::move(predicate_handle)};
     predicate.negated = context_.negated;
     condition_stack_.push_back(std::move(predicate));
     return true;
@@ -398,12 +400,12 @@ private:
         throw ParserException("Internal error occurred while parsing");
       }
     } else {
-      auto junction_ptr =
+      auto junction_handle =
           std::get_if<model::Junction>(&condition_stack_.back());
-      if (junction_ptr == nullptr) {
+      if (junction_handle == nullptr) {
         throw ParserException("Internal error occurred while parsing");
       }
-      junction_ptr->arguments.push_back(std::move(last_condition));
+      junction_handle->arguments.push_back(std::move(last_condition));
     }
     return true;
   }
