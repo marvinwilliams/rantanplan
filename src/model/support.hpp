@@ -20,7 +20,7 @@ class Support {
 public:
   using PredicateSupport =
       std::vector<std::unordered_map<model::ActionHandle,
-                                     std::vector<model::ArgumentAssignment>,
+                                     std::vector<model::ParameterAssignment>,
                                      model::hash::Handle<model::Action>>>;
 
   explicit Support(const model::Problem &problem_) noexcept;
@@ -49,7 +49,7 @@ public:
   inline model::GroundPredicateHandle
   get_predicate_index(const model::GroundPredicate &predicate) const noexcept {
     assert(ground_predicates_constructed_ &&
-           ground_predicates_[predicate.definition].count(predicate) > 0);
+           ground_predicates_.at(predicate.definition).count(predicate) > 0);
     return ground_predicates_.at(predicate);
   }
 

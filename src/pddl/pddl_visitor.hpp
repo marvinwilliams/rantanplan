@@ -41,10 +41,10 @@ public:
     context_ = Context{};
     condition_stack_.clear();
 
-    problem_->types.emplace_back("_root", 0);
+    problem_->types.emplace_back("_root", model::TypeHandle{0});
     auto equal_predicate = model::PredicateDefinition{"="};
-    equal_predicate.parameters.emplace_back("first", 0);
-    equal_predicate.parameters.emplace_back("second", 0);
+    equal_predicate.parameters.emplace_back("first", model::TypeHandle{0});
+    equal_predicate.parameters.emplace_back("second", model::TypeHandle{0});
     problem_->predicates.push_back(std::move(equal_predicate));
 
     traverse(ast);
@@ -211,7 +211,7 @@ private:
           throw ParserException(name.location, msg.c_str());
         }
 
-        if (!model::is_subtype(problem_->types, p->type, supertype)) {
+        if (!model::is_subtype(*problem_, p->type, supertype)) {
           std::string msg =
               "Type mismatch of argument \"" + name.name +
               "\": Expected a subtype of \"" + problem_->types[supertype].name +
@@ -241,7 +241,7 @@ private:
           throw ParserException(variable.location, msg.c_str());
         }
 
-        if (!model::is_subtype(problem_->types, p->type, supertype)) {
+        if (!model::is_subtype(*problem_, p->type, supertype)) {
           std::string msg =
               "Type mismatch of argument \"" + variable.name +
               "\": Expected a subtype of \"" + problem_->types[supertype].name +

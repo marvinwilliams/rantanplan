@@ -2,15 +2,14 @@
 #define PREPROCESS_HPP
 
 #include "config.hpp"
-#include "model/model.hpp"
-#include "model/support.hpp"
 #include "logging/logging.hpp"
+#include "model/model.hpp"
 
 namespace preprocess {
 
 extern logging::Logger logger;
 
-void preprocess(model::Problem &problem, support::Support &support, const Config& config);
+void preprocess(model::Problem &problem, const Config &config);
 
 } // namespace preprocess
 

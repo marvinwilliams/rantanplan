@@ -127,6 +127,11 @@ struct Junction {
   std::vector<Condition> arguments;
 };
 
+using ParameterMapping =
+    std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>>;
+using ParameterAssignment =
+    std::unordered_map<ParameterHandle, size_t, hash::Handle<Parameter>>;
+
 struct Action {
   explicit Action(const std::string &name) : name{name} {}
   std::string name;
@@ -139,42 +144,9 @@ inline bool operator==(const Action &first, const Action &second) {
   return first.name == second.name;
 }
 
-struct ArgumentMapping {
-  explicit ArgumentMapping(
-      const std::vector<model::Parameter> &parameters,
-      const std::vector<model::Argument> &arguments) noexcept {
-    std::vector<std::vector<ParameterHandle>> parameter_matches{
-        parameters.size()};
-    for (size_t i = 0; i < arguments.size(); ++i) {
-      auto parameter_handle = std::get_if<ParameterHandle>(&arguments[i]);
-      if (parameter_handle && !parameters[*parameter_handle].constant) {
-        parameter_matches[*parameter_handle].push_back(ParameterHandle{i});
-      }
-    }
-    for (size_t i = 0; i < parameters.size(); ++i) {
-      if (!parameter_matches[i].empty()) {
-        matches.emplace_back(ParameterHandle{i},
-                             std::move(parameter_matches[i]));
-      }
-    }
-  }
-
-  std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>> matches;
-};
-
-struct ArgumentAssignment {
-  explicit ArgumentAssignment() noexcept = default;
-  explicit ArgumentAssignment(const ArgumentMapping &mapping,
-                              const std::vector<size_t> &arguments) noexcept {
-    assert(arguments.size() == mapping.size());
-    this->arguments.reserve(mapping.matches.size());
-    for (size_t i = 0; i < mapping.matches.size(); ++i) {
-      this->arguments.insert({mapping.matches[i].first, arguments[i]});
-    }
-  }
-
-  std::unordered_map<ParameterHandle, size_t, hash::Handle<Parameter>>
-      arguments;
+struct ActionGrounding {
+  ActionHandle action_handle;
+  ParameterAssignment assignment;
 };
 
 struct ProblemHeader {
@@ -216,6 +188,7 @@ struct Problem : ProblemBase {
   std::vector<PredicateEvaluation> initial_state;
   std::vector<PredicateEvaluation> goal;
   std::vector<std::vector<ConstantHandle>> constants_by_type;
+  std::vector<ActionGrounding> action_groundings;
 };
 
 struct AbstractAction {
@@ -232,29 +205,31 @@ struct AbstractProblem : ProblemBase {
 };
 
 struct GroundPredicate {
-  GroundPredicate(PredicateHandle definition,
-                  std::vector<ConstantHandle> arguments)
+  explicit GroundPredicate(PredicateHandle definition,
+                           std::vector<ConstantHandle> arguments)
       : definition{definition}, arguments(std::move(arguments)) {}
 
-  GroundPredicate(const PredicateEvaluation &predicate) {
-    /* assert(is_grounded(predicate)); */
+  explicit GroundPredicate(const PredicateEvaluation &predicate) {
     definition = predicate.definition;
     arguments.reserve(predicate.arguments.size());
     for (const auto &argument : predicate.arguments) {
       arguments.push_back(std::get<ConstantHandle>(argument));
     }
   }
-  GroundPredicate(const Problem &problem, const PredicateEvaluation &predicate,
-                  const ArgumentAssignment &assignment) {
-    /* assert(is_grounded(predicate, action)); */
+
+  explicit GroundPredicate(const Problem &problem, const Action &action,
+                           const ParameterAssignment &assignment,
+                           const PredicateEvaluation &predicate) {
     definition = predicate.definition;
     arguments.reserve(predicate.arguments.size());
     for (const auto &argument : predicate.arguments) {
       if (const ConstantHandle *p = std::get_if<ConstantHandle>(&argument)) {
         arguments.push_back(*p);
       } else {
-        /* arguments.push_back(problem.constants_by_type[assiassignment.arguments.at(std::get<ParameterHandle>(argument))
-         */
+        auto parameter_handle = std::get<ParameterHandle>(argument);
+        arguments.push_back(
+            problem.constants_by_type[action.parameters[parameter_handle].type]
+                                     [assignment.at(parameter_handle)]);
       }
     }
   }

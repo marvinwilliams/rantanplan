@@ -11,13 +11,13 @@
 
 namespace model {
 
-inline bool is_subtype(const std::vector<Type> &types, TypeHandle type,
+inline bool is_subtype(const ProblemBase &problem, TypeHandle type,
                        TypeHandle supertype) {
   if (type == supertype) {
     return true;
   }
-  while (types[type].parent != type) {
-    type = types[type].parent;
+  while (problem.types[type].parent != type) {
+    type = problem.types[type].parent;
     if (type == supertype) {
       return true;
     }
@@ -31,43 +31,72 @@ inline bool is_grounded(const PredicateEvaluation &predicate) noexcept {
       [](const auto &a) { return std::holds_alternative<ConstantHandle>(a); });
 }
 
-inline bool is_grounded(const PredicateEvaluation &predicate,
-                        const Action &action) noexcept {
-  return std::all_of(
-      predicate.arguments.cbegin(), predicate.arguments.cend(),
-      [&action](const auto &a) {
-        return std::holds_alternative<ConstantHandle>(a) ||
-               action.parameters[std::get<ParameterHandle>(a)].constant;
-      });
+inline bool is_grounded(const ParameterAssignment &assignment,
+                        const PredicateEvaluation &predicate) noexcept {
+  return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
+                     [&assignment](const auto &a) {
+                       return std::holds_alternative<ConstantHandle>(a) ||
+                              assignment.count(std::get<ParameterHandle>(a)) >
+                                  0;
+                     });
 }
 
-inline bool is_grounded(const Action &action) {
-  return std::all_of(action.parameters.cbegin(), action.parameters.cend(),
-                     [](const auto &p) { return p.constant.has_value(); });
-}
-
-struct ArgumentMapping {
-  explicit ArgumentMapping(
-      const std::vector<model::Parameter> &parameters,
-      const std::vector<model::Argument> &arguments) noexcept {
-    std::vector<std::vector<ParameterHandle>> parameter_matches{
-        parameters.size()};
-    for (size_t i = 0; i < arguments.size(); ++i) {
-      auto parameter_handle = std::get_if<ParameterHandle>(&arguments[i]);
-      if (parameter_handle && !parameters[*parameter_handle].constant) {
-        parameter_matches[*parameter_handle].push_back(ParameterHandle{i});
-      }
-    }
-    for (size_t i = 0; i < parameters.size(); ++i) {
-      if (!parameter_matches[i].empty()) {
-        matches.emplace_back(ParameterHandle{i},
-                             std::move(parameter_matches[i]));
-      }
+inline ParameterMapping
+get_mapping(const Action &action,
+            const PredicateEvaluation &predicate) noexcept {
+  std::vector<std::vector<ParameterHandle>> parameter_matches{
+      action.parameters.size()};
+  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
+    if (auto parameter_handle =
+            std::get_if<ParameterHandle>(&predicate.arguments[i])) {
+      parameter_matches[*parameter_handle].push_back(ParameterHandle{i});
     }
   }
 
-  std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>> matches;
-};
+  ParameterMapping mapping;
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
+    if (!parameter_matches[i].empty()) {
+      mapping.emplace_back(ParameterHandle{i}, std::move(parameter_matches[i]));
+    }
+  }
+
+  return mapping;
+}
+
+inline ParameterMapping
+get_mapping(const Action &action, const ParameterAssignment &assignment,
+            const PredicateEvaluation &predicate) noexcept {
+  std::vector<std::vector<ParameterHandle>> parameter_matches{
+      action.parameters.size()};
+  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
+    auto parameter_handle =
+        std::get_if<ParameterHandle>(&predicate.arguments[i]);
+    if (parameter_handle && assignment.count(*parameter_handle) == 0) {
+      parameter_matches[*parameter_handle].push_back(ParameterHandle{i});
+    }
+  }
+
+  ParameterMapping mapping;
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
+    if (!parameter_matches[i].empty()) {
+      mapping.emplace_back(ParameterHandle{i}, std::move(parameter_matches[i]));
+    }
+  }
+
+  return mapping;
+}
+
+inline ParameterAssignment
+get_assignment(const ParameterMapping &mapping,
+               const std::vector<size_t> &arguments) noexcept {
+  ParameterAssignment assignment;
+  assert(arguments.size() == mapping.size());
+  assignment.reserve(mapping.size());
+  for (size_t i = 0; i < mapping.size(); ++i) {
+    assignment.insert({mapping[i].first, arguments[i]});
+  }
+  return assignment;
+}
 
 template <typename Function>
 void for_grounded_predicate(const Problem &problem,
@@ -99,27 +128,10 @@ void for_grounded_predicate(const Problem &problem,
   }
 }
 
-struct ArgumentAssignment {
-  explicit ArgumentAssignment() noexcept = default;
-  explicit ArgumentAssignment(const ArgumentMapping &mapping,
-                              const std::vector<size_t> &arguments) noexcept {
-    assert(arguments.size() == mapping.size());
-    this->arguments.reserve(mapping.matches.size());
-    for (size_t i = 0; i < mapping.matches.size(); ++i) {
-      this->arguments.insert({mapping.matches[i].first, arguments[i]});
-    }
-  }
-
-  std::unordered_map<ParameterHandle, size_t, hash::Handle<Parameter>>
-      arguments;
-};
-
 template <typename Function>
-void for_grounded_predicate(const Problem &problem, ActionHandle action_handle, const ArgumentAssignment& assignment,
+void for_grounded_predicate(const Problem &problem, const Action &action,
+                            const ParameterAssignment &assignment,
                             const PredicateEvaluation &predicate, Function f) {
-  const Action &action = problem.actions[action_handle];
-  ArgumentMapping mapping{action.parameters, predicate.arguments};
-
   std::vector<ConstantHandle> arguments(predicate.arguments.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
     const auto &argument = predicate.arguments[i];
@@ -127,19 +139,23 @@ void for_grounded_predicate(const Problem &problem, ActionHandle action_handle, 
       arguments[i] = *constant_handle;
     } else {
       auto parameter_handle = std::get<model::ParameterHandle>(argument);
-      if (action.parameters[parameter_handle].constant) {
-        arguments[i] = *action.parameters[parameter_handle].constant;
+      auto type = action.parameters[parameter_handle].type;
+      if (assignment.count(parameter_handle) > 0) {
+        arguments[i] =
+            problem.constants_by_type[type][assignment.at(parameter_handle)];
       }
     }
   }
 
+  ParameterMapping mapping = get_mapping(action, assignment, predicate);
+
   std::vector<size_t> argument_sizes;
-  argument_sizes.reserve(mapping.matches.size());
-  std::transform(
-      mapping.matches.begin(), mapping.matches.end(),
-      std::back_inserter(argument_sizes), [&problem, &action](const auto &m) {
-        return get_constants_of_type(action.parameters[m.first].type).size();
-      });
+  argument_sizes.reserve(mapping.size());
+  for (const auto &[parameter_handle, predicate_parameters] : mapping) {
+    argument_sizes.push_back(
+        problem.constants_by_type[action.parameters[parameter_handle].type]
+            .size());
+  }
 
   auto combination_iterator = CombinationIterator{argument_sizes};
 
@@ -148,26 +164,63 @@ void for_grounded_predicate(const Problem &problem, ActionHandle action_handle, 
 
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;
-    for (size_t i = 0; i < mapping.matches.size(); ++i) {
-      const auto &[parameter_pos, predicate_pos] = mapping.matches[i];
-      auto type = action.parameters[parameter_pos].type;
-      for (auto index : predicate_pos) {
-        ground_predicate.arguments[index] =
+    for (size_t i = 0; i < mapping.size(); ++i) {
+      const auto &[parameter_handle, predicate_parameters] = mapping[i];
+      auto type = action.parameters[parameter_handle].type;
+      for (auto predicate_parameter_handle : predicate_parameters) {
+        ground_predicate.arguments[predicate_parameter_handle] =
             problem.constants_by_type[type][combination[i]];
       }
     }
-    f(ground_predicate, ArgumentAssignment{mapping, combination});
+    f(ground_predicate, get_assignment(mapping, combination));
     ++combination_iterator;
   }
 }
 
-inline bool is_unifiable(const ArgumentAssignment &first,
-                         const ArgumentAssignment &second) noexcept {
-  return std::all_of(first.arguments.begin(), first.arguments.end(),
-                     [&second](auto a) {
-                       return (second.arguments.count(a.first) == 0 ||
-                               second.arguments.at(a.first) == a.second);
-                     });
+inline bool is_unifiable(const ParameterAssignment &first,
+                         const ParameterAssignment &second) noexcept {
+  return std::all_of(first.begin(), first.end(), [&second](auto a) {
+    return (second.count(a.first) == 0 || second.at(a.first) == a.second);
+  });
+}
+
+inline bool is_groundable(const Problem &problem, const Action &action,
+                          const ParameterAssignment &assignment,
+                          const PredicateEvaluation &predicate,
+                          const std::vector<ConstantHandle> &arguments) {
+  assert(predicate.arguments.size() == arguments.size());
+  std::unordered_map<ParameterHandle, ConstantHandle, hash::Handle<Parameter>>
+      grounded_parameters;
+  // Possible speedup (lookup in both maps instead of fusing)
+  for (auto [parameter_handle, constant_index] : assignment) {
+    TypeHandle type_handle = action.parameters[parameter_handle].type;
+    grounded_parameters[parameter_handle] =
+        problem.constants_by_type[type_handle][constant_index];
+  }
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    if (auto p = std::get_if<ConstantHandle>(&predicate.arguments[i])) {
+      if (*p != arguments[i]) {
+        return false;
+      }
+    } else {
+      auto parameter_handle = std::get<ParameterHandle>(predicate.arguments[i]);
+      // Possible speedup (no insertion needed if subtype does not match)
+      auto [it, inserted] =
+          grounded_parameters.try_emplace(parameter_handle, arguments[i]);
+      if (inserted) {
+        // Insertion happend
+        if (!is_subtype(problem, problem.constants[it->second].type,
+                        action.parameters[parameter_handle].type)) {
+          return false;
+        }
+      } else {
+        if (it->second != arguments[i]) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 } // namespace model

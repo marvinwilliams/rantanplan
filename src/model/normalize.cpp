@@ -151,7 +151,7 @@ Problem normalize(const AbstractProblem &abstract_problem) noexcept {
                                 problem.constants.size());
   for (size_t i = 0; i < problem.constants.size(); ++i) {
     std::vector<Argument> args{ConstantHandle{i}, ConstantHandle{i}};
-    problem.initial_state.emplace_back(0, args);
+    problem.initial_state.emplace_back(PredicateHandle{0}, args);
   }
 
   problem.goal = to_list(abstract_problem.goal);

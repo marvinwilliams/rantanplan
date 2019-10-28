@@ -1,7 +1,7 @@
 #include "build_config.hpp"
 #include "config.hpp"
 /* #include "encoding/encoding.hpp" */
-#include "encoding/foreach.hpp"
+/* #include "encoding/foreach.hpp" */
 /* #include "encoding/sequential_1.hpp" */
 /* #include "encoding/sequential_2.hpp" */
 /* #include "encoding/sequential_3.hpp" */
@@ -9,7 +9,7 @@
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
 #include "model/preprocess.hpp"
-#include "model/support.hpp"
+/* #include "model/support.hpp" */
 #include "model/to_string.hpp"
 #include "options/options.hpp"
 #include "pddl/ast.hpp"
@@ -17,7 +17,7 @@
 #include "pddl/pddl_visitor.hpp"
 #include "pddl/tokens.hpp"
 #include "planning/planner.hpp"
-#include "planning/sat_planner.hpp"
+/* #include "planning/sat_planner.hpp" */
 
 #include <climits>
 #include <memory>
@@ -38,8 +38,10 @@ options::Options set_options(const std::string &name) {
   options.add_positional_option<std::string>("problem",
                                              "The pddl problem file");
   options.add_option<std::string>("planner", 'x', "Planner to use", "foreach");
-  options.add_option<std::string>("preprocess", 'p',
-                                  "Select level of preprocessing", "rigid");
+  options.add_option<std::string>("preprocess-mode", 'm',
+                                  "Select preprocess mode", "rigid");
+  options.add_option<std::string>("preprocess-priority", 'p',
+                                  "Select preprocessing priority", "new");
   options.add_option<std::string>("solver", 's', "Select sat solver interface",
                                   "ipasir");
   options.add_option<std::string>("plan-output", 'o',
@@ -67,8 +69,14 @@ void get_config(const options::Options &options, Config &config) {
     config.set_planner_from_string(options.get<std::string>("planner"));
   }
 
-  if (options.count<std::string>("preprocess") > 0) {
-    config.set_preprocess_from_string(options.get<std::string>("preprocess"));
+  if (options.count<std::string>("preprocess-mode") > 0) {
+    config.set_preprocess_mode_from_string(
+        options.get<std::string>("preprocess-mode"));
+  }
+
+  if (options.count<std::string>("preprocess-priority") > 0) {
+    config.set_preprocess_priority_from_string(
+        options.get<std::string>("preprocess-priority"));
   }
 
   if (options.count<std::string>("solver") > 0) {
@@ -93,22 +101,26 @@ void get_config(const options::Options &options, Config &config) {
 std::unique_ptr<planning::Planner> get_planner(const Config &config,
                                                const model::Problem &problem) {
   switch (config.planner) {
-  case Config::Planner::Sequential1:
-    PRINT_INFO("Using sequential encoding 1");
-    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-        problem);
-  case Config::Planner::Sequential2:
-    PRINT_INFO("Using sequential encoding 2");
-    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-        problem);
-  case Config::Planner::Sequential3:
-    PRINT_INFO("Using sequential encoding 3");
-    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-        problem);
-  case Config::Planner::Foreach:
-    PRINT_INFO("Using foreach encoding");
-    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-        problem);
+  /* case Config::Planner::Sequential1: */
+  /*   PRINT_INFO("Using sequential encoding 1"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+  /*       problem); */
+  /* case Config::Planner::Sequential2: */
+  /*   PRINT_INFO("Using sequential encoding 2"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+  /*       problem); */
+  /* case Config::Planner::Sequential3: */
+  /*   PRINT_INFO("Using sequential encoding 3"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+  /*       problem); */
+  /* case Config::Planner::Foreach: */
+  /*   PRINT_INFO("Using foreach encoding"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+  /*       problem); */
   case Config::Planner::Preprocess:
     assert(false);
   default:
@@ -148,9 +160,9 @@ int main(int argc, char *argv[]) {
   if (config.log_normalize) {
     model::normalize_logger.add_appender(logging::default_appender);
   }
-  if (config.log_support) {
-    support::logger.add_appender(logging::default_appender);
-  }
+  /* if (config.log_support) { */
+  /*   support::logger.add_appender(logging::default_appender); */
+  /* } */
   if (config.log_preprocess) {
     preprocess::logger.add_appender(logging::default_appender);
   }
@@ -200,8 +212,7 @@ int main(int argc, char *argv[]) {
 
   if (config.planner == Config::Planner::Preprocess) {
     PRINT_INFO("Preprocessing...");
-    auto support = support::Support{problem};
-    preprocess::preprocess(problem, support, config);
+    preprocess::preprocess(problem, config);
     PRINT_INFO("Preprocessing successful");
     PRINT_DEBUG("Preprocessed problem:\n%s", model::to_string(problem).c_str());
     return 0;

@@ -87,12 +87,45 @@ std::string to_string(const PredicateEvaluation &predicate,
       ss << problem.constants[std::get<ConstantHandle>(*it)].name;
     } else {
       auto parameter_handle = std::get<ParameterHandle>(*it);
+      ss << action.parameters[parameter_handle].name;
+    }
+  }
+  ss << ')';
+  return ss.str();
+}
+
+std::string to_string(const PredicateEvaluation &predicate,
+                      const ActionGrounding &grounding,
+                      const Problem &problem) {
+  std::stringstream ss;
+  if (predicate.negated) {
+    ss << '!';
+  }
+  ss << problem.predicates[predicate.definition].name;
+  ss << '(';
+  for (auto it = predicate.arguments.cbegin(); it != predicate.arguments.cend();
+       ++it) {
+    if (it != predicate.arguments.cbegin()) {
+      ss << ", ";
+    }
+    if (std::holds_alternative<ConstantHandle>(*it)) {
+      ss << problem.constants[std::get<ConstantHandle>(*it)].name;
+    } else {
+      auto parameter_handle = std::get<ParameterHandle>(*it);
       /* ss << '?' << action.parameters[std::get<ParameterHandle>(*it)].name; */
-      if (action.parameters[parameter_handle].constant) {
-        ss << problem.constants[*(action.parameters[parameter_handle].constant)]
+      if (grounding.assignment.count(parameter_handle) > 0) {
+        TypeHandle type_handle = problem.actions[grounding.action_handle]
+                                     .parameters[parameter_handle]
+                                     .type;
+        ss << problem
+                  .constants[problem.constants_by_type[type_handle]
+                                                      [grounding.assignment.at(
+                                                          parameter_handle)]]
                   .name;
       } else {
-        ss << action.parameters[parameter_handle].name;
+        ss << problem.actions[grounding.action_handle]
+                  .parameters[parameter_handle]
+                  .name;
       }
     }
   }
@@ -219,14 +252,9 @@ std::string to_string(const Action &action, const ProblemBase &problem) {
     if (it != action.parameters.cbegin()) {
       ss << ", ";
     }
-    if (it->constant) {
-      ss << problem.constants[*(it->constant)].name;
-    } else {
-      /* ss << '?' << it->name; */
-      ss << it->name;
-      if (it->type != 0) {
-        ss << " - " << problem.types[it->type].name;
-      }
+    ss << it->name;
+    if (it->type != 0) {
+      ss << " - " << problem.types[it->type].name;
     }
   }
   ss << ')' << '\n';
@@ -237,6 +265,40 @@ std::string to_string(const Action &action, const ProblemBase &problem) {
   ss << '\t' << "Effects:" << '\n';
   for (const auto &effect : action.effects) {
     ss << '\t' << '\t' << to_string(effect, action, problem) << '\n';
+  }
+  return ss.str();
+}
+
+std::string to_string(const ActionGrounding &grounding,
+                      const Problem &problem) {
+  std::stringstream ss;
+  const auto &action = problem.actions[grounding.action_handle];
+  ss << action.name << '(';
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
+    if (i > 0) {
+      ss << ", ";
+    }
+    if (grounding.assignment.count(ParameterHandle{i}) > 0) {
+      ss << problem
+                .constants[problem.constants_by_type[action.parameters[i].type]
+                                                    [grounding.assignment.at(
+                                                        ParameterHandle{i})]]
+                .name;
+    } else {
+      ss << action.parameters[i].name;
+      if (action.parameters[i].type != 0) {
+        ss << " - " << problem.types[action.parameters[i].type].name;
+      }
+    }
+  }
+  ss << ')' << '\n';
+  ss << '\t' << "Preconditions:" << '\n';
+  for (const auto &precondition : action.preconditions) {
+    ss << '\t' << '\t' << to_string(precondition, grounding, problem) << '\n';
+  }
+  ss << '\t' << "Effects:" << '\n';
+  for (const auto &effect : action.effects) {
+    ss << '\t' << '\t' << to_string(effect, grounding, problem) << '\n';
   }
   return ss.str();
 }
@@ -296,6 +358,10 @@ std::string to_string(const Problem &problem) {
   ss << "Actions:" << '\n';
   for (auto &action : problem.actions) {
     ss << '\t' << to_string(action, problem) << '\n';
+  }
+  ss << "Groundings:" << '\n';
+  for (auto &groundings : problem.action_groundings) {
+    ss << '\t' << to_string(groundings, problem) << '\n';
   }
   ss << "Initial state:" << '\n';
   for (auto &predicate : problem.initial_state) {

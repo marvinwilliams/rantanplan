@@ -16,6 +16,8 @@ std::string to_string(const PredicateEvaluation &predicate,
 std::string to_string(const PredicateEvaluation &predicate,
                       const Action &action, const ProblemBase &problem);
 std::string to_string(const PredicateEvaluation &predicate,
+                      const ActionGrounding &grounding, const Problem &problem);
+std::string to_string(const PredicateEvaluation &predicate,
                       const ProblemBase &problem);
 std::string to_string(const GroundPredicate &predicate,
                       const ProblemBase &problem);
@@ -24,6 +26,7 @@ std::string to_string(const Condition &condition, const AbstractAction &action,
 std::string to_string(const Condition &condition, const ProblemBase &problem);
 std::string to_string(const AbstractAction &action, const ProblemBase &problem);
 std::string to_string(const Action &action, const ProblemBase &problem);
+std::string to_string(const ActionGrounding &grounding, const Problem &problem);
 std::string to_string(const AbstractProblem &problem);
 std::string to_string(const Problem &problem);
 
