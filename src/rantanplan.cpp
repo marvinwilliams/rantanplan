@@ -37,65 +37,129 @@ options::Options set_options(const std::string &name) {
   options.add_positional_option<std::string>("domain", "The pddl domain file");
   options.add_positional_option<std::string>("problem",
                                              "The pddl problem file");
-  options.add_option<std::string>("planner", 'x', "Planner to use", "foreach");
-  options.add_option<std::string>("preprocess-mode", 'm',
-                                  "Select preprocess mode", "rigid");
-  options.add_option<std::string>("preprocess-priority", 'p',
-                                  "Select preprocessing priority", "new");
-  options.add_option<std::string>("solver", 's', "Select sat solver interface",
-                                  "ipasir");
-  options.add_option<std::string>("plan-output", 'o',
-                                  "File to output the plan to", "plan.txt");
-  options.add_option<bool>("logging", 'v', "Enable debug logging", "0");
-  options.add_option<bool>("log-parser", 'R', "Enable logging for the parser",
-                           "1");
-  options.add_option<bool>("log-preprocess", 'P',
-                           "Enable logging for the problem preprocessor", "1");
-  options.add_option<bool>("log-normalize", 'N',
-                           "Enable logging for normalizing", "1");
-  options.add_option<bool>("log-support", 'S',
-                           "Enable logging for generating support", "1");
-  options.add_option<bool>("log-encoding", 'E',
-                           "Enable logging for the encoder", "1");
-  options.add_option<bool>("help", 'h', "Display usage information");
+  options.add_option<Config::Planner>(
+      {"planner", 'x'}, "Planner to use", [](auto input, auto &planner) {
+        if (input == "seq1") {
+          planner = Config::Planner::Sequential1;
+        } else if (input == "seq2") {
+          planner = Config::Planner::Sequential2;
+        } else if (input == "seq3") {
+          planner = Config::Planner::Sequential3;
+        } else if (input == "foreach") {
+          planner = Config::Planner::Foreach;
+        } else if (input == "parse") {
+          planner = Config::Planner::Parse;
+        } else if (input == "preprocess") {
+          planner = Config::Planner::Preprocess;
+        } else {
+          throw ConfigException{"Unknown planner \'" + std::string{input} +
+
+                                "\'"};
+        }
+      });
+  options.add_option<Config::PreprocessMode>(
+      {"preprocess-mode", 'm'}, "Select preprocess mode",
+      [](auto input, auto &mode) {
+        if (input == "none") {
+          mode = Config::PreprocessMode::None;
+        } else if (input == "rigid") {
+          mode = Config::PreprocessMode::Rigid;
+        } else if (input == "precond") {
+          mode = Config::PreprocessMode::Preconditions;
+        } else if (input == "full") {
+          mode = Config::PreprocessMode::Full;
+        } else {
+          throw ConfigException{"Unknown preprocessing mode \'" +
+                                std::string{input} + "\'"};
+        }
+      });
+
+  options.add_option<Config::PreprocessPriority>(
+      {"preprocess-priority", 'p'}, "Select preprocessing priority",
+      [](auto input, auto &priority) {
+        if (input == "new") {
+          priority = Config::PreprocessPriority::New;
+        } else if (input == "pruned") {
+          priority = Config::PreprocessPriority::Pruned;
+        } else {
+          throw ConfigException{"Unknown preprocessing mode \'" +
+                                std::string{input} + "\'"};
+        }
+      });
+
+  options.add_option<Config::Solver>(
+      {"solver", 's'}, "Select sat solver interface",
+      [](auto input, auto &solver) {
+        if (input == "ipasir") {
+          solver = Config::Solver::Ipasir;
+        } else {
+          throw ConfigException{"Unknown sat solver \'" + std::string{input} +
+                                "\'"};
+        }
+      });
+  options.add_option<std::string>({"plan-file", 'o'},
+                                  "File to output the plan to");
+  options.add_option<bool>({"logging", 'v'}, "Enable debug logging");
+  options.add_option<bool>({"log-parser", 'R'},
+                           "Enable logging for the parser");
+  options.add_option<bool>({"log-preprocess", 'P'},
+                           "Enable logging for the problem preprocessor");
+  options.add_option<bool>({"log-normalize", 'N'},
+                           "Enable logging for normalizing");
+  options.add_option<bool>({"log-support", 'S'},
+                           "Enable logging for generating support");
+  options.add_option<bool>({"log-encoding", 'E'},
+                           "Enable logging for the encoder");
+  options.add_option<bool>({"help", 'h'}, "Display usage information");
   return options;
 }
 
-void get_config(const options::Options &options, Config &config) {
-  config.domain_file = options.get<std::string>("domain");
-  config.problem_file = options.get<std::string>("problem");
-
-  if (options.count<std::string>("planner") > 0) {
-    config.set_planner_from_string(options.get<std::string>("planner"));
+void set_config(const options::Options &options, Config &config) {
+  const auto &domain = options.get<std::string>("domain");
+  if (domain.count > 0) {
+    config.domain_file = domain.value;
+  } else {
+    throw ConfigException{"Domain file required"};
   }
 
-  if (options.count<std::string>("preprocess-mode") > 0) {
-    config.set_preprocess_mode_from_string(
-        options.get<std::string>("preprocess-mode"));
+  const auto &problem = options.get<std::string>("problem");
+  if (problem.count > 0) {
+    config.problem_file = problem.value;
+  } else {
+    throw ConfigException{"Problem file required"};
   }
 
-  if (options.count<std::string>("preprocess-priority") > 0) {
-    config.set_preprocess_priority_from_string(
-        options.get<std::string>("preprocess-priority"));
+  const auto &planner = options.get<Config::Planner>("planner");
+  if (planner.count > 0) {
+    config.planner = planner.value;
   }
 
-  if (options.count<std::string>("solver") > 0) {
-    config.set_solver_from_string(options.get<std::string>("solver"));
+  const auto &preprocess_mode =
+      options.get<Config::PreprocessMode>("preprocess-mode");
+  if (preprocess_mode.count > 0) {
+    config.preprocess_mode = preprocess_mode.value;
   }
 
-  if (options.count<std::string>("plan-output") > 0) {
-    config.plan_output_file = options.get<std::string>("plan-output");
+  const auto &preprocess_priority =
+      options.get<Config::PreprocessPriority>("preprocess-priority");
+  if (preprocess_priority.count > 0) {
+    config.preprocess_priority = preprocess_priority.value;
   }
 
-  if (options.count<bool>("logging") > 0) {
-    config.log_level = logging::Level::DEBUG;
+  const auto &solver = options.get<Config::Solver>("solver");
+  if (solver.count > 0) {
+    config.solver = solver.value;
   }
 
-  config.log_parser = options.get<bool>("log-parser");
-  config.log_normalize = options.get<bool>("log-normalize");
-  config.log_support = options.get<bool>("log-support");
-  config.log_preprocess = options.get<bool>("log-preprocess");
-  config.log_encoding = options.get<bool>("log-encoding");
+  const auto &plan_file = options.get<std::string>("plan-file");
+  if (plan_file.count > 0) {
+    config.plan_file = plan_file.value;
+  }
+
+  config.log_level = options.get<bool>("logging").count;
+  if (config.log_level > 3 || (config.log_level > 1 && !DEBUG_LOG_ACTIVE)) {
+    PRINT_WARN("Requested verbosity level too high");
+  }
 }
 
 std::unique_ptr<planning::Planner> get_planner(const Config &config,
@@ -121,9 +185,8 @@ std::unique_ptr<planning::Planner> get_planner(const Config &config,
   /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
    */
   /*       problem); */
-  case Config::Planner::Preprocess:
-    assert(false);
   default:
+    assert(false);
     return std::unique_ptr<planning::Planner>{};
   }
 }
@@ -136,50 +199,49 @@ int main(int argc, char *argv[]) {
     PRINT_ERROR(e.what());
     PRINT_INFO("Try %s --help for further information", argv[0]);
     return 1;
-  }
-
-  if (options.count<bool>("help") > 0) {
-    options.print_usage();
-    return 0;
-  }
-
-  Config config;
-  try {
-    get_config(options, config);
   } catch (const ConfigException &e) {
     PRINT_ERROR(e.what());
     PRINT_INFO("Try %s --help for further information", argv[0]);
     return 1;
   }
 
-  logging::default_appender.set_level(config.log_level);
+  if (options.present("help")) {
+    options.print_usage();
+    return 0;
+  }
 
-  if (config.log_parser) {
-    pddl::Parser::logger.add_appender(logging::default_appender);
+  Config config;
+  try {
+    set_config(options, config);
+  } catch (const ConfigException &e) {
+    PRINT_ERROR(e.what());
+    PRINT_INFO("Try %s --help for further information", argv[0]);
+    return 1;
   }
-  if (config.log_normalize) {
+
+  logging::default_appender.set_level(
+      config.log_level < 2 ? logging::Level::INFO : logging::Level::DEBUG);
+
+  if (config.log_level > 0) {
     model::normalize_logger.add_appender(logging::default_appender);
-  }
-  /* if (config.log_support) { */
-  /*   support::logger.add_appender(logging::default_appender); */
-  /* } */
-  if (config.log_preprocess) {
+    /* support::logger.add_appender(logging::default_appender); */
     preprocess::logger.add_appender(logging::default_appender);
+  }
+  if (config.log_level > 2) {
+    pddl::Parser::logger.add_appender(logging::default_appender);
   }
 
   print_version();
 
   std::unique_ptr<model::AbstractProblem> abstract_problem;
 
+  PRINT_INFO("Reading problem...");
+  pddl::Parser parser;
   try {
-    PRINT_INFO("Parsing problem...");
-    pddl::Parser parser;
     auto ast = parser.parse(config.domain_file, config.problem_file);
 
     pddl::PddlAstParser visitor;
     abstract_problem = visitor.parse(ast);
-    PRINT_DEBUG("Abstract problem:\n%s",
-                model::to_string(*abstract_problem).c_str());
   } catch (const pddl::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
@@ -199,7 +261,11 @@ int main(int argc, char *argv[]) {
     PRINT_ERROR(ss.str().c_str());
     return 1;
   }
+
   assert(abstract_problem);
+
+  PRINT_DEBUG("Abstract problem:\n%s",
+              model::to_string(*abstract_problem).c_str());
 
   if (config.planner == Config::Planner::Parse) {
     PRINT_INFO("Parsing successful");
@@ -227,10 +293,10 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  if (config.plan_output_file == "") {
+  if (config.plan_file == "") {
     std::cout << planner->to_string(plan) << std::endl;
   } else {
-    std::ofstream s{config.plan_output_file};
+    std::ofstream s{config.plan_file};
     s << planner->to_string(plan);
   }
 

@@ -113,14 +113,14 @@ std::string to_string(const PredicateEvaluation &predicate,
     } else {
       auto parameter_handle = std::get<ParameterHandle>(*it);
       /* ss << '?' << action.parameters[std::get<ParameterHandle>(*it)].name; */
-      if (grounding.assignment.count(parameter_handle) > 0) {
+      if (grounding.assignment[parameter_handle]) {
         TypeHandle type_handle = problem.actions[grounding.action_handle]
                                      .parameters[parameter_handle]
                                      .type;
         ss << problem
-                  .constants[problem.constants_by_type[type_handle]
-                                                      [grounding.assignment.at(
-                                                          parameter_handle)]]
+                  .constants[problem.constants_by_type
+                                 [type_handle]
+                                 [*grounding.assignment[parameter_handle]]]
                   .name;
       } else {
         ss << problem.actions[grounding.action_handle]
@@ -278,11 +278,10 @@ std::string to_string(const ActionGrounding &grounding,
     if (i > 0) {
       ss << ", ";
     }
-    if (grounding.assignment.count(ParameterHandle{i}) > 0) {
+    if (grounding.assignment[i]) {
       ss << problem
                 .constants[problem.constants_by_type[action.parameters[i].type]
-                                                    [grounding.assignment.at(
-                                                        ParameterHandle{i})]]
+                                                    [*grounding.assignment[i]]]
                 .name;
     } else {
       ss << action.parameters[i].name;

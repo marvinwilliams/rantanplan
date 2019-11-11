@@ -30,9 +30,11 @@ AST Parser::parse(const std::string &domain, const std::string &problem) {
   }
   lexer_.set_source("domain", domain_bytes.data(),
                     domain_bytes.data() + domain_bytes.size());
+  LOG_INFO(logger, "Parsing domain file");
   parse_domain(ast);
   lexer_.set_source("problem", problem_bytes.data(),
                     problem_bytes.data() + problem_bytes.size());
+  LOG_INFO(logger, "Parsing problem file");
   parse_problem(ast);
   return ast;
 }
@@ -73,7 +75,7 @@ std::unique_ptr<ast::VariableList> Parser::parse_variable_list() {
       std::make_unique<std::vector<std::unique_ptr<ast::Variable>>>();
   while (lexer_.has_type<token::Variable>()) {
     const auto &name = lexer_.get<token::Variable>().name;
-    LOG_DEBUG(logger, "Found variable \'?%s\'", std::string{name}.c_str());
+    LOG_DEBUG(logger, "Found variable \'%s\'", std::string{name}.c_str());
     auto variable = std::make_unique<ast::Variable>(lexer_.location(), name);
     names->push_back(std::move(variable));
     lexer_.next();
@@ -97,7 +99,7 @@ std::unique_ptr<ast::ArgumentList> Parser::parse_argument_list() {
       arguments->push_back(std::move(argument));
     } else {
       const auto &name = lexer_.get<token::Variable>().name;
-      LOG_DEBUG(logger, "Found variable \'?%s\'", std::string{name}.c_str());
+      LOG_DEBUG(logger, "Found variable \'%s\'", std::string{name}.c_str());
       auto argument =
           std::make_unique<ast::Variable>(lexer_.location(), name);
       arguments->push_back(std::move(argument));

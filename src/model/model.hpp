@@ -129,8 +129,7 @@ struct Junction {
 
 using ParameterMapping =
     std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>>;
-using ParameterAssignment =
-    std::unordered_map<ParameterHandle, size_t, hash::Handle<Parameter>>;
+using ParameterAssignment = std::vector<std::optional<size_t>>;
 
 struct Action {
   explicit Action(const std::string &name) : name{name} {}
@@ -229,7 +228,7 @@ struct GroundPredicate {
         auto parameter_handle = std::get<ParameterHandle>(argument);
         arguments.push_back(
             problem.constants_by_type[action.parameters[parameter_handle].type]
-                                     [assignment.at(parameter_handle)]);
+                                     [*assignment[parameter_handle]]);
       }
     }
   }
