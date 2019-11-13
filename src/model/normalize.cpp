@@ -2,6 +2,7 @@
 #include "logging/logging.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
+#include "model/to_string.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -65,7 +66,7 @@ Condition normalize_condition(const Condition &condition) noexcept {
       return normalize_condition(new_disjunction);
     }
   }
-  if (new_junction.arguments.size() == 0) {
+  if (new_junction.arguments.empty()) {
     if (is_conjunction) {
       return TrivialTrue{};
     } else {
@@ -145,16 +146,46 @@ Problem normalize(const AbstractProblem &abstract_problem) noexcept {
                            new_actions.end());
   }
 
-  problem.initial_state = to_list(abstract_problem.initial_state);
-  // Reserve space for initial and equality predicates
-  problem.initial_state.reserve(problem.initial_state.size() +
-                                problem.constants.size());
-  for (size_t i = 0; i < problem.constants.size(); ++i) {
-    std::vector<Argument> args{ConstantHandle{i}, ConstantHandle{i}};
-    problem.initial_state.emplace_back(PredicateHandle{0}, args);
+  std::vector<GroundPredicate> negated_init;
+  for (const auto &predicate : to_list(abstract_problem.init)) {
+    GroundPredicate ground_predicate{predicate};
+    if (predicate.negated) {
+      if (std::find(negated_init.begin(), negated_init.end(),
+                    ground_predicate) != negated_init.end()) {
+        LOG_WARN(normalize_logger,
+                 "Found duplicate negated init predicate '%s'",
+                 to_string(ground_predicate, problem).c_str());
+      } else {
+        negated_init.push_back(GroundPredicate{predicate});
+      }
+    } else {
+      if (std::find(problem.init.begin(), problem.init.end(),
+                    ground_predicate) != problem.init.end()) {
+        LOG_WARN(normalize_logger, "Found duplicate init predicate '%s'",
+                 to_string(ground_predicate, problem).c_str());
+      } else {
+        problem.init.push_back(GroundPredicate{predicate});
+      }
+    }
+  }
+  for (const auto &predicate : negated_init) {
+    if (std::find(problem.init.begin(), problem.init.end(), predicate) !=
+        problem.init.end()) {
+      LOG_ERROR(normalize_logger, "Found contradicting init predicate '%s'",
+                to_string(predicate, problem).c_str());
+    }
   }
 
-  problem.goal = to_list(abstract_problem.goal);
+  // Reserve space for initial and equality predicates
+  problem.init.reserve(problem.init.size() + problem.constants.size());
+  for (size_t i = 0; i < problem.constants.size(); ++i) {
+    problem.init.push_back(GroundPredicate{
+        PredicateHandle{0}, {ConstantHandle{i}, ConstantHandle{i}}});
+  }
+
+  for (const auto &predicate : to_list(abstract_problem.goal)) {
+    problem.goal.push_back({GroundPredicate{predicate}, predicate.negated});
+  }
   return problem;
 }
 

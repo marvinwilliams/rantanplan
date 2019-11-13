@@ -12,18 +12,46 @@
 
 namespace model {
 
-inline bool is_subtype(const ProblemBase &problem, TypeHandle type,
-                       TypeHandle supertype) {
+inline bool is_subtype(TypeHandle type, TypeHandle supertype,
+                       const std::vector<Type> &types) noexcept {
   if (type == supertype) {
     return true;
   }
-  while (problem.types[type].parent != type) {
-    type = problem.types[type].parent;
+  while (types[type].parent != type) {
+    type = types[type].parent;
     if (type == supertype) {
       return true;
     }
   }
   return false;
+}
+
+inline GroundPredicate
+instantiate(const PredicateEvaluation &predicate) noexcept {
+  std::vector<ConstantHandle> arguments;
+  arguments.reserve(predicate.arguments.size());
+  for (const auto &argument : predicate.arguments) {
+    assert(argument.type == Argument::Type::Constant);
+    arguments.emplace_back(argument.handle);
+  }
+  return GroundPredicate{predicate.definition, std::move(arguments)};
+}
+
+inline GroundPredicate
+instantiate(const PredicateEvaluation &predicate,
+            const ParameterAssignment &assignment) noexcept {
+  std::vector<ConstantHandle> arguments;
+  arguments.reserve(predicate.arguments.size());
+  for (const auto &argument : predicate.arguments) {
+    if (argument.handle_type == Argument::Type::Constant) {
+      arguments.emplace_back(argument.handle);
+    } else {
+      assert(assignment.find(ParameterHandle{argument.handle}) !=
+             assignment.end());
+      arguments.push_back(assignment.at(ParameterHandle{argument.handle}));
+    }
+  }
+  return GroundPredicate{predicate.definition, std::move(arguments)};
 }
 
 inline bool is_grounded(const PredicateEvaluation &predicate) noexcept {
@@ -47,9 +75,9 @@ get_mapping(const Action &action,
   std::vector<std::vector<ParameterHandle>> parameter_matches{
       action.parameters.size()};
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (auto parameter_handle =
-            std::get_if<ParameterHandle>(&predicate.arguments[i])) {
-      parameter_matches[*parameter_handle].push_back(ParameterHandle{i});
+    if (predicate.arguments[i].handle_type == Argument::Type::Parameter) {
+      parameter_matches[predicate.arguments[i].handle].push_back(
+          ParameterHandle{i});
     }
   }
 
@@ -69,10 +97,11 @@ get_mapping(const Action &action, const ParameterAssignment &assignment,
   std::vector<std::vector<ParameterHandle>> parameter_matches{
       action.parameters.size()};
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    auto parameter_handle =
-        std::get_if<ParameterHandle>(&predicate.arguments[i]);
-    if (parameter_handle && !assignment[*parameter_handle]) {
-      parameter_matches[*parameter_handle].push_back(ParameterHandle{i});
+    if (predicate.arguments[i].handle_type == Argument::Type::Parameter) {
+      ParameterHandle handle{predicate.arguments[i].handle};
+      if (assignment.find(handle) != assignment.end()) {
+        parameter_matches[handle].push_back(ParameterHandle{i});
+      }
     }
   }
 
@@ -87,11 +116,10 @@ get_mapping(const Action &action, const ParameterAssignment &assignment,
 }
 
 inline ParameterAssignment
-get_assignment(const Action &action, const ParameterMapping &mapping,
-               const std::vector<size_t> &arguments) noexcept {
+get_assignment(const ParameterMapping &mapping,
+               const std::vector<ConstantHandle> &arguments) noexcept {
   assert(arguments.size() == mapping.size());
   ParameterAssignment assignment;
-  assignment.resize(action.parameters.size());
   for (size_t i = 0; i < mapping.size(); ++i) {
     assert(mapping[i].first < action.parameters.size());
     assignment[mapping[i].first] = arguments[i];
@@ -99,87 +127,79 @@ get_assignment(const Action &action, const ParameterMapping &mapping,
   return assignment;
 }
 
-inline GroundPredicateHandle
-get_ground_predicate_handle(const Problem &problem, PredicateHandle handle,
-                            const std::vector<ConstantHandle> &arguments) {
-  const PredicateDefinition &predicate = problem.predicates[handle];
+inline GroundPredicateHandle get_handle(const GroundPredicate &predicate,
+                                        size_t num_constants) {
   size_t factor = 1;
   size_t result = 0;
-  for (size_t i = 0; i < predicate.parameters.size(); ++i) {
-    assert(result <= result + arguments[i] * factor);
-    result += arguments[i] * factor;
-    factor *= problem.constants.size();
+  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
+    assert(result <= result + arguments[i] * factor); // Overflow
+    result += predicate.arguments[i] * factor;
+    factor *= num_constants;
   }
   return GroundPredicateHandle{result};
 }
 
-inline size_t get_num_grounded(const Problem &problem,
-                               PredicateHandle predicate_ptr) {
-  const PredicateDefinition &predicate = problem.predicates[predicate_ptr];
+inline size_t get_num_grounded(const PredicateDefinition &predicate,
+                               const std::vector<std::vector<ConstantHandle>>
+                                   &constants_by_type) noexcept {
   return std::accumulate(
       predicate.parameters.begin(), predicate.parameters.end(), 1ul,
-      [&problem](size_t product, const Parameter &parameter) {
-        return product * problem.constants_by_type[parameter.type].size();
+      [&constants_by_type](size_t product, const Parameter &parameter) {
+        return product * constants_by_type[parameter.type].size();
       });
 }
 
-inline size_t get_num_grounded(const Problem &problem, const Action &action,
-                               const ParameterAssignment &assignment,
-                               const PredicateEvaluation &predicate) {
-  ParameterMapping mapping = get_mapping(action, assignment, predicate);
+inline size_t get_num_grounded(
+    const ParameterMapping &mapping, const Action &action,
+    const std::vector<std::vector<ConstantHandle>> &constants_by_type) {
 
   return std::accumulate(
       mapping.begin(), mapping.end(), 1ul,
-      [&problem, &action](size_t product, const auto &m) {
+      [&action, &constants_by_type](size_t product, const auto &m) {
         return product *
-               problem.constants_by_type[action.parameters[m.first].type]
-                   .size();
+               constants_by_type[action.parameters[m.first].type].size();
       });
 }
 
 template <typename Function>
-void for_grounded_predicate(const Problem &problem,
-                            PredicateHandle predicate_ptr, Function f) {
-  const PredicateDefinition &predicate = problem.predicates[predicate_ptr];
+void for_each_instantiation(const PredicateDefinition &predicate, Function f,
+                            const std::vector<std::vector<ConstantHandle>>
+                                &constants_by_type) noexcept {
   std::vector<size_t> number_arguments;
   number_arguments.reserve(predicate.parameters.size());
   for (const auto &parameter : predicate.parameters) {
-    number_arguments.push_back(
-        problem.constants_by_type[parameter.type].size());
+    number_arguments.push_back(constants_by_type[parameter.type].size());
   }
 
   auto combination_iterator = CombinationIterator{std::move(number_arguments)};
 
+  std::vector<ConstantHandle> arguments(predicate.parameters.size());
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;
-    std::vector<ConstantHandle> arguments;
-    arguments.reserve(combination.size());
     for (size_t i = 0; i < combination.size(); ++i) {
       auto type = predicate.parameters[i].type;
-      auto constant = problem.constants_by_type[type][combination[i]];
-      arguments.push_back(constant);
+      auto constant = constants_by_type[type][combination[i]];
+      arguments[i] = constant;
     }
-    GroundPredicate ground_predicate{predicate_ptr, std::move(arguments)};
-    f(std::move(ground_predicate));
+    f(arguments);
     ++combination_iterator;
   }
 }
 
 template <typename Function>
-void for_grounded_predicate(const Problem &problem, const Action &action,
-                            const ParameterAssignment &assignment,
-                            const PredicateEvaluation &predicate, Function f) {
+void for_each_assignment(const PredicateEvaluation &predicate,
+                            const Action &action,
+                            const ParameterAssignment &assignment, Function f,
+                            const std::vector<std::vector<ConstantHandle>>
+                                &constants_by_type) noexcept {
   std::vector<ConstantHandle> arguments(predicate.arguments.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    const auto &argument = predicate.arguments[i];
-    if (auto constant_handle = std::get_if<ConstantHandle>(&argument)) {
-      arguments[i] = *constant_handle;
+    if (predicate.arguments[i].handle_type == Argument::Type::Constant) {
+      arguments[i] = ConstantHandle{predicate.arguments[i].handle};
     } else {
-      auto parameter_handle = std::get<ParameterHandle>(argument);
-      auto type = action.parameters[parameter_handle].type;
-      if (assignment[parameter_handle]) {
-        arguments[i] =
-            problem.constants_by_type[type][*assignment[parameter_handle]];
+      ParameterHandle handle{predicate.arguments[i].handle};
+      if (auto it = assignment.find(handle); it != assignment.end()) {
+        arguments[i] = it->second;
       }
     }
   }
@@ -190,13 +210,11 @@ void for_grounded_predicate(const Problem &problem, const Action &action,
   argument_sizes.reserve(mapping.size());
   for (const auto &[parameter_handle, predicate_parameters] : mapping) {
     argument_sizes.push_back(
-        problem.constants_by_type[action.parameters[parameter_handle].type]
+        constants_by_type[action.parameters[parameter_handle].type]
             .size());
   }
 
   auto combination_iterator = CombinationIterator{argument_sizes};
-
-  GroundPredicate ground_predicate{predicate.definition, std::move(arguments)};
 
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;

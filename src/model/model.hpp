@@ -61,65 +61,52 @@ template <typename T> struct Handle {
 
 struct Type;
 struct Constant;
-struct Parameter;
-struct PredicateDefinition;
-struct GroundPredicate;
+struct Predicate;
+struct PredicateInstantiation;
 struct Action;
 
 using TypeHandle = Handle<Type>;
 using ConstantHandle = Handle<Constant>;
-using ParameterHandle = Handle<Parameter>;
-using PredicateHandle = Handle<PredicateDefinition>;
-using GroundPredicateHandle = Handle<GroundPredicate>;
+using PredicateHandle = Handle<Predicate>;
+using PredicateInstantiationHandle = Handle<PredicateInstantiation>;
 using ActionHandle = Handle<Action>;
 
 struct Type {
-  Type(const std::string &name, TypeHandle parent)
-      : name{name}, parent{parent} {}
-  std::string name;
   TypeHandle parent;
 };
 
-struct Parameter {
-  explicit Parameter(const std::string &name, TypeHandle type)
-      : name{name}, type{type} {}
-  std::string name;
-  TypeHandle type;
+struct Predicate {
+  std::vector<TypeHandle> parameter_types;
 };
 
-struct PredicateDefinition {
-  explicit PredicateDefinition(const std::string &name) : name{name} {}
-  std::string name;
-  std::vector<Parameter> parameters;
+struct FreeParameter {
+  TypeHandle type;
 };
 
 struct Constant {
-  Constant(const std::string &name, TypeHandle type) : name{name}, type{type} {}
-  std::string name;
   TypeHandle type;
 };
 
-using Argument = std::variant<ConstantHandle, ParameterHandle>;
+using Parameter = std::variant<FreeParameter, Constant>;
+
+using ParameterHandle = Handle<Parameter>;
+
+using Argument = std::variant<ParameterHandle, ConstantHandle>;
 
 struct Junction;
-struct PredicateEvaluation;
+
+struct ConditionPredicate {
+  PredicateHandle predicate;
+  std::vector<Argument> arguments;
+  bool negated = false;
+};
+
 template <bool> struct Trivial {};
 using TrivialTrue = Trivial<true>;
 using TrivialFalse = Trivial<false>;
 
 using Condition =
-    std::variant<Junction, PredicateEvaluation, TrivialTrue, TrivialFalse>;
-
-struct PredicateEvaluation {
-  PredicateEvaluation(PredicateHandle predicate) : definition{predicate} {}
-
-  PredicateEvaluation(PredicateHandle predicate,
-                      std::vector<Argument> arguments)
-      : definition{predicate}, arguments{std::move(arguments)} {}
-  PredicateHandle definition;
-  std::vector<Argument> arguments;
-  bool negated = false;
-};
+    std::variant<Junction, ConditionPredicate, TrivialTrue, TrivialFalse>;
 
 struct Junction {
   enum class Connective { And, Or };
@@ -129,24 +116,20 @@ struct Junction {
 
 using ParameterMapping =
     std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>>;
-using ParameterAssignment = std::vector<std::optional<size_t>>;
+using ParameterAssignment =
+    std::vector<std::pair<ParameterHandle, ConstantHandle>>;
 
 struct Action {
   explicit Action(const std::string &name) : name{name} {}
   std::string name;
   std::vector<Parameter> parameters;
-  std::vector<PredicateEvaluation> preconditions;
-  std::vector<PredicateEvaluation> effects;
+  std::vector<ConditionPredicate> preconditions;
+  std::vector<ConditionPredicate> effects;
 };
 
 inline bool operator==(const Action &first, const Action &second) {
   return first.name == second.name;
 }
-
-struct ActionGrounding {
-  ActionHandle action_handle;
-  ParameterAssignment assignment;
-};
 
 struct ProblemHeader {
   std::string domain_name;
@@ -158,9 +141,12 @@ struct ProblemBase {
   virtual ~ProblemBase() = default;
 
   ProblemHeader header;
-  std::vector<Type> types;
+  std::vector<TypeHandle> types;
+  std::vector<std::string> type_names;
   std::vector<Constant> constants;
-  std::vector<PredicateDefinition> predicates;
+  std::vector<std::string> constant_names;
+  std::vector<Predicate> predicates;
+  std::vector<std::string> predicate_names;
 
 protected:
   ProblemBase() = default;
@@ -171,23 +157,13 @@ protected:
 };
 
 struct Problem : ProblemBase {
-  explicit Problem(const ProblemBase &other) : ProblemBase{other} {
-    constants_by_type.resize(types.size());
-    for (size_t i = 0; i < constants.size(); ++i) {
-      TypeHandle type = constants[i].type;
-      constants_by_type[type].push_back(ConstantHandle{i});
-      while (types[type].parent != type) {
-        type = types[type].parent;
-        constants_by_type[type].push_back(ConstantHandle{i});
-      }
-    }
-  }
+  explicit Problem(const ProblemBase &other) : ProblemBase{other} {}
 
   std::vector<Action> actions;
-  std::vector<PredicateEvaluation> initial_state;
-  std::vector<PredicateEvaluation> goal;
-  std::vector<std::vector<ConstantHandle>> constants_by_type;
-  std::vector<ActionGrounding> action_groundings;
+  std::vector<std::string> action_names;
+  std::vector<std::vector<std::string>> parameter_names;
+  std::vector<PredicateInstantiation> init;
+  std::vector<std::pair<PredicateInstantiation, bool>> goal;
 };
 
 struct AbstractAction {
@@ -199,55 +175,31 @@ struct AbstractAction {
 
 struct AbstractProblem : ProblemBase {
   std::vector<AbstractAction> actions;
-  model::Condition initial_state = TrivialTrue{};
+  model::Condition init = TrivialTrue{};
   model::Condition goal = TrivialTrue{};
 };
 
-struct GroundPredicate {
-  explicit GroundPredicate(PredicateHandle definition,
-                           std::vector<ConstantHandle> arguments)
+struct PredicateInstantiation {
+  explicit PredicateInstantiation(PredicateHandle definition,
+                                  std::vector<ConstantHandle> arguments)
       : definition{definition}, arguments(std::move(arguments)) {}
-
-  explicit GroundPredicate(const PredicateEvaluation &predicate) {
-    definition = predicate.definition;
-    arguments.reserve(predicate.arguments.size());
-    for (const auto &argument : predicate.arguments) {
-      arguments.push_back(std::get<ConstantHandle>(argument));
-    }
-  }
-
-  explicit GroundPredicate(const Problem &problem, const Action &action,
-                           const ParameterAssignment &assignment,
-                           const PredicateEvaluation &predicate) {
-    definition = predicate.definition;
-    arguments.reserve(predicate.arguments.size());
-    for (const auto &argument : predicate.arguments) {
-      if (const ConstantHandle *p = std::get_if<ConstantHandle>(&argument)) {
-        arguments.push_back(*p);
-      } else {
-        auto parameter_handle = std::get<ParameterHandle>(argument);
-        arguments.push_back(
-            problem.constants_by_type[action.parameters[parameter_handle].type]
-                                     [*assignment[parameter_handle]]);
-      }
-    }
-  }
 
   PredicateHandle definition;
   std::vector<ConstantHandle> arguments;
 };
 
-inline bool operator==(const GroundPredicate &first,
-                       const GroundPredicate &second) {
+inline bool operator==(const PredicateInstantiation &first,
+                       const PredicateInstantiation &second) {
   return first.definition == second.definition &&
          first.arguments == second.arguments;
 }
 
 namespace hash {
 
-struct GroundPredicate {
-  size_t operator()(const ::model::GroundPredicate &predicate) const noexcept {
-    size_t hash = Handle<PredicateDefinition>{}(predicate.definition);
+struct PredicateInstantiation {
+  size_t operator()(const ::model::PredicateInstantiation &predicate) const
+      noexcept {
+    size_t hash = Handle<Predicate>{}(predicate.definition);
     for (ConstantHandle p : predicate.arguments) {
       hash ^= Handle<Constant>{}(p);
     }

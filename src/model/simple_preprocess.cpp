@@ -86,21 +86,12 @@ struct PreprocessSupport {
       for (const auto &effect : action.effects) {
         if (effect.definition == predicate.definition &&
             effect.negated != negated) {
-          /* printf("is %s ground of %s\n", to_string(predicate, */
-          /* problem).c_str(), */ 
-          /*        to_string(effect, action, problem).c_str()); */ 
           if (is_groundable(problem, action,
                             ParameterAssignment(action.parameters.size()),
                             effect, predicate.arguments)) {
             for (const auto &assignment : action_assignments[i]) {
-              /* printf("is %s ground of %s with assignment\n", */
-              /*        to_string(predicate, problem).c_str(), */
-              /* to_string(effect, {ActionHandle{i}, assignment}, */
-              /*   problem) */ 
-              /*            .c_str()); */
               if (is_groundable(problem, action, assignment, effect,
                                 predicate.arguments)) {
-                /* printf("Yes\n"); */
                 return false;
               }
             }
@@ -108,13 +99,11 @@ struct PreprocessSupport {
         }
       }
     }
-    /* printf("is new rigid: %s (%s)\n", to_string(predicate, problem).c_str(), negated? "negated": "not negated"); */
     rigid.insert(handle);
-    /* in_no_effect[predicate.definition].insert(handle); */
     return true;
   }
 
-  void refine() {
+  template <typename Function> void refine(Function &&best_predicate) {
     LOG_INFO(logger, "New grounding iteration with %lu action(s)",
              std::accumulate(action_assignments.begin(),
                              action_assignments.end(), 0ul,
@@ -158,18 +147,27 @@ struct PreprocessSupport {
           continue;
         }
 
-        size_t min_num_new = std::numeric_limits<size_t>::max();
+        size_t min_value = std::numeric_limits<size_t>::max();
         const PredicateEvaluation *predicate_to_ground = nullptr;
 
         for (size_t k : to_check) {
           const auto &predicate = action.preconditions[k];
-          size_t num_new =
-              get_num_grounded(problem, action, assignment, predicate);
-          if (num_new < min_num_new) {
-            min_num_new = num_new;
+          size_t value = best_predicate(action, assignment, predicate);
+          if (value < min_value) {
+            min_value = value;
             predicate_to_ground = &predicate;
           }
         }
+
+        /* for (size_t k : to_check) { */
+        /*   const auto &predicate = action.preconditions[k]; */
+        /*   size_t num_new = */
+        /*       get_num_grounded(problem, action, assignment, predicate); */
+        /*   if (num_new < min_num_new) { */
+        /*     min_num_new = num_new; */
+        /*     predicate_to_ground = &predicate; */
+        /*   } */
+        /* } */
 
         assert(predicate_to_ground);
 
@@ -202,41 +200,6 @@ struct PreprocessSupport {
       }
       action_assignments[i] = std::move(new_assignments);
     }
-    /* if (!refinement_possible) { */
-    /* puts("Filter actions"); */
-    /*   for (size_t i = 0; i < problem.actions.size(); ++i) { */
-    /*     const auto &action = problem.actions[i]; */
-    /*     std::vector<ParameterAssignment> new_assignments; */
-    /*     std::vector<std::vector<bool>> new_predicate_checked; */
-    /*     for (size_t j = 0; j < action_assignments[i].size(); ++j) { */
-    /*       const auto &assignment = action_assignments[i][j]; */
-    /*       bool valid = true; */
-    /*       for (size_t k = 0; k < action.preconditions.size(); ++k) { */
-    /*         const auto &predicate = action.preconditions[k]; */
-    /*         if (!predicate_checked[i][j][k] && */
-    /*             is_grounded(assignment, predicate)) { */
-    /*           auto ground_predicate = */
-    /*               GroundPredicate{problem, action, assignment, predicate}; */
-    /*           if (is_rigid(ground_predicate, !predicate.negated)) { */
-    /*             valid = false; */
-    /*             break; */
-    /*           } */
-    /*           if (is_rigid(ground_predicate, predicate.negated)) { */
-    /*             predicate_checked[i][j][k] = true; */
-    /*           } */
-    /*         } */
-    /*       } */
-    /*       if (valid) { */
-    /*         new_predicate_checked.push_back(predicate_checked[i][j]); */
-    /*         new_assignments.push_back(std::move(assignment)); */
-    /*       } else { */
-    /*         refinement_possible = true; */
-    /*       } */
-    /*     } */
-    /*     action_assignments[i] = std::move(new_assignments); */
-    /*     predicate_checked[i] = std::move(new_predicate_checked); */
-    /*   } */
-    /* } */
   }
 
   std::vector<
@@ -271,7 +234,10 @@ void preprocess(Problem &problem, const Config &config) {
   PreprocessSupport support{problem};
 
   while (support.refinement_possible) {
-    support.refine();
+    support.refine([&problem](const auto &action, const auto &assignment,
+                              const auto &predicate) {
+      return get_num_grounded(problem, action, assignment, predicate);
+    });
   }
 
   for (size_t i = 0; i < problem.actions.size(); ++i) {
