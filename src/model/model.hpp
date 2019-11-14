@@ -60,44 +60,38 @@ template <typename T> struct Handle {
 } // namespace hash
 
 struct Type;
-struct Constant;
-struct Predicate;
-struct PredicateInstantiation;
-struct Action;
-
 using TypeHandle = Handle<Type>;
-using ConstantHandle = Handle<Constant>;
-using PredicateHandle = Handle<Predicate>;
-using PredicateInstantiationHandle = Handle<PredicateInstantiation>;
-using ActionHandle = Handle<Action>;
 
 struct Type {
   TypeHandle parent;
 };
 
+struct Predicate;
+using PredicateHandle = Handle<Predicate>;
+
 struct Predicate {
   std::vector<TypeHandle> parameter_types;
 };
 
-struct FreeParameter {
-  TypeHandle type;
-};
+struct Constant;
+using ConstantHandle = Handle<Constant>;
 
 struct Constant {
   TypeHandle type;
 };
 
-using Parameter = std::variant<FreeParameter, Constant>;
+struct Parameter {
+  bool constant;
+  size_t index;
+};
 
 using ParameterHandle = Handle<Parameter>;
-
-using Argument = std::variant<ParameterHandle, ConstantHandle>;
 
 struct Junction;
 
 struct ConditionPredicate {
-  PredicateHandle predicate;
-  std::vector<Argument> arguments;
+  PredicateHandle definition;
+  std::vector<Parameter> arguments;
   bool negated = false;
 };
 
@@ -114,70 +108,8 @@ struct Junction {
   std::vector<Condition> arguments;
 };
 
-using ParameterMapping =
-    std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>>;
-using ParameterAssignment =
-    std::vector<std::pair<ParameterHandle, ConstantHandle>>;
-
-struct Action {
-  explicit Action(const std::string &name) : name{name} {}
-  std::string name;
-  std::vector<Parameter> parameters;
-  std::vector<ConditionPredicate> preconditions;
-  std::vector<ConditionPredicate> effects;
-};
-
-inline bool operator==(const Action &first, const Action &second) {
-  return first.name == second.name;
-}
-
-struct ProblemHeader {
-  std::string domain_name;
-  std::string problem_name;
-  std::vector<std::string> requirements;
-};
-
-struct ProblemBase {
-  virtual ~ProblemBase() = default;
-
-  ProblemHeader header;
-  std::vector<TypeHandle> types;
-  std::vector<std::string> type_names;
-  std::vector<Constant> constants;
-  std::vector<std::string> constant_names;
-  std::vector<Predicate> predicates;
-  std::vector<std::string> predicate_names;
-
-protected:
-  ProblemBase() = default;
-  ProblemBase(const ProblemBase &) = default;
-  ProblemBase(ProblemBase &&) = default;
-  ProblemBase &operator=(const ProblemBase &) = default;
-  ProblemBase &operator=(ProblemBase &&) = default;
-};
-
-struct Problem : ProblemBase {
-  explicit Problem(const ProblemBase &other) : ProblemBase{other} {}
-
-  std::vector<Action> actions;
-  std::vector<std::string> action_names;
-  std::vector<std::vector<std::string>> parameter_names;
-  std::vector<PredicateInstantiation> init;
-  std::vector<std::pair<PredicateInstantiation, bool>> goal;
-};
-
-struct AbstractAction {
-  std::string name;
-  std::vector<Parameter> parameters;
-  Condition precondition = TrivialTrue{};
-  Condition effect = TrivialTrue{};
-};
-
-struct AbstractProblem : ProblemBase {
-  std::vector<AbstractAction> actions;
-  model::Condition init = TrivialTrue{};
-  model::Condition goal = TrivialTrue{};
-};
+struct PredicateInstantiation;
+using PredicateInstantiationHandle = Handle<PredicateInstantiation>;
 
 struct PredicateInstantiation {
   explicit PredicateInstantiation(PredicateHandle definition,
@@ -208,6 +140,64 @@ struct PredicateInstantiation {
 };
 
 } // namespace hash
+
+struct Action;
+using ActionHandle = Handle<Action>;
+
+struct Action {
+  std::vector<Parameter> parameters;
+  std::vector<ConditionPredicate> preconditions;
+  std::vector<ConditionPredicate> effects;
+  std::vector<std::pair<PredicateInstantiation, bool>> pre_instantiated;
+  std::vector<std::pair<PredicateInstantiation, bool>> eff_instantiated;
+};
+
+struct AbstractAction {
+  std::vector<Parameter> parameters;
+  Condition precondition = TrivialTrue{};
+  Condition effect = TrivialTrue{};
+};
+
+struct ProblemHeader {
+  std::string domain_name;
+  std::string problem_name;
+  std::vector<std::string> requirements;
+};
+
+struct ProblemBase {
+  virtual ~ProblemBase() = default;
+
+  ProblemHeader header;
+  std::vector<Type> types;
+  std::vector<std::string> type_names;
+  std::vector<Constant> constants;
+  std::vector<std::string> constant_names;
+  std::vector<Predicate> predicates;
+  std::vector<std::string> predicate_names;
+
+protected:
+  ProblemBase() = default;
+  ProblemBase(const ProblemBase &) = default;
+  ProblemBase(ProblemBase &&) = default;
+  ProblemBase &operator=(const ProblemBase &) = default;
+  ProblemBase &operator=(ProblemBase &&) = default;
+};
+
+struct AbstractProblem : ProblemBase {
+  std::vector<AbstractAction> actions;
+  std::vector<std::string> action_names;
+  model::Condition init = TrivialTrue{};
+  model::Condition goal = TrivialTrue{};
+};
+
+struct Problem : ProblemBase {
+  explicit Problem(const ProblemBase &other) : ProblemBase{other} {}
+
+  std::vector<Action> actions;
+  std::vector<std::string> action_names;
+  std::vector<PredicateInstantiation> init;
+  std::vector<std::pair<PredicateInstantiation, bool>> goal;
+};
 
 } // namespace model
 
