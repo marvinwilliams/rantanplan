@@ -1,6 +1,7 @@
 #include "pddl/pddl_visitor.hpp"
 #include "model/model.hpp"
 #include "model/model_utils.hpp"
+#include "model/problem.hpp"
 #include "pddl/ast.hpp"
 #include "pddl/parser_exception.hpp"
 
@@ -12,50 +13,42 @@ namespace pddl {
 
 logging::Logger PddlAstParser::logger{"Ast"};
 
-std::unique_ptr<model::AbstractProblem> PddlAstParser::parse(const AST &ast) {
+Problem PddlAstParser::parse(const AST &ast) {
   LOG_INFO(logger, "Traverse AST");
-  header_ = model::ProblemHeader{};
-  auto problem = std::make_unique<model::AbstractProblem>();
-  problem_ = problem.get();
+  problem_ = Problem{};
   context_ = Context{};
 
-  context_.type_lookup["_root"] = model::TypeHandle{0};
-  problem_->types.push_back(model::Type{model::TypeHandle{0}});
-  problem_->type_names.push_back("_root");
-  context_.predicate_lookup["="] = model::PredicateHandle{0};
-  problem_->predicates.emplace_back(model::TypeHandle{0}, model::TypeHandle{0});
-  problem->predicate_names.push_back("=");
+  problem_.add_predicate("=")
+      .add_parameter_type(problem_.get_root_type().name)
+      .add_parameter_type(problem_.get_root_type().name);
 
-  traverse(ast);
-
-  problem_->header = std::move(header_);
+  try {
+    traverse(ast);
+  } catch (const ModelException &e) {
+    throw ParserException{*current_location_, "Error constructing the model: " +
+                                                  std::string{e.what()}};
+  }
 
   LOG_INFO(logger,
            "Problem has\n%lu requirements\n%lu types\n%lu constants\n%lu "
            "predicates\n%lu actions",
-           problem_->header.requirements.size(), problem_->types.size(),
-           problem_->constants.size(), problem->predicates.size(),
-           problem->actions.size());
+           context_.num_requirements, context_.num_types,
+           context_.num_constants, context_.num_predicates,
+           context_.num_actions);
 
-  return problem;
+  return problem_;
 }
 
 bool PddlAstParser::visit_begin(const ast::Domain &domain) {
   LOG_DEBUG(logger, "Visiting domain '%s'", domain.name->name.c_str());
-  header_.domain_name = domain.name->name;
+  problem_.set_domain_name(domain.name->name);
   return true;
 }
 
 bool PddlAstParser::visit_begin(const ast::Problem &problem) {
   LOG_DEBUG(logger, "Visiting problem '%s' with domain reference '%s'",
             problem.name->name.c_str(), problem.domain_ref->name.c_str());
-  if (problem.domain_ref->name != header_.domain_name) {
-    std::string msg = "Domain reference \'" + problem.domain_ref->name +
-                      "\' does not match domain name \'" + header_.domain_name +
-                      "\'";
-    throw ParserException(problem.domain_ref->location, msg.c_str());
-  }
-  header_.problem_name = problem.name->name;
+  problem_.set_problem_name(problem.name->name, problem.domain_ref->name);
   return true;
 }
 
@@ -63,43 +56,27 @@ bool PddlAstParser::visit_begin(const ast::SingleTypeIdentifierList &list) {
   LOG_DEBUG(logger, "Visiting identifier list of type '%s'",
             list.type ? list.type->name.c_str() : "_root");
   if (list.type) {
-    if (auto it = context_.type_lookup.find(list.type->name);
-        it != context_.type_lookup.end()) {
-      context_.type_handle = it->second;
-    } else if (list.type->name == "object") {
-      context_.type_handle = model::TypeHandle{0};
-    } else {
-      std::string msg = "Type \'" + list.type->name + "\' undefined";
-      throw ParserException(list.type->location, msg.c_str());
-    }
+    context_.current_type = problem_.get_type(list.type->name).name;
   }
   return true;
 }
 
 bool PddlAstParser::visit_end(const ast::SingleTypeIdentifierList &) {
-  context_.type_handle = model::TypeHandle{0};
+  context_.current_type = problem_.get_root_type().name;
   return true;
 }
 
 bool PddlAstParser::visit_begin(const ast::SingleTypeVariableList &list) {
   LOG_DEBUG(logger, "Visiting variable list of type '%s'",
             list.type ? list.type->name.c_str() : "_root");
-  if (!list.type) {
-    if (auto it = context_.type_lookup.find(list.type->name);
-        it != context_.type_lookup.end()) {
-      context_.type_handle = it->second;
-    } else if (list.type->name == "object") {
-      context_.type_handle = model::TypeHandle{0};
-    } else {
-      std::string msg = "Type \'" + list.type->name + "\' undefined";
-      throw ParserException(list.type->location, msg.c_str());
-    }
+  if (list.type) {
+    context_.current_type = problem_.get_type(list.type->name).name;
   }
   return true;
 }
 
 bool PddlAstParser::visit_end(const ast::SingleTypeVariableList &) {
-  context_.type_handle = model::TypeHandle{0};
+  context_.current_type = problem_.get_root_type().name;
   return true;
 }
 
@@ -108,30 +85,13 @@ bool PddlAstParser::visit_begin(const ast::IdentifierList &list) {
   case State::Types:
     LOG_DEBUG(logger, "Visiting identifier list as types");
     for (const auto &name : *list.elements) {
-      if (auto [it, success] = context_.type_lookup.insert(
-              {name->name, model::TypeHandle{context_.type_lookup.size()}});
-          success) {
-        problem_->types.push_back(model::Type{context_.type_handle});
-        problem_->type_names.push_back(it->first);
-      } else {
-        std::string msg = "Type \'" + name->name + "\' already defined";
-        throw ParserException(name->location, msg.c_str());
-      }
+      problem_.add_type(name->name, context_.current_type);
     }
     break;
   case State::Constants:
     LOG_DEBUG(logger, "Visiting identifier list as constants");
     for (const auto &name : *list.elements) {
-      if (auto [it, success] = context_.constant_lookup.insert(
-              {name->name,
-               model::ConstantHandle{context_.constant_lookup.size()}});
-          success) {
-        problem_->constants.push_back(model::Constant{context_.type_handle});
-        problem_->constant_names.push_back(it->first);
-      } else {
-        std::string msg = "Constant \'" + name->name + "\' already defined";
-        throw ParserException(name->location, msg.c_str());
-      }
+      problem_.add_constant(name->name, context_.current_type);
     }
     break;
   default:
@@ -162,7 +122,7 @@ bool PddlAstParser::visit_begin(const ast::VariableList &list) {
       }
     } else {
       std::string msg = "Parameter \'" + variable->name + "\' already defined";
-      throw ParserException(variable->location, msg.c_str());
+      throw ParserException(variable->location, msg);
     }
   }
   return true;
@@ -184,7 +144,7 @@ bool PddlAstParser::visit_begin(const ast::ArgumentList &list) {
     msg << "Wrong number of arguments: Expected "
         << problem_->predicates[predicate->definition].parameter_types.size()
         << " but got " << list.elements->size();
-    throw ParserException(list.location, msg.str().c_str());
+    throw ParserException(list.location, msg.str());
   }
 
   for (size_t i = 0; i < list.elements->size(); ++i) {
@@ -202,13 +162,13 @@ bool PddlAstParser::visit_begin(const ast::ArgumentList &list) {
                             problem_->type_names[predicate_type] +
                             "\' but got type \'" +
                             problem_->type_names[constant_type] + "\'";
-          throw ParserException((*name)->location, msg.c_str());
+          throw ParserException((*name)->location, msg);
         }
 
         predicate->arguments.emplace_back(true, it->second);
       } else {
         std::string msg = "Constant \'" + (*name)->name + "\' undefined";
-        throw ParserException((*name)->location, msg.c_str());
+        throw ParserException((*name)->location, msg);
       }
     } else if (auto variable =
                    std::get_if<std::unique_ptr<ast::Variable>>(&argument)) {
@@ -230,14 +190,14 @@ bool PddlAstParser::visit_begin(const ast::ArgumentList &list) {
                             problem_->type_names[predicate_type] +
                             "\' but got type \'" +
                             problem_->type_names[parameter_type] + "\'";
-          throw ParserException((*variable)->location, msg.c_str());
+          throw ParserException((*variable)->location, msg);
         }
         predicate->arguments.emplace_back(false, it->second);
       } else {
         std::string msg = "Parameter \'" + (*variable)->name +
                           "\' undefined in action \'" +
                           problem_->action_names.back() + "\'";
-        throw ParserException((*variable)->location, msg.c_str());
+        throw ParserException((*variable)->location, msg);
       }
     } else {
       throw ParserException("Internal error occurred while parsing");
@@ -333,7 +293,7 @@ bool PddlAstParser::visit_begin(const ast::Predicate &ast_predicate) {
   } else {
     std::string msg =
         "Predicate \'" + ast_predicate.name->name + "\' already defined";
-    throw ParserException(ast_predicate.name->location, msg.c_str());
+    throw ParserException(ast_predicate.name->location, msg);
   }
   return true;
 }
@@ -348,7 +308,7 @@ bool PddlAstParser::visit_begin(const ast::PredicateEvaluation &ast_predicate) {
   } else {
     std::string msg =
         "Predicate \'" + ast_predicate.name->name + "\' not defined";
-    throw ParserException(ast_predicate.name->location, msg.c_str());
+    throw ParserException(ast_predicate.name->location, msg);
   }
   return true;
 }

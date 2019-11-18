@@ -2,7 +2,8 @@
 #define PDDL_VISITOR_HPP
 
 #include "logging/logging.hpp"
-#include "model/model.hpp"
+#include "model/problem.hpp"
+#include "pddl/ast.hpp"
 #include "pddl/visitor.hpp"
 
 #include <algorithm>
@@ -30,12 +31,13 @@ public:
     };
 
     bool negated = false;
-    model::TypeHandle type_handle{0};
-    std::unordered_map<std::string, model::ParameterHandle> parameter_lookup;
-    std::unordered_map<std::string, model::TypeHandle> type_lookup;
-    std::unordered_map<std::string, model::ConstantHandle> constant_lookup;
-    std::unordered_map<std::string, model::PredicateHandle> predicate_lookup;
-    std::vector<model::Condition> condition_stack_;
+    std::string current_type = "";
+    size_t num_requirements = 0;
+    size_t num_types = 0;
+    size_t num_constants = 0;
+    size_t num_predicates = 0;
+    size_t num_actions = 0;
+    std::vector<Condition> condition_stack;
     State state;
   };
 
@@ -43,7 +45,7 @@ public:
 
   static logging::Logger logger;
 
-  std::unique_ptr<model::AbstractProblem> parse(const AST &ast);
+  Problem parse(const AST &ast);
 
 private:
   using Visitor<PddlAstParser>::traverse;
@@ -79,8 +81,7 @@ private:
   bool visit_begin(const ast::Requirement &ast_requirement);
 
   Context context_;
-  model::AbstractProblem *problem_;
-  model::ProblemHeader header_;
+  Problem problem_;
 };
 
 } // namespace pddl

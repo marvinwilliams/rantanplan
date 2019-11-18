@@ -1,6 +1,7 @@
 #include "model/problem.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <list>
 #include <string>
 #include <variant>
@@ -10,7 +11,7 @@ bool is_subtype(const Type *subtype, const Type *supertype) {
   if (subtype == supertype) {
     return true;
   }
-  while (subtype->supertype != subtype) {
+  while (subtype->supertype != nullptr) {
     subtype = subtype->supertype;
     if (subtype == supertype) {
       return true;
@@ -19,117 +20,124 @@ bool is_subtype(const Type *subtype, const Type *supertype) {
   return false;
 }
 
-void Predicate::add_parameter_type(const std::string &type) {
-  parameter_types_.push_back(&problem_->get_type(type));
+Predicate &Predicate::add_parameter_type(const std::string &type) {
+  parameter_types_.push_back(&problem->get_type(type));
+  return *this;
 }
 
-const std::vector<const Type *> &Predicate::get_parameter_types() const {
-  return parameter_types_;
-}
+const auto &Predicate::get_parameter_types() const { return parameter_types_; }
 
-void AtomicCondition::add_bound_argument(const std::string &parameter) {
-  if (finished_) {
-    throw ModelException{"Internal model exception"};
+AtomicCondition::AtomicCondition(bool positive, ConditionContext context,
+                                 const Predicate *predicate,
+                                 const Action *action, const Problem *problem)
+    : positive{positive}, context{context}, predicate{predicate},
+      action{action}, problem{problem} {
+  if (action && context != ConditionContext::Precondition &&
+      context != ConditionContext::Effect) {
+    throw ModelException{"Invalid condition context"};
+  } else if (!action && context != ConditionContext::Init &&
+             context != ConditionContext::Goal) {
+    throw ModelException{"Invalid condition context"};
   }
-  if (!action_) {
+  if (predicate->name == "=" && context != ConditionContext::Precondition) {
+    throw ModelException{"Predicate \"=\" can only be used in preconditions"};
+  }
+}
+
+AtomicCondition &
+AtomicCondition::add_bound_argument(const std::string &parameter) {
+  if (context != ConditionContext::Precondition &&
+      context != ConditionContext::Effect) {
     throw ModelException{"Variable arguments can only occur within actions"};
   }
-  auto p = &action_->get_parameter(parameter);
+  assert(action);
+  if (arguments_.size() == predicate->get_parameter_types().size()) {
+    throw ModelException{
+        "Number of arguments exceeded: Predicate takes " +
+        std::to_string(predicate->get_parameter_types().size()) + " arguments"};
+  }
+  auto p = &action->get_parameter(parameter);
   if (!is_subtype(p->type,
-                  predicate_->get_parameter_types()[arguments_.size()])) {
+                  predicate->get_parameter_types()[arguments_.size()])) {
     throw ModelException{
         "Type mismatch of bound argument \'" + parameter +
         "\': Expected a subtype of \'" +
-        predicate_->get_parameter_types()[arguments_.size()]->name +
+        predicate->get_parameter_types()[arguments_.size()]->name +
         "\' but got type \'" + p->type->name};
   }
   arguments_.push_back(p);
+  return *this;
 }
 
-void AtomicCondition::add_constant_argument(const std::string &constant) {
-  if (finished_) {
-    throw ModelException{"Internal model exception"};
+AtomicCondition &
+AtomicCondition::add_constant_argument(const std::string &constant) {
+  if (arguments_.size() == predicate->get_parameter_types().size()) {
+    throw ModelException{
+        "Number of arguments exceeded: Predicate takes " +
+        std::to_string(predicate->get_parameter_types().size()) + " arguments"};
   }
-  auto c = &problem_->get_constant(constant);
+  auto c = &problem->get_constant(constant);
   if (!is_subtype(c->type,
-                  predicate_->get_parameter_types()[arguments_.size()])) {
+                  predicate->get_parameter_types()[arguments_.size()])) {
     throw ModelException{
         "Type mismatch of constant argument \'" + constant +
         "\': Expected a subtype of \'" +
-        predicate_->get_parameter_types()[arguments_.size()]->name +
+        predicate->get_parameter_types()[arguments_.size()]->name +
         "\' but got type \'" + c->type->name};
   }
   arguments_.push_back(c);
+  return *this;
 }
 
-void AtomicCondition::finish() {
-  if (finished_) {
-    throw ModelException{"Internal model exception"};
-  }
-  if (arguments_.size() != predicate_->get_parameter_types().size()) {
+const auto &AtomicCondition::get_arguments() const { return arguments_; }
+
+void AtomicCondition::check_complete() const {
+  assert(arguments_.size() <= predicate->get_parameter_types().size());
+  if (arguments_.size() != predicate->get_parameter_types().size()) {
     throw ModelException{
         "Too few arguments: Expected " +
-        std::to_string(predicate_->get_parameter_types().size()) + " but got " +
+        std::to_string(predicate->get_parameter_types().size()) + " but got " +
         std::to_string(arguments_.size())};
   }
-  finished_ = true;
 }
 
-AtomicCondition &
-Conjunction::add_atomic_condition(bool positive, const std::string &predicate) {
-  finish_prev();
-  conditions_.emplace_back(
-      AtomicCondition{positive, &problem_->get_predicate(predicate), problem_});
-  return std::get<AtomicCondition>(conditions_.back());
-}
+Junction::Junction(Operator op, bool positive, ConditionContext context,
+                   const Action *action, const Problem *problem)
+    : op{op}, positive{positive}, context{context}, action{action},
+      problem{problem} {
+  if (context == ConditionContext::Init) {
+    throw ModelException{"Invalid condition context"};
+  }
 
-Conjunction &Conjunction::add_conjuction(bool positive) {
-  finish_prev();
-  conditions_.emplace_back(Conjunction{positive, problem_});
-  return std::get<Conjunction>(conditions_.back());
-}
+  if (action && context != ConditionContext::Precondition &&
+      context != ConditionContext::Effect) {
+    throw ModelException{"Invalid condition context"};
+  } else if (!action && context != ConditionContext::Init &&
+             context != ConditionContext::Goal) {
+    throw ModelException{"Invalid condition context"};
+  }
 
-Disjunction &Conjunction::add_disjunction(bool positive) {
-  finish_prev();
-  conditions_.emplace_back(Disjunction{positive, problem_});
-  return std::get<Disjunction>(conditions_.back());
-}
-
-void Conjunction::finish_prev() {
-  if (!conditions_.empty()) {
-    if (auto p = std::get_if<AtomicCondition>(&conditions_.back())) {
-      p->finish();
-    }
+  if ((!positive || op == Operator::Or) &&
+      context == ConditionContext::Effect) {
+    throw ModelException{
+        "Only positive conjunctions are not allowed in effects"};
   }
 }
 
-AtomicCondition &
-Disjunction::add_atomic_condition(bool positive, const std::string &predicate) {
-  finish_prev();
-  conditions_.emplace_back(
-      AtomicCondition{positive, &problem_->get_predicate(predicate), problem_});
-  return std::get<AtomicCondition>(conditions_.back());
-}
-
-Conjunction &Disjunction::add_conjuction(bool positive) {
-  finish_prev();
-  conditions_.emplace_back(Conjunction{positive, problem_});
-  return std::get<Conjunction>(conditions_.back());
-}
-
-Disjunction &Disjunction::add_disjunction(bool positive) {
-  finish_prev();
-  conditions_.emplace_back(Disjunction{positive, problem_});
-  return std::get<Disjunction>(conditions_.back());
-}
-
-void Disjunction::finish_prev() {
-  if (!conditions_.empty()) {
-    if (auto p = std::get_if<AtomicCondition>(&conditions_.back())) {
-      p->finish();
-    }
+Junction &Junction::add_condition(Condition condition) {
+  if (!std::visit(
+          [this](const auto &c) {
+            return c.context == context && c.action == action &&
+                   c.problem == problem;
+          },
+          condition)) {
+    throw ModelException{"Condition must be from the same context"};
   }
+  conditions_.push_back(std::move(condition));
+  return *this;
 }
+
+const auto &Junction::get_conditions() const { return conditions_; }
 
 const Parameter &Action::get_parameter(const std::string &name) const {
   auto it = std::find_if(parameters_.begin(), parameters_.end(),
@@ -140,48 +148,41 @@ const Parameter &Action::get_parameter(const std::string &name) const {
   return *it;
 }
 
-void Action::add_parameter(std::string name, const std::string &type) {
+Action &Action::add_parameter(std::string name, const std::string &type) {
   if (std::find_if(parameters_.begin(), parameters_.end(),
                    [&name](const auto &t) { return t.name == name; }) !=
       parameters_.end()) {
     throw ModelException{"Parameter \'" + name + "\' already exists"};
   }
-  parameters_.emplace_back(std::move(name), &problem_->get_type(type));
+  parameters_.emplace_back(std::move(name), &problem->get_type(type));
+  return *this;
 }
 
-AtomicCondition &Action::set_atomic_precondition(bool negated,
-                                                 const std::string &predicate) {
-  precondition_ =
-      AtomicCondition{negated, &problem_->get_predicate(predicate), problem_};
-  return std::get<AtomicCondition>(precondition_);
+void Action::set_precondition(Condition condition) {
+  if (!std::visit(
+          [this](const auto &c) {
+            return c.context == ConditionContext::Precondition &&
+                   c.action == this && c.problem == problem;
+          },
+          condition)) {
+    throw ModelException{"Condition must be from the same context"};
+  }
 }
 
-Conjunction &Action::set_conjunctive_precondition(bool negated) {
-  precondition_ = Conjunction{negated, problem_};
-  return std::get<Conjunction>(precondition_);
+void Action::set_effect(Condition condition) {
+  if (!std::visit(
+          [this](const auto &c) {
+            return c.context == ConditionContext::Effect && c.action == this &&
+                   c.problem == problem;
+          },
+          condition)) {
+    throw ModelException{"Condition must be from the same context"};
+  }
 }
 
-Disjunction &Action::set_disjunctive_precondition(bool negated) {
-  precondition_ = Disjunction{negated, problem_};
-  return std::get<Disjunction>(precondition_);
-}
-
-AtomicCondition &Action::set_atomic_effect(bool negated,
-                                           const std::string &predicate) {
-  effect_ =
-      AtomicCondition{negated, &problem_->get_predicate(predicate), problem_};
-  return std::get<AtomicCondition>(effect_);
-}
-
-Conjunction &Action::set_conjunctive_effect(bool negated) {
-  effect_ = Conjunction{negated, problem_};
-  return std::get<Conjunction>(effect_);
-}
-
-Disjunction &Action::set_disjunctive_effect(bool negated) {
-  effect_ = Disjunction{negated, problem_};
-  return std::get<Disjunction>(effect_);
-}
+const auto &Action::get_parameters() const { return parameters_; }
+const Condition &Action::get_precondition() const { return precondition_; }
+const Condition &Action::get_effect() const { return effect_; }
 
 void Problem::set_domain_name(std::string name) {
   if (name.empty()) {
@@ -202,8 +203,9 @@ void Problem::set_problem_name(std::string name,
   problem_name_ = std::move(name);
 }
 
-void Problem::add_requirement(std::string name) {
+Problem &Problem::add_requirement(std::string name) {
   requirements_.push_back(std::move(name));
+  return *this;
 }
 
 const Type &Problem::get_type(const std::string &name) const {
@@ -218,13 +220,16 @@ const Type &Problem::get_type(const std::string &name) const {
   return *it;
 }
 
-void Problem::add_type(std::string name, const std::string &supertype) {
+const Type &Problem::get_root_type() const { return *types_.begin(); }
+
+Problem &Problem::add_type(std::string name, const std::string &supertype) {
   if (std::find_if(types_.begin(), types_.end(), [&name](const auto &t) {
         return t.name == name;
       }) != types_.end()) {
     throw ModelException{"Type \'" + name + "\' already exists"};
   }
   types_.emplace_back(std::move(name), &get_type(supertype));
+  return *this;
 }
 
 const Constant &Problem::get_constant(const std::string &name) const {
@@ -235,13 +240,14 @@ const Constant &Problem::get_constant(const std::string &name) const {
   return *it;
 }
 
-void Problem::add_constant(std::string name, std::string type) {
+Problem &Problem::add_constant(std::string name, std::string type) {
   if (std::find_if(constants_.begin(), constants_.end(), [&name](const auto c) {
         return c.name == name;
       }) != constants_.end()) {
     throw ModelException{"Constant \'" + name + "\' already exists"};
   }
   constants_.emplace_back(std::move(name), &get_type(type));
+  return *this;
 }
 
 const Predicate &Problem::get_predicate(const std::string &name) const {
@@ -253,22 +259,30 @@ const Predicate &Problem::get_predicate(const std::string &name) const {
   return *it;
 }
 
-Predicate &Problem::add_predicate(std::string name) {
-  if (std::find_if(predicates_.begin(), predicates_.end(),
-                   [&name](const auto &p) { return p.name == name; }) !=
-      predicates_.end()) {
-    throw ModelException{"Predicate \'" + name + "\' already exists"};
+Problem &Problem::add_predicate(Predicate predicate) {
+  if (predicate.problem != this) {
+    throw ModelException{"Predicate must be from the same context"};
   }
-  predicates_.emplace_back(std::move(name), this);
-  return predicates_.back();
+  if (std::find_if(predicates_.begin(), predicates_.end(),
+                   [&name = predicate.name](const auto &p) {
+                     return p.name == name;
+                   }) != predicates_.end()) {
+    throw ModelException{"Predicate \'" + predicate.name + "\' already exists"};
+  }
+  predicates_.push_back(std::move(predicate));
+  return *this;
 }
 
-Action &Problem::add_action(std::string name) {
-  if (std::find_if(actions_.begin(), actions_.end(), [&name](const auto &p) {
-        return p.name == name;
-      }) != actions_.end()) {
-    throw ModelException{"Action \'" + name + "\' already exists"};
+Problem &Problem::add_action(Action action) {
+  if (action.problem != this) {
+    throw ModelException{"Action must be from the same context"};
   }
-  actions_.emplace_back(std::move(name), this);
-  return actions_.back();
+  if (std::find_if(actions_.begin(), actions_.end(),
+                   [&name = action.name](const auto &p) {
+                     return p.name == name;
+                   }) != actions_.end()) {
+    throw ModelException{"Action \'" + action.name + "\' already exists"};
+  }
+  actions_.emplace_back(std::move(action));
+  return *this;
 }

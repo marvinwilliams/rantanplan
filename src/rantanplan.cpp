@@ -7,6 +7,7 @@
 /* #include "encoding/sequential_3.hpp" */
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
+#include "model/problem.hpp"
 #include "model/normalize.hpp"
 #include "model/preprocess.hpp"
 /* #include "model/support.hpp" */
@@ -233,7 +234,7 @@ int main(int argc, char *argv[]) {
 
   print_version();
 
-  std::unique_ptr<model::AbstractProblem> abstract_problem;
+  std::unique_ptr<Problem> abstract_problem;
 
   PRINT_INFO("Reading problem...");
   pddl::Parser parser;
@@ -241,7 +242,7 @@ int main(int argc, char *argv[]) {
     auto ast = parser.parse(config.domain_file, config.problem_file);
 
     pddl::PddlAstParser visitor;
-    abstract_problem = visitor.parse(ast);
+    abstract_problem = std::make_unique<Problem>(visitor.parse(ast));
   } catch (const pddl::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
