@@ -3,6 +3,23 @@ project(rantanplan)
 set(rantanplan_VERSION_MAJOR 0)
 set(rantanplan_VERSION_MINOR 1)
 
+function(PreventInTreeBuilds)
+  get_filename_component(srcdir "${CMAKE_SOURCE_DIR}" REALPATH)
+  get_filename_component(bindir "${CMAKE_BINARY_DIR}" REALPATH)
+  if("${srcdir}" STREQUAL "${bindir}")
+    message("")
+    message("In-tree builds are not supported.")
+    message("Use a build/ directory (preferably not as a subdirectory)")
+    message("    mkdir build")
+    message("    cd build")
+    message("    cmake <OPTIONS> ..")
+    message("")
+    message(FATAL_ERROR "Stopping build.")
+  endif()
+endfunction()
+
+PreventInTreeBuilds()
+
 set(CMAKE_CXX_STANDARD 17)
 
 add_compile_options(
