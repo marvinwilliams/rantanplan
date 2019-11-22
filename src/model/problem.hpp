@@ -1,31 +1,67 @@
 #ifndef PROBLEM_HPP
 #define PROBLEM_HPP
 
+#include <algorithm>
+#include <cassert>
 #include <exception>
-#include <list>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
 
-struct ModelException : public std::exception {
-  explicit ModelException(std::string message) : message{std::move(message)} {}
+class ModelException : public std::exception {
+public:
+  explicit ModelException(std::string message) : message_{std::move(message)} {}
 
   [[nodiscard]] inline const char *what() const noexcept override {
-    return message.c_str();
+    return message_.c_str();
   }
 
-  const std::string message;
+private:
+  std::string message_;
 };
 
 class Problem;
-class Action;
+
+template <typename T> class Handle {
+public:
+  friend Problem;
+
+  const T *get() { return p_; }
+  const Problem *get_problem() { return problem_; }
+  const T &operator*() { return *p_; }
+  const T *operator->() { return p_; }
+  bool operator==(const Handle<T> &other) const {
+    return p_ == other.p_ && problem_ == other.problem_;
+  }
+
+private:
+  Handle(T *p, const Problem *problem) : p_{p}, problem_{problem} {}
+
+  T *p_;
+  const Problem *problem_;
+};
 
 struct Type {
   std::string name;
   const Type *supertype;
 };
 
-bool is_subtype(const Type *subtype, const Type *supertype);
+bool is_subtype(const Type *first, const Type *second);
+
+class Predicate {
+public:
+  std::string name;
+  explicit Predicate(std::string name, const Problem *problem)
+      : name{std::move(name)}, problem_{problem} {}
+
+  void add_parameter_type(Handle<Type> type);
+  const auto &get_parameter_types() const { return parameter_types_; }
+
+private:
+  std::vector<const Type *> parameter_types_;
+  const Problem *problem_;
+};
 
 struct Constant {
   std::string name;
@@ -37,142 +73,275 @@ struct Parameter {
   const Type *type;
 };
 
-class Predicate {
+class Action;
+enum class ConditionContext { Free, Precondition, Effect };
+
+template <> class Handle<Parameter> {
 public:
-  const std::string name;
-  const Problem *const problem;
+  friend Action;
 
-  explicit Predicate(std::string name, const Problem *problem)
-      : name{std::move(name)}, problem{problem} {}
-
-  Predicate &add_parameter_type(const std::string &type);
-  const auto &get_parameter_types() const;
+  const Parameter *get() { return p_; }
+  const Action *get_action() { return action_; }
+  const Problem *get_problem() { return problem_; }
+  const Parameter &operator*() { return *p_; }
+  const Parameter *operator->() { return p_; }
+  bool operator==(const Handle<Parameter> &other) {
+    return p_ == other.p_ && action_ == other.action_ &&
+           problem_ == other.problem_;
+  }
 
 private:
-  std::vector<const Type *> parameter_types_;
+  Handle(const Parameter *p, const Action *action, const Problem *problem)
+      : p_{p}, action_{action}, problem_{problem} {}
+
+  const Parameter *p_;
+  const Action *action_;
+  const Problem *problem_;
 };
 
-enum class ConditionContext { Init, Goal, Precondition, Effect };
-
-class Junction;
-class AtomicCondition;
-
-using Argument = std::variant<const Parameter *, const Constant *>;
-
-using Condition = std::variant<AtomicCondition, Junction>;
-
-class Junction {
-public:
-  enum class Operator { And, Or };
-
-  const Operator op;
-  const bool positive;
-  const ConditionContext context;
-  const Action *const action;
-  const Problem *const problem;
-
-  explicit Junction(Operator op, bool positive, ConditionContext context,
-                    const Action *action, const Problem *problem);
-
-  explicit Junction(Operator op, bool positive, const Junction &parent)
-      : Junction{op, positive, parent.context, parent.action, parent.problem} {}
-
-  explicit Junction(Operator op, bool positive, ConditionContext context,
-                    const Problem *problem)
-      : Junction{op, positive, context, nullptr, problem} {}
-
-  Junction &add_condition(Condition condition);
-  const auto &get_conditions() const;
-
-private:
-  std::vector<Condition> conditions_;
-};
-
-class AtomicCondition {
-public:
-  const bool positive;
-  const ConditionContext context;
-  const Predicate *const predicate;
-  const Action *const action;
-  const Problem *const problem;
-
-  explicit AtomicCondition(bool positive, const Predicate *predicate,
-                           ConditionContext context, const Action *action,
-                           const Problem *problem);
-
-  explicit AtomicCondition(bool positive, const Predicate *predicate,
-                           const Junction &parent)
-      : AtomicCondition{positive, predicate, parent.context, parent.action,
-                        parent.problem} {}
-
-  explicit AtomicCondition(bool positive, const Predicate *predicate,
-                           ConditionContext context, const Problem *problem)
-      : AtomicCondition{positive, predicate, context, nullptr, problem} {}
-
-  AtomicCondition &add_bound_argument(const std::string &parameter);
-  AtomicCondition &add_constant_argument(const std::string &constant);
-  const auto &get_arguments() const;
-  void check_complete() const;
-
-private:
-  std::vector<Argument> arguments_;
-};
+template <ConditionContext C> class Condition;
+using FreeCondition = Condition<ConditionContext::Free>;
+using Precondition = Condition<ConditionContext::Precondition>;
+using Effect = Condition<ConditionContext::Effect>;
 
 class Action {
 public:
-  const std::string name;
-  const Problem *const problem;
+  std::string name;
 
   explicit Action(std::string name, const Problem *problem)
-      : name{std::move(name)}, problem{problem},
-        precondition_{Junction{Junction::Operator::And, true,
-                               ConditionContext::Precondition, this, problem}},
-        effect_{Junction{Junction::Operator::And, true,
-                         ConditionContext::Effect, this, problem}} {}
+      : name{std::move(name)}, problem_{problem} {}
 
-  const Parameter &get_parameter(const std::string &name) const;
-  Action &add_parameter(std::string name, const std::string &type);
-  void set_precondition(Condition precondition);
-  void set_effect(Condition effect);
-  const auto &get_parameters() const;
-  const Condition &get_precondition() const;
-  const Condition &get_effect() const;
+  Handle<Parameter> add_parameter(std::string name, Handle<Type> type);
+  void set_precondition(std::unique_ptr<Precondition> precondition);
+  void set_effect(std::unique_ptr<Effect> effect);
+  Handle<Parameter> get_parameter(const std::string &name) const;
+  const auto &get_parameters() const { return parameters_; }
+  const Precondition *get_precondition() const { return precondition_.get(); }
+  const Effect *get_effect() const { return effect_.get(); }
 
 private:
-  std::list<Parameter> parameters_;
-  Condition precondition_;
-  Condition effect_;
+  std::vector<std::unique_ptr<Parameter>> parameters_;
+  std::unique_ptr<Precondition> precondition_;
+  std::unique_ptr<Effect> effect_;
+  const Problem *problem_;
 };
+
+template <ConditionContext C> class Condition {
+public:
+  explicit Condition(bool valid, bool positive, Handle<Action> action)
+      : valid_{valid}, positive_{positive}, action_{action.get()},
+        problem_{action.get_problem()} {}
+
+  bool valid() const { return valid_; }
+  bool positive() const { return positive_; }
+  const Action *get_action() const { return action_; }
+  const Problem *get_problem() const { return problem_; }
+
+protected:
+  bool valid_;
+  bool positive_;
+  const Action *action_;
+  const Problem *problem_;
+};
+
+template <> class Condition<ConditionContext::Free> {
+public:
+  explicit Condition(bool valid, bool positive, const Problem *problem)
+      : valid_{valid}, positive_{positive}, problem_{problem} {}
+
+  bool valid() const { return valid_; }
+  bool positive() const { return positive_; }
+  const Problem *get_problem() const { return problem_; }
+
+protected:
+  bool valid_;
+  bool positive_;
+  const Problem *problem_;
+};
+
+using Argument = std::variant<const Parameter *, const Constant *>;
+
+template <ConditionContext C> class AtomicCondition : public Condition<C> {
+public:
+  template <bool Enable = true,
+            typename = std::enable_if_t<Enable && C == ConditionContext::Free>>
+  explicit AtomicCondition(bool positive, Handle<Predicate> predicate)
+      : Condition<C>{false, positive, predicate.get_problem()},
+        predicate_{predicate.get()} {
+    if (predicate->name == "=") {
+      throw ModelException{"Predicate \"=\" can only be used in preconditions"};
+    }
+  }
+
+  template <bool Enable = true,
+            typename = std::enable_if_t<Enable && C != ConditionContext::Free>>
+  explicit AtomicCondition(bool positive, Handle<Predicate> predicate,
+                           Handle<Action> action)
+      : Condition<C>{false, positive, action}, predicate_{predicate.get()} {
+    if (predicate.get_problem() != action.get_problem()) {
+      throw ModelException{"Predicate and action not from the same problem"};
+    }
+    if (predicate->name == "=" && C != ConditionContext::Precondition) {
+      throw ModelException{"Predicate \"=\" can only be used in preconditions"};
+    }
+  }
+
+  template <bool Enable = true,
+            typename = std::enable_if_t<Enable && C != ConditionContext::Free>>
+  AtomicCondition &add_bound_argument(Handle<Parameter> parameter) {
+    if (Condition<C>::action_ != parameter.get_action()) {
+      throw ModelException{"Parameter is not from the same action"};
+    }
+    if (arguments_.size() == predicate_->get_parameter_types().size()) {
+      throw ModelException{
+          "Number of arguments exceeded: Predicate \'" + predicate_->name +
+          "\' takes " +
+          std::to_string(predicate_->get_parameter_types().size()) +
+          " arguments"};
+    }
+    if (!is_subtype(parameter->type,
+                    predicate_->get_parameter_types()[arguments_.size()])) {
+      throw ModelException{
+          "Type mismatch of bound argument \'" + parameter->name +
+          "\': Expected a subtype of \'" +
+          predicate_->get_parameter_types()[arguments_.size()]->name +
+          "\' but got type \'" + parameter->type->name + "\'"};
+    }
+    arguments_.push_back(std::move(parameter.get()));
+    return *this;
+  }
+
+  AtomicCondition &add_constant_argument(Handle<Constant> constant) {
+    if (Condition<C>::problem_ != constant.get_problem()) {
+      throw ModelException{"Constant is not from same problem"};
+    }
+    if (arguments_.size() == predicate_->get_parameter_types().size()) {
+      throw ModelException{
+          "Number of arguments exceeded: Predicate \'" + predicate_->name +
+          "\' takes " +
+          std::to_string(predicate_->get_parameter_types().size()) +
+          " arguments"};
+    }
+    if (!is_subtype(constant->type,
+                    predicate_->get_parameter_types()[arguments_.size()])) {
+      throw ModelException{
+          "Type mismatch of constant argument \'" + constant->name +
+          "\': Expected a subtype of \'" +
+          predicate_->get_parameter_types()[arguments_.size()]->name +
+          "\' but got type \'" + constant->type->name + "\'"};
+    }
+    arguments_.push_back(std::move(constant.get()));
+    return *this;
+  }
+
+  void finish() {
+    assert(arguments_.size() <= predicate_->get_parameter_types().size());
+    if (arguments_.size() != predicate_->get_parameter_types().size()) {
+      throw ModelException{
+          "Too few arguments: Expected " +
+          std::to_string(predicate_->get_parameter_types().size()) +
+          " but got " + std::to_string(arguments_.size())};
+    }
+    Condition<C>::valid_ = true;
+  }
+
+  const auto &get_arguments() const { return arguments_; }
+
+private:
+  const Predicate *predicate_;
+  std::vector<
+      std::conditional_t<C == ConditionContext::Free, Constant, Argument>>
+      arguments_;
+};
+
+enum class JunctionOperator { And, Or };
+
+template <ConditionContext C> class Junction : public Condition<C> {
+public:
+  template <bool Enable = true,
+            typename = std::enable_if_t<Enable && C == ConditionContext::Free>>
+  explicit Junction(JunctionOperator op, bool positive, const Problem *problem)
+      : Condition<C>{true, positive, problem}, op_{op} {}
+
+  template <bool Enable = true,
+            typename =
+                std::enable_if_t<Enable && C == ConditionContext::Precondition>>
+  explicit Junction(JunctionOperator op, bool positive, Handle<Action> action)
+      : Condition<C>{true, positive, action}, op_{op} {}
+
+  template <bool Enable = true, typename = std::enable_if_t<
+                                    Enable && C == ConditionContext::Effect>>
+  explicit Junction(Handle<Action> action)
+      : Condition<C>{true, true, action}, op_{JunctionOperator::And} {}
+
+  JunctionOperator get_operator() const { return op_; }
+
+  void add_condition(std::unique_ptr<Condition<C>> condition) {
+    if (Condition<C>::problem_ != condition->get_problem()) {
+      throw ModelException{"Condition is not from the same problem"};
+    }
+    if constexpr (C != ConditionContext::Free) {
+      if (Condition<C>::action_ != condition->get_action()) {
+        throw ModelException{"Condition is not from the same action"};
+      }
+    }
+    if (!condition->valid()) {
+      throw ModelException{"Condition is not valid"};
+    }
+    conditions_.push_back(std::move(condition));
+  }
+
+  const auto &get_conditions() const { return conditions_; }
+
+private:
+  JunctionOperator op_;
+  std::vector<std::unique_ptr<Condition<C>>> conditions_;
+};
+
+using InitPredicate = AtomicCondition<ConditionContext::Free>;
+using GoalCondition = Condition<ConditionContext::Free>;
 
 class Problem {
 public:
-  explicit Problem()
-      : goal_{Junction{Junction::Operator::And, true, ConditionContext::Goal,
-                       this}} {}
   void set_domain_name(std::string name);
   void set_problem_name(std::string name, const std::string &domain_ref);
-  Problem &add_requirement(std::string name);
-  const Type &get_type(const std::string &name) const;
-  const Type &get_root_type() const;
-  Problem &add_type(std::string name, const std::string &supertype);
-  const Constant &get_constant(const std::string &name) const;
-  Problem &add_constant(std::string name, std::string type);
-  const Predicate &get_predicate(const std::string &name) const;
-  Problem &add_predicate(Predicate predicate);
-  Problem &add_action(Action action);
-  void set_init(Condition condition);
-  void set_goal(Condition condition);
+  void add_requirement(std::string name);
+  Handle<Type> add_type(std::string name);
+  Handle<Type> add_type(std::string name, Handle<Type> supertype);
+  Handle<Constant> add_constant(std::string name, Handle<Type> type);
+  Handle<Predicate> add_predicate(std::string name);
+  void add_parameter_type(Handle<Predicate> predicate, Handle<Type> type);
+  Handle<Action> add_action(std::string name);
+  Handle<Parameter> add_parameter(Handle<Action> action, std::string name,
+                                  Handle<Type> type);
+  void set_precondition(Handle<Action> action,
+                        std::unique_ptr<Precondition> precondition);
+  void set_effect(Handle<Action> action, std::unique_ptr<Effect> effect);
+  void add_init(std::unique_ptr<InitPredicate> init);
+  void set_goal(std::unique_ptr<GoalCondition> goal);
+
+  const std::string &get_domain_name() const { return domain_name_; }
+  const std::string &get_problem_name() const { return problem_name_; }
+  const std::vector<std::string> &get_requirements() const {
+    return requirements_;
+  }
+  Handle<Type> get_type(const std::string &name) const;
+  Handle<Constant> get_constant(const std::string &name) const;
+  Handle<Predicate> get_predicate(const std::string &name) const;
+  Handle<Action> get_action(const std::string &name) const;
+  const auto &get_init() const { return init_; }
+  const auto &get_goal() const { return goal_; }
 
 private:
   std::string domain_name_ = "";
   std::string problem_name_ = "";
   std::vector<std::string> requirements_;
-  std::list<Type> types_ = {{"_root", nullptr}};
-  std::list<Constant> constants_;
-  std::list<Predicate> predicates_;
-  std::vector<Action> actions_;
-  std::vector<AtomicCondition> init_;
-  Condition goal_;
+  std::vector<std::unique_ptr<Type>> types_;
+  std::vector<std::unique_ptr<Constant>> constants_;
+  std::vector<std::unique_ptr<Predicate>> predicates_;
+  std::vector<std::unique_ptr<Action>> actions_;
+  std::vector<std::unique_ptr<AtomicCondition<ConditionContext::Free>>> init_;
+  std::unique_ptr<Condition<ConditionContext::Free>> goal_;
 };
 
 #endif /* end of include guard: PROBLEM_HPP */

@@ -31,14 +31,16 @@ public:
     };
 
     bool negated = false;
-    std::string current_type = "";
+    Type *reference_type;
+    State state;
     size_t num_requirements = 0;
     size_t num_types = 0;
     size_t num_constants = 0;
     size_t num_predicates = 0;
     size_t num_actions = 0;
+    std::unique_ptr<Action> current_action;
+    std::unique_ptr<Predicate> current_predicate;
     std::vector<Condition> condition_stack;
-    State state;
   };
 
   using State = Context::State;
