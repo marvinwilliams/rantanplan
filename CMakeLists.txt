@@ -64,15 +64,16 @@ link_directories("${CMAKE_CURRENT_BINARY_DIR}")
 add_executable(rantanplan_glucose
   "src/rantanplan.cpp"
   "lib/logging/src/logging/logging.cpp"
+  "src/model/problem.cpp"
   "src/model/normalize.cpp"
   # "src/model/support.cpp"
-  "src/model/to_string.cpp"
+  # "src/model/to_string.cpp"
   "src/pddl/parser.cpp"
   # "src/encoding/foreach.cpp"
   "src/pddl/pddl_visitor.cpp"
   "src/util/combinatorics.cpp"
-  "src/model/simple_preprocess.cpp"
-  "src/planning/planner.cpp"
+  # "src/model/simple_preprocess.cpp"
+  # "src/planning/planner.cpp"
   "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a"
   )
 

@@ -4,7 +4,9 @@
 #include "lexer/location.hpp"
 #include "pddl/ast.hpp"
 
-#include <type_traits>
+#include <memory>
+#include <variant>
+#include <vector>
 
 namespace pddl {
 
@@ -106,7 +108,7 @@ public:
   bool traverse(const InitDef &init_def) {
     current_location_ = &init_def.location;
     return get_derived_().visit_begin(init_def) &&
-           get_derived_().traverse(init_def.init_condition) &&
+           get_derived_().traverse(*init_def.init_list) &&
            get_derived_().visit_end(init_def);
   }
 
@@ -221,7 +223,7 @@ public:
   virtual ~Visitor() {}
 
 protected:
-  lexer::Location *current_location_ = nullptr;
+  const lexer::Location *current_location_ = nullptr;
 
 private:
   Derived &get_derived_() {
@@ -231,7 +233,6 @@ private:
 
   template <typename T>
   bool traverse_vector(const std::vector<std::unique_ptr<T>> &element) {
-    current_location_ = &element.location;
     for (const auto &c : element) {
       if (!get_derived_().traverse(*c)) {
         return false;
@@ -241,7 +242,6 @@ private:
   }
 
   template <typename T> bool traverse_vector(const std::vector<T> &element) {
-    current_location_ = &element.location;
     for (const auto &c : element) {
       if (!get_derived_().traverse(c)) {
         return false;

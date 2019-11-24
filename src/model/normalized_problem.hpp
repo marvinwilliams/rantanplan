@@ -1,5 +1,5 @@
-#ifndef MODEL_HPP
-#define MODEL_HPP
+#ifndef NORMALIZED_PROBLEM_HPP
+#define NORMALIZED_PROBLEM_HPP
 
 #include <cassert>
 #include <functional>
@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-namespace model {
+namespace normalized {
 
 template <typename T> struct Handle {
   using value_type = size_t;
@@ -49,16 +49,6 @@ inline bool operator!=(const Handle<T> &first, const Handle<T> &second) {
   return !(first == second);
 }
 
-namespace hash {
-
-template <typename T> struct Handle {
-  size_t operator()(const ::model::Handle<T> &handle) const {
-    return std::hash<size_t>{}(handle.i);
-  }
-};
-
-} // namespace hash
-
 struct Type;
 using TypeHandle = Handle<Type>;
 
@@ -88,7 +78,7 @@ using ParameterHandle = Handle<Parameter>;
 struct Condition {
   PredicateHandle definition;
   std::vector<Parameter> arguments;
-  bool negated = false;
+  bool positive = true;
 };
 
 struct PredicateInstantiation {
@@ -107,21 +97,6 @@ inline bool operator==(const PredicateInstantiation &first,
   return first.definition == second.definition &&
          first.arguments == second.arguments;
 }
-
-namespace hash {
-
-struct PredicateInstantiation {
-  size_t operator()(const ::model::PredicateInstantiation &predicate) const
-      noexcept {
-    size_t hash = Handle<Predicate>{}(predicate.definition);
-    for (ConstantHandle p : predicate.arguments) {
-      hash ^= Handle<Constant>{}(p);
-    }
-    return hash;
-  }
-};
-
-} // namespace hash
 
 struct Action {
   std::vector<Parameter> parameters;
@@ -149,6 +124,28 @@ struct Problem {
   std::vector<std::pair<PredicateInstantiation, bool>> goal;
 };
 
-} // namespace model
+} // namespace normalized
 
-#endif /* end of include guard: MODEL_HPP */
+namespace std {
+
+template <typename T> struct hash<::normalized::Handle<T>> {
+  size_t operator()(const ::normalized::Handle<T> &handle) const noexcept {
+    return std::hash<size_t>{}(handle.i);
+  }
+};
+
+template <> struct hash<normalized::PredicateInstantiation> {
+  size_t operator()(const ::normalized::PredicateInstantiation &predicate) const
+      noexcept {
+    size_t hash =
+        std::hash<::normalized::PredicateHandle>{}(predicate.definition);
+    for (auto p : predicate.arguments) {
+      hash ^= std::hash<::normalized::ConstantHandle>{}(p);
+    }
+    return hash;
+  }
+};
+
+} // namespace std
+
+#endif /* end of include guard: NORMALIZED_PROBLEM_HPP */

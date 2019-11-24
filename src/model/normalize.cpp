@@ -1,192 +1,189 @@
 #include "model/normalize.hpp"
 #include "logging/logging.hpp"
-#include "model/model.hpp"
-#include "model/model_utils.hpp"
+#include "model/normalized_problem.hpp"
+#include "model/problem.hpp"
 #include "model/to_string.hpp"
+#include "model/utils.hpp"
 
 #include <algorithm>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <variant>
 #include <vector>
 
-namespace model {
-
 logging::Logger normalize_logger{"Normalize"};
 
-Condition normalize_condition(const Condition &condition) noexcept {
-  const auto junction = std::get_if<Junction>(&condition);
-  if (junction == nullptr) {
-    return condition;
-  }
-  Junction new_junction{};
-  new_junction.connective = junction->connective;
-  std::vector<Condition> dnf_children{};
-  const bool is_conjunction = junction->connective == Junction::Connective::And;
-  for (const auto &child : junction->arguments) {
-    auto normalized_child = normalize_condition(child);
-    auto child_junction = std::get_if<Junction>(&normalized_child);
-    // Flatten nested conditions if possible
-    if (child_junction && child_junction->connective == junction->connective) {
-      new_junction.arguments.insert(new_junction.arguments.cend(),
-                                    child_junction->arguments.begin(),
-                                    child_junction->arguments.end());
+normalized::Condition
+normalize_atomic_condition(const BaseAtomicCondition &condition) noexcept {
+  normalized::Condition result;
+  result.definition =
+      normalized::PredicateHandle{condition.get_predicate()->id};
+  for (const auto &a : condition.get_arguments()) {
+    if (auto c = std::get_if<const Constant *>(&a)) {
+      result.arguments.emplace_back(true, (*c)->id);
+    } else if (auto p = std::get_if<const Parameter *>(&a)) {
+      result.arguments.emplace_back(false, (*c)->id);
     } else {
-      if (is_conjunction) {
-        if (std::holds_alternative<TrivialTrue>(normalized_child)) {
-          continue;
-        } else if (std::holds_alternative<TrivialFalse>(normalized_child)) {
-          return TrivialFalse{};
-        }
-      } else {
-        if (std::holds_alternative<TrivialTrue>(normalized_child)) {
-          return TrivialTrue{};
-        } else if (std::holds_alternative<TrivialFalse>(normalized_child)) {
-          continue;
-        }
-      }
-      new_junction.arguments.push_back(std::move(normalized_child));
+      assert(false);
     }
   }
-  for (auto it = new_junction.arguments.cbegin();
-       it != new_junction.arguments.cend(); ++it) {
-    const auto first_disjunction = std::get_if<Junction>(&*it);
-    if (first_disjunction &&
-        first_disjunction->connective == Junction::Connective::Or) {
-      Junction disjunction = *first_disjunction;
-      new_junction.arguments.erase(it);
-      auto new_disjunction = Junction{};
-      new_disjunction.connective = Junction::Connective::Or;
-      for (const auto &argument : disjunction.arguments) {
-        auto new_conjunction = Junction{};
-        new_conjunction.connective = Junction::Connective::And;
-        new_conjunction.arguments = new_junction.arguments;
-        new_conjunction.arguments.push_back(argument);
-        new_disjunction.arguments.push_back(std::move(new_conjunction));
-      }
-      return normalize_condition(new_disjunction);
-    }
-  }
-  if (new_junction.arguments.empty()) {
-    if (is_conjunction) {
-      return TrivialTrue{};
-    } else {
-      return TrivialFalse{};
-    }
-  } else if (new_junction.arguments.size() == 1) {
-    return new_junction.arguments[0];
-  }
-  return new_junction;
+  result.positive = condition.positive();
+
+  return result;
 }
 
-std::vector<PredicateEvaluation> to_list(const Condition &condition) noexcept {
-  std::vector<PredicateEvaluation> list;
-  const auto junction = std::get_if<Junction>(&condition);
-  if (junction) {
-    for (const auto &argument : junction->arguments) {
-      list.push_back(std::get<PredicateEvaluation>(argument));
+std::vector<std::shared_ptr<BaseAtomicCondition>>
+to_list(std::shared_ptr<Condition> condition) noexcept {
+  std::vector<std::shared_ptr<BaseAtomicCondition>> list;
+  if (auto junction = std::dynamic_pointer_cast<BaseJunction>(condition)) {
+    for (auto c : junction->get_conditions()) {
+      list.push_back(std::static_pointer_cast<BaseAtomicCondition>(c));
     }
   } else {
-    const auto predicate = std::get_if<PredicateEvaluation>(&condition);
-    if (predicate) {
-      list.push_back(*predicate);
-    }
+    list.push_back(std::static_pointer_cast<BaseAtomicCondition>(condition));
   }
   return list;
 }
 
-std::vector<Action> normalize_action(const AbstractAction &action) noexcept {
-  std::vector<Action> new_actions;
+std::vector<normalized::Action>
+normalize_action(const Action &action) noexcept {
+  std::vector<normalized::Action> new_actions;
 
-  const auto precondition = normalize_condition(action.precondition);
-  if (std::holds_alternative<TrivialFalse>(precondition)) {
-    return new_actions;
-  }
+  auto precondition =
+      std::dynamic_pointer_cast<Condition>(action.precondition)->to_dnf();
 
-  const auto effects = to_list(normalize_condition(action.effect));
+  auto effects =
+      to_list(std::dynamic_pointer_cast<Condition>(action.effect)->to_dnf());
 
   if (effects.empty()) {
     return new_actions;
   }
 
-  const auto junction = std::get_if<Junction>(&precondition);
-  if (junction && junction->connective == Junction::Connective::Or) {
-    new_actions.reserve(junction->arguments.size());
-    unsigned int counter = 0;
-    for (const auto &argument : junction->arguments) {
-      std::stringstream new_name;
-      new_name << action.name << '[' << counter++ << ']';
-      Action new_action{new_name.str()};
-      new_action.parameters = action.parameters;
-      new_action.preconditions = to_list(argument);
-      new_action.effects = effects;
+  std::vector<normalized::Condition> effect_list;
+
+  for (const auto &e : effects) {
+    effect_list.push_back(normalize_atomic_condition(*e));
+  }
+
+  if (auto junction = std::dynamic_pointer_cast<BaseJunction>(precondition);
+      junction && junction->get_operator() == JunctionOperator::Or) {
+    if (junction->get_conditions().empty()) {
+      return new_actions;
+    }
+    new_actions.reserve(junction->get_conditions().size());
+    for (const auto &condition : junction->get_conditions()) {
+      normalized::Action new_action{};
+      for (const auto &p : action.parameters) {
+        new_action.parameters.emplace_back(false, p->type->id);
+      }
+      for (const auto &cond : to_list(condition)) {
+        new_action.preconditions.push_back(normalize_atomic_condition(*cond));
+      }
+      new_action.effects = effect_list;
       new_actions.push_back(std::move(new_action));
     }
   } else {
-    Action new_action{action.name};
-    std::transform(action.parameters.cbegin(), action.parameters.cend(),
-                   std::back_inserter(new_action.parameters),
-                   [](const auto &p) { return p; });
-    new_action.preconditions = to_list(precondition);
-    new_action.effects = effects;
+    normalized::Action new_action{};
+    for (const auto &p : action.parameters) {
+      new_action.parameters.emplace_back(false, p->type->id);
+    }
+    for (const auto &cond : to_list(precondition)) {
+      new_action.preconditions.push_back(normalize_atomic_condition(*cond));
+    }
+    new_action.effects = effect_list;
     new_actions.push_back(std::move(new_action));
   }
   return new_actions;
 }
 
-Problem normalize(const AbstractProblem &abstract_problem) noexcept {
-  Problem problem{abstract_problem};
+std::optional<normalized::Problem> normalize(const Problem &problem) noexcept {
+  normalized::Problem normalized_problem{};
+  normalized_problem.domain_name = problem.get_domain_name();
+  normalized_problem.problem_name = problem.get_problem_name();
+  normalized_problem.requirements = problem.get_requirements();
 
-  for (auto &action : abstract_problem.actions) {
-    LOG_DEBUG(normalize_logger, "Normalizing action \'%s\'...",
-              action.name.c_str());
-    auto new_actions = normalize_action(action);
-    LOG_DEBUG(normalize_logger, "resulted in %u STRIPS actions",
-              new_actions.size());
-    problem.actions.insert(problem.actions.cend(), new_actions.begin(),
-                           new_actions.end());
+  for (const auto &type : problem.get_types()) {
+    normalized_problem.types.emplace_back(
+        normalized::TypeHandle{type->supertype->id});
+    normalized_problem.type_names.push_back(type->name);
   }
 
-  std::vector<GroundPredicate> negated_init;
-  for (const auto &predicate : to_list(abstract_problem.init)) {
-    GroundPredicate ground_predicate{predicate};
-    if (predicate.negated) {
-      if (std::find(negated_init.begin(), negated_init.end(),
-                    ground_predicate) != negated_init.end()) {
-        LOG_WARN(normalize_logger,
-                 "Found duplicate negated init predicate '%s'",
-                 to_string(ground_predicate, problem).c_str());
+  for (const auto &constant : problem.get_constants()) {
+    normalized_problem.constants.emplace_back(
+        normalized::TypeHandle{constant->type->id});
+    normalized_problem.constant_names.push_back(constant->name);
+  }
+
+  for (const auto &predicate : problem.get_predicates()) {
+    normalized_problem.predicates.emplace_back();
+    for (const auto &type : predicate->parameter_types) {
+      normalized_problem.predicates.back().parameter_types.emplace_back(
+          normalized::TypeHandle{type->id});
+    }
+    normalized_problem.predicate_names.push_back(predicate->name);
+  }
+
+  std::vector<normalized::PredicateInstantiation> negative_init;
+  for (const auto &predicate : problem.get_init()) {
+    auto condition = normalize_atomic_condition(*predicate);
+    auto instantiation = instantiate(condition);
+    if (predicate->positive()) {
+      if (std::find(normalized_problem.init.begin(),
+                    normalized_problem.init.end(),
+                    instantiation) == normalized_problem.init.end()) {
+        normalized_problem.init.push_back(instantiation);
       } else {
-        negated_init.push_back(GroundPredicate{predicate});
+        LOG_WARN(normalize_logger, "Found duplicate init predicate '%s'",
+                 to_string(instantiation, normalized_problem).c_str());
       }
     } else {
-      if (std::find(problem.init.begin(), problem.init.end(),
-                    ground_predicate) != problem.init.end()) {
-        LOG_WARN(normalize_logger, "Found duplicate init predicate '%s'",
-                 to_string(ground_predicate, problem).c_str());
+      if (std::find(negative_init.begin(), negative_init.end(),
+                    instantiation) == negative_init.end()) {
+        negative_init.push_back(instantiation);
       } else {
-        problem.init.push_back(GroundPredicate{predicate});
+        LOG_WARN(normalize_logger,
+                 "Found duplicate negated init predicate '%s'",
+                 to_string(instantiation, normalized_problem).c_str());
       }
     }
   }
-  for (const auto &predicate : negated_init) {
-    if (std::find(problem.init.begin(), problem.init.end(), predicate) !=
-        problem.init.end()) {
+
+  for (const auto &predicate : negative_init) {
+    if (std::find(normalized_problem.init.begin(),
+                  normalized_problem.init.end(),
+                  predicate) != normalized_problem.init.end()) {
       LOG_ERROR(normalize_logger, "Found contradicting init predicate '%s'",
-                to_string(predicate, problem).c_str());
+                to_string(predicate, normalized_problem).c_str());
+      return std::nullopt;
     }
   }
 
   // Reserve space for initial and equality predicates
-  problem.init.reserve(problem.init.size() + problem.constants.size());
-  for (size_t i = 0; i < problem.constants.size(); ++i) {
-    problem.init.push_back(GroundPredicate{
-        PredicateHandle{0}, {ConstantHandle{i}, ConstantHandle{i}}});
+  normalized_problem.init.reserve(normalized_problem.init.size() +
+                                  normalized_problem.constants.size());
+  for (size_t i = 0; i < normalized_problem.constants.size(); ++i) {
+    normalized_problem.init.push_back(normalized::PredicateInstantiation{
+        normalized::PredicateHandle{0},
+        {normalized::ConstantHandle{i}, normalized::ConstantHandle{i}}});
   }
 
-  for (const auto &predicate : to_list(abstract_problem.goal)) {
-    problem.goal.push_back({GroundPredicate{predicate}, predicate.negated});
+  for (const auto &action : problem.get_actions()) {
+    LOG_INFO(normalize_logger, "Normalizing action \'%s\'...",
+             action->name.c_str());
+    auto new_actions = normalize_action(action);
+    LOG_INFO(normalize_logger, "resulted in %u STRIPS actions",
+             new_actions.size());
+    normalized_problem.actions.insert(normalized_problem.actions.cend(),
+                                      new_actions.begin(), new_actions.end());
   }
-  return problem;
+
+  auto goal =
+      std::dynamic_pointer_cast<Condition>(problem.get_goal())->to_dnf();
+  for (const auto &predicate : to_list(goal)) {
+    normalized_problem.goal.emplace_back(
+        instantiate(normalize_atomic_condition(*predicate)),
+        predicate->positive());
+  }
+  return normalized_problem;
 }
-
-} // namespace model

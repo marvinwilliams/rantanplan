@@ -9,15 +9,15 @@
 #include "logging/logging.hpp"
 #include "model/problem.hpp"
 #include "model/normalize.hpp"
-#include "model/preprocess.hpp"
+/* #include "model/preprocess.hpp" */
 /* #include "model/support.hpp" */
-#include "model/to_string.hpp"
+/* #include "model/to_string.hpp" */
 #include "options/options.hpp"
 #include "pddl/ast.hpp"
 #include "pddl/parser.hpp"
 #include "pddl/pddl_visitor.hpp"
 #include "pddl/tokens.hpp"
-#include "planning/planner.hpp"
+/* #include "planning/planner.hpp" */
 /* #include "planning/sat_planner.hpp" */
 
 #include <climits>
@@ -163,34 +163,35 @@ void set_config(const options::Options &options, Config &config) {
   }
 }
 
-std::unique_ptr<planning::Planner> get_planner(const Config &config,
-                                               const model::Problem &problem) {
-  switch (config.planner) {
-  /* case Config::Planner::Sequential1: */
-  /*   PRINT_INFO("Using sequential encoding 1"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-  /*       problem); */
-  /* case Config::Planner::Sequential2: */
-  /*   PRINT_INFO("Using sequential encoding 2"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-  /*       problem); */
-  /* case Config::Planner::Sequential3: */
-  /*   PRINT_INFO("Using sequential encoding 3"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-  /*       problem); */
-  /* case Config::Planner::Foreach: */
-  /*   PRINT_INFO("Using foreach encoding"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-  /*       problem); */
-  default:
-    assert(false);
-    return std::unique_ptr<planning::Planner>{};
-  }
-}
+/* std::unique_ptr<planning::Planner> get_planner(const Config &config, */
+/*                                                const model::Problem &problem)
+ * { */
+/*   switch (config.planner) { */
+/* case Config::Planner::Sequential1: */
+/*   PRINT_INFO("Using sequential encoding 1"); */
+/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+ */
+/*       problem); */
+/* case Config::Planner::Sequential2: */
+/*   PRINT_INFO("Using sequential encoding 2"); */
+/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+ */
+/*       problem); */
+/* case Config::Planner::Sequential3: */
+/*   PRINT_INFO("Using sequential encoding 3"); */
+/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+ */
+/*       problem); */
+/* case Config::Planner::Foreach: */
+/*   PRINT_INFO("Using foreach encoding"); */
+/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+ */
+/*       problem); */
+/* default: */
+/*   assert(false); */
+/*   return std::unique_ptr<planning::Planner>{}; */
+/* } */
+/* } */
 
 int main(int argc, char *argv[]) {
   auto options = set_options(argv[0]);
@@ -226,7 +227,7 @@ int main(int argc, char *argv[]) {
   if (config.log_level > 0) {
     model::normalize_logger.add_appender(logging::default_appender);
     /* support::logger.add_appender(logging::default_appender); */
-    preprocess::logger.add_appender(logging::default_appender);
+    /* preprocess::logger.add_appender(logging::default_appender); */
   }
   if (config.log_level > 2) {
     pddl::Parser::logger.add_appender(logging::default_appender);
@@ -242,7 +243,7 @@ int main(int argc, char *argv[]) {
     auto ast = parser.parse(config.domain_file, config.problem_file);
 
     pddl::PddlAstParser visitor;
-    abstract_problem = std::make_unique<Problem>(visitor.parse(ast));
+    abstract_problem = visitor.parse(ast);
   } catch (const pddl::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
@@ -265,41 +266,42 @@ int main(int argc, char *argv[]) {
 
   assert(abstract_problem);
 
-  PRINT_DEBUG("Abstract problem:\n%s",
-              model::to_string(*abstract_problem).c_str());
+  /* PRINT_DEBUG("Abstract problem:\n%s", */
+  /*             model::to_string(*abstract_problem).c_str()); */
 
   if (config.planner == Config::Planner::Parse) {
     PRINT_INFO("Parsing successful");
     return 0;
   }
 
-  PRINT_INFO("Normalizing problem...");
-  auto problem = model::normalize(*abstract_problem);
+  PRINT_INFO("Normalizing problem..."); 
+  auto problem = model::normalize(*abstract_problem); 
   PRINT_DEBUG("Normalized problem:\n%s", model::to_string(problem).c_str());
 
-  if (config.planner == Config::Planner::Preprocess) {
-    PRINT_INFO("Preprocessing...");
-    preprocess::preprocess(problem, config);
-    PRINT_INFO("Preprocessing successful");
-    PRINT_DEBUG("Preprocessed problem:\n%s", model::to_string(problem).c_str());
-    return 0;
-  }
+  /* if (config.planner == Config::Planner::Preprocess) { */
+  /*   PRINT_INFO("Preprocessing..."); */
+  /*   preprocess::preprocess(problem, config); */
+  /*   PRINT_INFO("Preprocessing successful"); */
+  /*   PRINT_DEBUG("Preprocessed problem:\n%s",
+   * model::to_string(problem).c_str()); */
+  /*   return 0; */
+  /* } */
 
-  auto planner = get_planner(config, problem);
-  assert(planner);
+  /* auto planner = get_planner(config, problem); */
+  /* assert(planner); */
 
-  auto plan = planner->plan(config);
+  /* auto plan = planner->plan(config); */
 
-  if (plan.empty()) {
-    return 1;
-  }
+  /* if (plan.empty()) { */
+  /*   return 1; */
+  /* } */
 
-  if (config.plan_file == "") {
-    std::cout << planner->to_string(plan) << std::endl;
-  } else {
-    std::ofstream s{config.plan_file};
-    s << planner->to_string(plan);
-  }
+  /* if (config.plan_file == "") { */
+  /*   std::cout << planner->to_string(plan) << std::endl; */
+  /* } else { */
+  /*   std::ofstream s{config.plan_file}; */
+  /*   s << planner->to_string(plan); */
+  /* } */
 
   return 0;
 }

@@ -68,7 +68,7 @@ public:
 
   Location(const Position &begin) : begin_{begin}, end_{begin} {}
 
-  Location(const std::string &name) : Location{Position{name}} {}
+  Location(std::string_view name) : Location{Position{name}} {}
 
   Location(const Location &other) : begin_{other.begin_}, end_{other.end_} {}
 

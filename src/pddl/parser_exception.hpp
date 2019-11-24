@@ -12,7 +12,7 @@ namespace pddl {
 class ParserException : public std::exception {
 public:
   explicit ParserException(const lexer::Location &location, std::string message)
-      : location_(location), message_{std::move(message)} {}
+      : location_{location}, message_{std::move(message)} {}
   explicit ParserException(const lexer::Location &location)
       : ParserException(location, "unknown error") {}
   explicit ParserException(std::string message)

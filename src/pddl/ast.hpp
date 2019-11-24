@@ -146,13 +146,23 @@ struct Negation : Node {
   Condition condition;
 };
 
-struct Imply {};
-struct Quantification {
+struct Imply : Node {
+  Imply(const lexer::Location &location) : Node{location} {}
+};
+
+struct Quantification : Node {
+  Quantification(const lexer::Location &location) : Node{location} {}
   enum class Quantor { Exists, ForAll };
 };
-struct When {};
 
-struct Empty {};
+struct When : Node {
+  When(const lexer::Location &location) : Node{location} {}
+};
+
+struct Empty : Node {
+  Empty() : Node{lexer::Location{}} {}
+  Empty(const lexer::Location &location) : Node{location} {}
+};
 
 struct Precondition : Node {
   Precondition(const lexer::Location &location, Condition precondition)
@@ -224,10 +234,11 @@ struct ObjectsDef : Node {
 };
 
 struct InitDef : Node {
-  InitDef(const lexer::Location &location, Condition init_condition)
-      : Node{location}, init_condition{std::move(init_condition)} {}
+  InitDef(const lexer::Location &location,
+          std::unique_ptr<ConditionList> init_list)
+      : Node{location}, init_list{std::move(init_list)} {}
 
-  Condition init_condition;
+  std::unique_ptr<ConditionList> init_list;
 };
 
 struct GoalDef : Node {

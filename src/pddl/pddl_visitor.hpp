@@ -17,43 +17,29 @@ class PddlAstParser : public ast::Visitor<PddlAstParser> {
 public:
   friend ast::Visitor<PddlAstParser>;
 
-  struct Context {
-    enum class State {
-      Requirements,
-      Types,
-      Constants,
-      Predicates,
-      Actions,
-      Precondition,
-      Effect,
-      InitialState,
-      Goal
-    };
-
-    bool negated = false;
-    Type *reference_type;
-    State state;
-    size_t num_requirements = 0;
-    size_t num_types = 0;
-    size_t num_constants = 0;
-    size_t num_predicates = 0;
-    size_t num_actions = 0;
-    std::unique_ptr<Action> current_action;
-    std::unique_ptr<Predicate> current_predicate;
-    std::vector<Condition> condition_stack;
+  enum class State {
+    Header,
+    Requirements,
+    Types,
+    Constants,
+    Predicates,
+    Action,
+    Precondition,
+    Effect,
+    Init,
+    Goal
   };
 
-  using State = Context::State;
+  static inline logging::Logger logger{"Ast"};
 
-  static logging::Logger logger;
-
-  Problem parse(const AST &ast);
+  std::unique_ptr<Problem> parse(const AST &ast);
 
 private:
   using Visitor<PddlAstParser>::traverse;
   using Visitor<PddlAstParser>::visit_begin;
   using Visitor<PddlAstParser>::visit_end;
 
+  void reset();
   bool visit_begin(const ast::Domain &domain);
   bool visit_begin(const ast::Problem &problem);
   bool visit_begin(const ast::SingleTypeIdentifierList &list);
@@ -68,6 +54,7 @@ private:
   bool visit_begin(const ast::ConstantsDef &);
   bool visit_begin(const ast::PredicatesDef &);
   bool visit_begin(const ast::ActionDef &action_def);
+  bool visit_end(const ast::ActionDef &);
   bool visit_begin(const ast::ObjectsDef &);
   bool visit_begin(const ast::InitDef &);
   bool visit_begin(const ast::GoalDef &);
@@ -76,14 +63,26 @@ private:
   bool visit_begin(const ast::Negation &negation);
   bool visit_end(const ast::Negation &);
   bool visit_begin(const ast::Predicate &ast_predicate);
+  bool visit_end(const ast::Predicate &);
   bool visit_begin(const ast::PredicateEvaluation &ast_predicate);
   bool visit_begin(const ast::Conjunction &conjunction);
   bool visit_begin(const ast::Disjunction &disjunction);
   bool visit_end(const ast::Condition &condition);
   bool visit_begin(const ast::Requirement &ast_requirement);
 
-  Context context_;
-  Problem problem_;
+  State state_ = State::Header;
+  bool positive_ = true;
+  Handle<Type> root_type_ = Handle<Type>{};
+  Handle<Type> current_type_ = Handle<Type>{};
+  Handle<Predicate> current_predicate_ = Handle<Predicate>{};
+  Handle<Action> current_action_ = Handle<Action>{};
+  std::vector<std::shared_ptr<Condition>> condition_stack_;
+  size_t num_requirements_ = 0;
+  size_t num_types_ = 0;
+  size_t num_constants_ = 0;
+  size_t num_predicates_ = 0;
+  size_t num_actions_ = 0;
+  std::unique_ptr<Problem> problem_;
 };
 
 } // namespace pddl

@@ -28,11 +28,11 @@ AST Parser::parse(const std::string &domain, const std::string &problem) {
   if (!problem_in.is_open()) {
     throw ParserException{"Failed to open " + problem};
   }
-  lexer_.set_source("domain", domain_bytes.data(),
+  lexer_.set_source(domain, domain_bytes.data(),
                     domain_bytes.data() + domain_bytes.size());
   LOG_INFO(logger, "Parsing domain file");
   parse_domain(ast);
-  lexer_.set_source("problem", problem_bytes.data(),
+  lexer_.set_source(problem, problem_bytes.data(),
                     problem_bytes.data() + problem_bytes.size());
   LOG_INFO(logger, "Parsing problem file");
   parse_problem(ast);
@@ -71,8 +71,7 @@ std::unique_ptr<ast::IdentifierList> Parser::parse_identifier_list() {
 std::unique_ptr<ast::VariableList> Parser::parse_variable_list() {
   LOG_DEBUG(logger, "Parsing variable list");
   const auto begin = lexer_.location();
-  auto names =
-      std::make_unique<std::vector<std::unique_ptr<ast::Variable>>>();
+  auto names = std::make_unique<std::vector<std::unique_ptr<ast::Variable>>>();
   while (lexer_.has_type<token::Variable>()) {
     const auto &name = lexer_.get<token::Variable>().name;
     LOG_DEBUG(logger, "Found variable \'%s\'", std::string{name}.c_str());
@@ -89,8 +88,7 @@ std::unique_ptr<ast::ArgumentList> Parser::parse_argument_list() {
   LOG_DEBUG(logger, "Parsing argument list");
   const auto begin = lexer_.location();
   auto arguments = std::make_unique<std::vector<ast::Argument>>();
-  while (lexer_.has_type<token::Name>() ||
-         lexer_.has_type<token::Variable>()) {
+  while (lexer_.has_type<token::Name>() || lexer_.has_type<token::Variable>()) {
     if (lexer_.has_type<token::Name>()) {
       const auto &name = lexer_.get<token::Name>().name;
       LOG_DEBUG(logger, "Found identifier \'%s\'", std::string{name}.c_str());
@@ -100,17 +98,14 @@ std::unique_ptr<ast::ArgumentList> Parser::parse_argument_list() {
     } else {
       const auto &name = lexer_.get<token::Variable>().name;
       LOG_DEBUG(logger, "Found variable \'%s\'", std::string{name}.c_str());
-      auto argument =
-          std::make_unique<ast::Variable>(lexer_.location(), name);
+      auto argument = std::make_unique<ast::Variable>(lexer_.location(), name);
       arguments->push_back(std::move(argument));
     }
     lexer_.next();
   }
   const auto &end = lexer_.location();
-  LOG_DEBUG(logger, "End of argument list (%u element(s))",
-            arguments->size());
-  return std::make_unique<ast::ArgumentList>(begin + end,
-                                             std::move(arguments));
+  LOG_DEBUG(logger, "End of argument list (%u element(s))", arguments->size());
+  return std::make_unique<ast::ArgumentList>(begin + end, std::move(arguments));
 }
 
 std::unique_ptr<ast::SingleTypeIdentifierList>
@@ -155,7 +150,8 @@ Parser::parse_single_type_variable_list() {
   }
 }
 
-std::unique_ptr<ast::TypedIdentifierList> Parser::parse_typed_identifier_list() {
+std::unique_ptr<ast::TypedIdentifierList>
+Parser::parse_typed_identifier_list() {
   LOG_DEBUG(logger, "Parsing typed identifier list");
   const auto begin = lexer_.location();
   auto lists = std::make_unique<
@@ -246,8 +242,7 @@ std::unique_ptr<ast::Predicate> Parser::parse_predicate() {
   const auto begin = lexer_.location();
   const auto &name = lexer_.get<token::Name>().name;
   LOG_DEBUG(logger, "Found predicate name \'%s\'", std::string{name}.c_str());
-  auto identifier =
-      std::make_unique<ast::Identifier>(lexer_.location(), name);
+  auto identifier = std::make_unique<ast::Identifier>(lexer_.location(), name);
   advance();
   auto parameters = parse_typed_variable_list();
   const auto &end = parameters->location;
@@ -372,12 +367,13 @@ ast::Condition Parser::parse_condition() {
         --count;
       }
     }
+  } else {
+    LOG_WARN(logger, "Parsing empty condition");
   }
-  LOG_WARN(logger, "Parsing empty condition");
-  return std::make_unique<ast::Empty>();
+  return std::make_unique<ast::Empty>(lexer_.location());
 }
 
-std::unique_ptr<ast::Conjunction> Parser::parse_init_list() {
+std::unique_ptr<ast::ConditionList> Parser::parse_init_list() {
   LOG_DEBUG(logger, "Parsing init list");
   const auto begin = lexer_.location();
   auto arguments = std::make_unique<std::vector<ast::Condition>>();
@@ -416,10 +412,8 @@ std::unique_ptr<ast::Conjunction> Parser::parse_init_list() {
   }
   const auto &end = lexer_.location();
   LOG_DEBUG(logger, "End of init list (%u element(s))", arguments->size());
-  auto condition_list =
-      std::make_unique<ast::ConditionList>(begin + end, std::move(arguments));
-  return std::make_unique<ast::Conjunction>(condition_list->location,
-                                            std::move(condition_list));
+  return std::make_unique<ast::ConditionList>(begin + end,
+                                              std::move(arguments));
 }
 
 std::unique_ptr<ast::ActionDef> Parser::parse_action() {
@@ -449,8 +443,8 @@ std::unique_ptr<ast::ActionDef> Parser::parse_action() {
     skip<token::RParen>();
     const auto end = lexer_.location();
     skip_comments();
-    precondition = std::make_unique<ast::Precondition>(
-        precondition_begin + end, std::move(condition));
+    precondition = std::make_unique<ast::Precondition>(precondition_begin + end,
+                                                       std::move(condition));
   }
   std::unique_ptr<ast::Effect> effect = nullptr;
   if (lexer_.has_type<token::Effect>()) {
@@ -463,8 +457,8 @@ std::unique_ptr<ast::ActionDef> Parser::parse_action() {
     skip<token::RParen>();
     const auto end = lexer_.location();
     skip_comments();
-    effect = std::make_unique<ast::Effect>(effect_begin + end,
-                                           std::move(condition));
+    effect =
+        std::make_unique<ast::Effect>(effect_begin + end, std::move(condition));
   }
   const auto &end = lexer_.location();
   LOG_DEBUG(logger, "End of action definition");
@@ -528,8 +522,7 @@ std::unique_ptr<ast::FunctionsDef> Parser::parse_functions() {
 
 // TODO metric support
 std::unique_ptr<ast::MetricDef> Parser::parse_metric() {
-  LOG_WARN(logger,
-           "Metrics will be ignored and have limited parsing support");
+  LOG_WARN(logger, "Metrics will be ignored and have limited parsing support");
   LOG_DEBUG(logger, "Parsing metric definition");
   const auto begin = lexer_.location();
   int count = 0;
@@ -555,8 +548,7 @@ std::unique_ptr<ast::Domain> Parser::parse_domain() {
   skip<token::Domain>();
   const auto &name = lexer_.get<token::Name>().name;
   LOG_DEBUG(logger, "Found domain name \'%s\'", std::string{name}.c_str());
-  auto domain_name =
-      std::make_unique<ast::Identifier>(lexer_.location(), name);
+  auto domain_name = std::make_unique<ast::Identifier>(lexer_.location(), name);
   lexer_.next();
   skip<token::RParen>();
   skip_comments();
@@ -584,7 +576,8 @@ std::unique_ptr<ast::Problem> Parser::parse_problem() {
   skip<token::LParen>();
   skip<token::DomainRef>();
   const auto &domain_ref = lexer_.get<token::Name>().name;
-  LOG_DEBUG(logger, "Found domain reference \'%s\'", std::string{domain_ref}.c_str());
+  LOG_DEBUG(logger, "Found domain reference \'%s\'",
+            std::string{domain_ref}.c_str());
   auto domain_ref_name =
       std::make_unique<ast::Identifier>(lexer_.location(), domain_ref);
   lexer_.next();

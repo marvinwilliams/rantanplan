@@ -8,9 +8,10 @@
 #include "lexer/location.hpp"
 #include "lexer/rules.hpp"
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <variant>
 
@@ -41,17 +42,15 @@ class Lexer {
 public:
   using Token = typename RuleSet::Token;
 
-  explicit Lexer(const std::string &name, char *begin, char *end)
-      : name_{name}, location_{name_}, begin_{begin}, current_{begin},
-        end_{end} {
+  explicit Lexer(std::string_view name, char *begin, char *end)
+      : location_{name}, begin_{begin}, current_{begin}, end_{end} {
     get_next_token();
   }
 
   explicit Lexer() noexcept : Lexer{"", nullptr, nullptr} {}
 
-  void set_source(const std::string &name, char *begin, char *end) {
-    name_ = name;
-    location_ = Location{name_};
+  void set_source(std::string_view name, char *begin, char *end) {
+    location_ = Location{name};
     begin_ = begin;
     current_ = begin;
     end_ = end;
@@ -142,7 +141,6 @@ private:
   }
 
   Token token_ = ErrorToken{};
-  std::string name_;
   Location location_;
   char *begin_ = nullptr;
   char *current_ = nullptr;

@@ -2,22 +2,23 @@
 #define NORMALIZE_HPP
 
 #include "logging/logging.hpp"
-#include "model/model.hpp"
+#include "model/normalized_problem.hpp"
+#include "model/problem.hpp"
 
+#include <optional>
 #include <vector>
-
-namespace model {
 
 extern logging::Logger normalize_logger;
 
+normalized::Condition
+normalize_atomic_condition(const BaseAtomicCondition &condition) noexcept;
+
 Condition normalize_condition(const Condition &condition) noexcept;
 
-std::vector<PredicateEvaluation> to_list(const Condition &condition) noexcept;
+std::vector<std::shared_ptr<BaseAtomicCondition>> to_list(const Condition &condition) noexcept;
 
-std::vector<Action> normalize_action(const AbstractAction &action) noexcept;
+std::vector<normalized::Action> normalize_action(const Action &action) noexcept;
 
-Problem normalize(const AbstractProblem &abstract_problem) noexcept;
-
-} // namespace model
+std::optional<normalized::Problem> normalize(const Problem &problem) noexcept;
 
 #endif /* end of include guard: NORMALIZE_HPP */

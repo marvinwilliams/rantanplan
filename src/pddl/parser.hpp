@@ -110,7 +110,7 @@ private:
   std::unique_ptr<ast::Conjunction> parse_conjunction();
   std::unique_ptr<ast::Disjunction> parse_disjunction();
   ast::Condition parse_condition();
-  std::unique_ptr<ast::Conjunction> parse_init_list();
+  std::unique_ptr<ast::ConditionList> parse_init_list();
   std::unique_ptr<ast::ActionDef> parse_action();
   std::unique_ptr<ast::ObjectsDef> parse_objects();
   std::unique_ptr<ast::InitDef> parse_init();
