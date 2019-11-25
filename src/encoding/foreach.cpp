@@ -1,18 +1,19 @@
 #include "encoding/foreach.hpp"
+#include "config.hpp"
 #include "logging/logging.hpp"
+#include "model/normalized_problem.hpp"
+#include "model/support.hpp"
+#include "planning/planner.hpp"
 
 namespace encoding {
 
 logging::Logger ForeachEncoder::logger{"Foreach"};
 
-ForeachEncoder::ForeachEncoder(const support::Support &support,
+ForeachEncoder::ForeachEncoder(const normalized::Problem &problem,
                                const Config &config) noexcept
-    : support_{support} {
-  if (config.log_encoding) {
-    logger.add_appender(logging::default_appender);
-  }
+    : support_{problem} {
   num_helpers_ = 0;
-  encode_initial_state();
+  encode_init();
   encode_actions();
   parameter_implies_predicate(false, false);
   parameter_implies_predicate(false, true);
@@ -34,7 +35,7 @@ int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
   } else if (const PredicateVariable *p =
                  std::get_if<PredicateVariable>(&literal.variable);
              p) {
-    variable = predicates_[p->predicate_handle][p->ground_predicate_handle];
+    variable = predicates_[p->handle];
     if (!p->this_step && variable > UNSAT) {
       variable += static_cast<size_t>(num_vars_);
     }
@@ -53,60 +54,61 @@ int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
     return static_cast<int>(SAT);
   }
   if (variable == SAT || variable == UNSAT) {
-    return (literal.negated ? -1 : 1) * static_cast<int>(variable);
+    return (literal.positive ? 1 : -1) * static_cast<int>(variable);
   }
-  return (literal.negated ? -1 : 1) *
+  return (literal.positive ? 1 : -1) *
          static_cast<int>(variable + step * num_vars_);
 }
 
-planning::Plan ForeachEncoder::extract_plan(const sat::Model &model,
-                                            unsigned int step) const noexcept {
-  planning::Plan plan;
+planning::Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
+                                                     unsigned int step) const
+    noexcept {
+  planning::Planner::Plan plan;
   for (unsigned int s = 0; s < step; ++s) {
-    for (model::ActionHandle action_handle = 0;
-         action_handle < support_.get_num_actions(); ++action_handle) {
-      if (model[actions_[action_handle] + s * num_vars_]) {
-        model::Action action = support_.get_problem().actions[action_handle];
+    for (size_t i = 0; i < support_.get_num_actions(); ++i) {
+      if (model[actions_[i] + s * num_vars_]) {
+        const normalized::Action &action = support_.get_problem().actions[i];
+        std::vector<normalized::ConstantHandle> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
           auto &parameter = action.parameters[parameter_pos];
           if (parameter.constant) {
-            continue;
-          }
-          for (size_t i = 0;
-               i < support_.get_constants_of_type(parameter.type).size(); ++i) {
-            if (model[parameters_[action_handle][parameter_pos][i] +
-                      s * num_vars_]) {
-              parameter.constant =
-                  support_.get_constants_of_type(parameter.type)[i];
-              break;
+            constants.push_back(normalized::ConstantHandle{parameter.index});
+          } else {
+            auto type_handle = normalized::TypeHandle{parameter.index};
+            for (size_t j = 0;
+                 j < support_.get_constants_of_type(type_handle).size(); ++j) {
+              if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
+                constants.push_back(
+                    support_.get_constants_of_type(type_handle)[j]);
+                break;
+              }
             }
           }
-          assert(parameter.constant);
+          assert(constants.size() == parameter_pos + 1);
         }
-        assert(model::is_grounded(action));
-        plan.push_back(std::move(action));
+        /* assert(normalized::is_grounded(action)); */
+        plan.emplace_back(normalized::ActionHandle{i}, std::move(constants));
       }
     }
   }
   return plan;
 }
 
-void ForeachEncoder::encode_initial_state() noexcept {
-  for (model::PredicateHandle predicate_handle = 0;
-       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
-    for (const auto &[ground_predicate, ground_predicate_handle] :
-         support_.get_ground_predicates(predicate_handle)) {
-      auto literal =
-          Literal{PredicateVariable{predicate_handle, ground_predicate_handle, true},
-                  !support_.is_init(ground_predicate)};
-      initial_state_ << literal << sat::EndClause;
-    }
+void ForeachEncoder::encode_init() noexcept {
+  /* for (normalized::PredicateHandle predicate_handle{0}; */
+  /*      predicate_handle < support_.get_num_predicates(); ++predicate_handle)
+   * { */
+  for (const auto &[instantiation, handle] : support_.get_instantiations()) {
+    auto literal =
+        Literal{PredicateVariable{handle, true}, support_.is_init(handle)};
+    init_ << literal << sat::EndClause;
+    /* } */
   }
 }
 
 void ForeachEncoder::encode_actions() {
-  for (model::ActionHandle action_handle = 0;
+  for (normalized::ActionHandle action_handle{0};
        action_handle < support_.get_problem().actions.size(); ++action_handle) {
     const auto &action = support_.get_problem().actions[action_handle];
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
@@ -116,7 +118,9 @@ void ForeachEncoder::encode_actions() {
         continue;
       }
       size_t number_arguments =
-          support_.get_constants_of_type(parameter.type).size();
+          support_
+              .get_constants_of_type(normalized::TypeHandle{parameter.index})
+              .size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
       auto action_var = ActionVariable{action_handle};
@@ -124,14 +128,14 @@ void ForeachEncoder::encode_actions() {
            ++constant_index) {
         auto parameter_var =
             ParameterVariable{action_handle, parameter_pos, constant_index};
-        universal_clauses_ << Literal{parameter_var, true};
-        universal_clauses_ << Literal{action_var, false};
+        universal_clauses_ << Literal{parameter_var, false};
+        universal_clauses_ << Literal{action_var, true};
         universal_clauses_ << sat::EndClause;
         all_arguments.push_back(parameter_var);
       }
-      universal_clauses_ << Literal{action_var, true};
+      universal_clauses_ << Literal{action_var, false};
       for (const auto &argument : all_arguments) {
-        universal_clauses_ << Literal{argument, false};
+        universal_clauses_ << Literal{argument, true};
       }
       universal_clauses_ << sat::EndClause;
       universal_clauses_.at_most_one(all_arguments);
@@ -139,83 +143,113 @@ void ForeachEncoder::encode_actions() {
   }
 }
 
-void ForeachEncoder::parameter_implies_predicate(bool is_negated,
+void ForeachEncoder::parameter_implies_predicate(bool positive,
                                                  bool is_effect) {
   const auto &predicate_support =
-      support_.get_predicate_support(is_negated, is_effect);
+      support_.get_predicate_support(positive, is_effect);
   auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
-  for (model::PredicateHandle predicate_handle = 0;
-       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
-    for (const auto &[ground_predicate, ground_predicate_handle] :
-         support_.get_ground_predicates(predicate_handle)) {
-      for (const auto &[action_handle, assignments] :
-           predicate_support[predicate_handle][ground_predicate_handle]) {
-        for (const auto &assignment : assignments) {
-          if (assignment.arguments.empty()) {
-            formula << Literal{ActionVariable{action_handle}, true};
-          } else {
-            for (auto [parameter_index, constant_index] :
-                 assignment.arguments) {
-              formula << Literal{ParameterVariable{action_handle, parameter_index,
-                                                   constant_index},
-                                 true};
-            }
+  for (const auto &[instantiation, instantiation_handle] :
+       support_.get_instantiations()) {
+    for (const auto &[action_handle, assignments] :
+         predicate_support[instantiation_handle]) {
+      for (const auto &assignment : assignments) {
+        if (assignment.empty()) {
+          formula << Literal{ActionVariable{action_handle}, false};
+        } else {
+          for (auto [parameter_index, constant_handle] : assignment) {
+            assert(!support_.get_problem()
+                        .actions[action_handle]
+                        .parameters[parameter_index]
+                        .constant);
+
+            const auto &constants = support_.get_constants_of_type(
+                normalized::TypeHandle{support_.get_problem()
+                                           .actions[action_handle]
+                                           .parameters[parameter_index]
+                                           .index});
+            auto it =
+                std::find(constants.begin(), constants.end(), constant_handle);
+            assert(it != constants.end());
+            formula << Literal{
+                ParameterVariable{
+                    action_handle, parameter_index,
+                    static_cast<size_t>(std::distance(constants.begin(), it))},
+                false};
           }
-          formula << Literal{PredicateVariable{predicate_handle,
-                                               ground_predicate_handle,
-                                               !is_effect},
-                             is_negated}
-                  << sat::EndClause;
         }
+        formula << Literal{PredicateVariable{instantiation_handle, !is_effect},
+                           positive}
+                << sat::EndClause;
       }
     }
   }
 }
 
-void ForeachEncoder::interference(bool is_negated) {
+void ForeachEncoder::interference(bool positive) {
   const auto &precondition_support =
-      support_.get_predicate_support(is_negated, false);
-  const auto &effect_support =
-      support_.get_predicate_support(!is_negated, true);
-  for (model::PredicateHandle predicate_handle = 0;
-       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
-    for (const auto &[ground_predicate, ground_predicate_handle] :
-         support_.get_ground_predicates(predicate_handle)) {
-      for (const auto &[p_action_handle, p_assignments] :
-           precondition_support[predicate_handle][ground_predicate_handle]) {
-        for (const auto &[e_action_handle, e_assignments] :
-             effect_support[predicate_handle][ground_predicate_handle]) {
-          if (p_action_handle == e_action_handle) {
-            continue;
-          }
-          for (const auto &p_assignment : p_assignments) {
-            for (const auto &e_assignment : e_assignments) {
-              if (p_assignment.arguments.empty()) {
-                universal_clauses_
-                    << Literal{ActionVariable{p_action_handle}, true};
-              } else {
-                for (auto [parameter_index, constant_index] :
-                     p_assignment.arguments) {
-                  universal_clauses_ << Literal{
-                      ParameterVariable{p_action_handle, parameter_index,
-                                        constant_index},
-                      true};
-                }
+      support_.get_predicate_support(positive, false);
+  const auto &effect_support = support_.get_predicate_support(!positive, true);
+  for (const auto &[instantiation, handle] : support_.get_instantiations()) {
+    for (const auto &[p_action_handle, p_assignments] :
+         precondition_support[handle]) {
+      for (const auto &[e_action_handle, e_assignments] :
+           effect_support[handle]) {
+        if (p_action_handle == e_action_handle) {
+          continue;
+        }
+        for (const auto &p_assignment : p_assignments) {
+          for (const auto &e_assignment : e_assignments) {
+            if (p_assignment.empty()) {
+              universal_clauses_
+                  << Literal{ActionVariable{p_action_handle}, false};
+            } else {
+              for (auto [parameter_index, constant_handle] : p_assignment) {
+                assert(!support_.get_problem()
+                            .actions[p_action_handle]
+                            .parameters[parameter_index]
+                            .constant);
+
+                const auto &constants = support_.get_constants_of_type(
+                    normalized::TypeHandle{support_.get_problem()
+                                               .actions[p_action_handle]
+                                               .parameters[parameter_index]
+                                               .index});
+                auto it = std::find(constants.begin(), constants.end(),
+                                    constant_handle);
+                assert(it != constants.end());
+                universal_clauses_ << Literal{
+                    ParameterVariable{p_action_handle, parameter_index,
+                                      static_cast<size_t>(std::distance(
+                                          constants.begin(), it))},
+                    false};
               }
-              if (e_assignment.arguments.empty()) {
-                universal_clauses_
-                    << Literal{ActionVariable{e_action_handle}, true};
-              } else {
-                for (auto [parameter_index, constant_index] :
-                     e_assignment.arguments) {
-                  universal_clauses_ << Literal{
-                      ParameterVariable{e_action_handle, parameter_index,
-                                        constant_index},
-                      true};
-                }
-              }
-              universal_clauses_ << sat::EndClause;
             }
+            if (e_assignment.empty()) {
+              universal_clauses_
+                  << Literal{ActionVariable{e_action_handle}, false};
+            } else {
+              for (auto [parameter_index, constant_handle] : e_assignment) {
+                assert(!support_.get_problem()
+                            .actions[e_action_handle]
+                            .parameters[parameter_index]
+                            .constant);
+
+                const auto &constants = support_.get_constants_of_type(
+                    normalized::TypeHandle{support_.get_problem()
+                                               .actions[e_action_handle]
+                                               .parameters[parameter_index]
+                                               .index});
+                auto it = std::find(constants.begin(), constants.end(),
+                                    constant_handle);
+                assert(it != constants.end());
+                universal_clauses_ << Literal{
+                    ParameterVariable{e_action_handle, parameter_index,
+                                      static_cast<size_t>(std::distance(
+                                          constants.begin(), it))},
+                    false};
+              }
+            }
+            universal_clauses_ << sat::EndClause;
           }
         }
       }
@@ -223,72 +257,87 @@ void ForeachEncoder::interference(bool is_negated) {
   }
 }
 
-void ForeachEncoder::frame_axioms(bool is_negated, size_t dnf_threshold) {
-  for (model::PredicateHandle predicate_handle = 0;
-       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
-    for (const auto &[ground_predicate, ground_predicate_handle] :
-         support_.get_ground_predicates(predicate_handle)) {
+void ForeachEncoder::frame_axioms(bool positive, size_t dnf_threshold) {
+  for (const auto &[instantiation, handle] : support_.get_instantiations()) {
+    const auto &predicate_support =
+        support_.get_predicate_support(positive, true)[handle];
 
-      const auto &predicate_support = support_.get_predicate_support(
-          is_negated, true)[predicate_handle][ground_predicate_handle];
-
-      size_t num_nontrivial_clauses = 0;
-      for (const auto &[action_handle, assignments] : predicate_support) {
-        for (const auto &assignment : assignments) {
-          if (assignment.arguments.size() > 1) {
-            ++num_nontrivial_clauses;
-          }
+    size_t num_nontrivial_clauses = 0;
+    for (const auto &[action_handle, assignments] : predicate_support) {
+      for (const auto &assignment : assignments) {
+        if (assignment.size() > 1) {
+          ++num_nontrivial_clauses;
         }
       }
-
-      Formula dnf;
-      dnf << Literal{PredicateVariable{predicate_handle, ground_predicate_handle,
-                                       true},
-                     is_negated}
-          << sat::EndClause;
-      dnf << Literal{PredicateVariable{predicate_handle, ground_predicate_handle,
-                                       false},
-                     !is_negated}
-          << sat::EndClause;
-      for (const auto &[action_handle, assignments] : predicate_support) {
-        for (const auto &assignment : assignments) {
-          if (assignment.arguments.empty()) {
-            dnf << Literal{ActionVariable{action_handle}, false};
-          } else if (assignment.arguments.size() == 1 ||
-                     num_nontrivial_clauses < dnf_threshold) {
-            for (auto [parameter_index, constant_index] :
-                 assignment.arguments) {
-              dnf << Literal{ParameterVariable{action_handle, parameter_index,
-                                               constant_index},
-                             false};
-            }
-          } else {
-            for (auto [parameter_index, constant_index] :
-                 assignment.arguments) {
-              universal_clauses_ << Literal{HelperVariable{num_helpers_}, true};
-              universal_clauses_
-                  << Literal{ParameterVariable{action_handle, parameter_index,
-                                               constant_index},
-                             false};
-              universal_clauses_ << sat::EndClause;
-            }
-            dnf << Literal{HelperVariable{num_helpers_}, false};
-            ++num_helpers_;
-          }
-          dnf << sat::EndClause;
-        }
-      }
-      transition_clauses_.add_dnf(dnf);
     }
+
+    Formula dnf;
+    dnf << Literal{PredicateVariable{handle, true}, positive} << sat::EndClause;
+    dnf << Literal{PredicateVariable{handle, false}, !positive}
+        << sat::EndClause;
+    for (const auto &[action_handle, assignments] : predicate_support) {
+      for (const auto &assignment : assignments) {
+        if (assignment.empty()) {
+          dnf << Literal{ActionVariable{action_handle}, true};
+        } else if (assignment.size() == 1 ||
+                   num_nontrivial_clauses < dnf_threshold) {
+          for (auto [parameter_index, constant_handle] : assignment) {
+            assert(!support_.get_problem()
+                        .actions[action_handle]
+                        .parameters[parameter_index]
+                        .constant);
+
+            const auto &constants = support_.get_constants_of_type(
+                normalized::TypeHandle{support_.get_problem()
+                                           .actions[action_handle]
+                                           .parameters[parameter_index]
+                                           .index});
+            auto it =
+                std::find(constants.begin(), constants.end(), constant_handle);
+            assert(it != constants.end());
+            dnf << Literal{ParameterVariable{action_handle, parameter_index,
+                                             static_cast<size_t>(std::distance(
+                                                 constants.begin(), it))},
+                           true};
+          }
+        } else {
+          for (auto [parameter_index, constant_handle] : assignment) {
+            universal_clauses_ << Literal{HelperVariable{num_helpers_}, false};
+            assert(!support_.get_problem()
+                        .actions[action_handle]
+                        .parameters[parameter_index]
+                        .constant);
+
+            const auto &constants = support_.get_constants_of_type(
+                normalized::TypeHandle{support_.get_problem()
+                                           .actions[action_handle]
+                                           .parameters[parameter_index]
+                                           .index});
+            auto it =
+                std::find(constants.begin(), constants.end(), constant_handle);
+            assert(it != constants.end());
+            universal_clauses_ << Literal{
+                ParameterVariable{
+                    action_handle, parameter_index,
+                    static_cast<size_t>(std::distance(constants.begin(), it))},
+                true};
+            universal_clauses_ << sat::EndClause;
+          }
+          dnf << Literal{HelperVariable{num_helpers_}, true};
+          ++num_helpers_;
+        }
+        dnf << sat::EndClause;
+      }
+    }
+    transition_clauses_.add_dnf(dnf);
   }
 }
 
 void ForeachEncoder::assume_goal() {
-  for (const auto &predicate : support_.get_problem().goal) {
-    model::GroundPredicateHandle index =
-        support_.get_predicate_index(model::GroundPredicate{predicate});
-    goal_ << Literal{PredicateVariable{predicate.definition, index, true},
-                     predicate.negated}
+  for (const auto &[goal, positive] : support_.get_problem().goal) {
+    goal_ << Literal{PredicateVariable{support_.get_instantiations().at(goal),
+                                       true},
+                     positive}
           << sat::EndClause;
   }
 }
@@ -299,15 +348,15 @@ void ForeachEncoder::init_sat_vars() {
 
   actions_.reserve(support_.get_problem().actions.size());
   parameters_.resize(support_.get_problem().actions.size());
-  for (model::ActionHandle action_handle = 0;
-       action_handle < support_.get_problem().actions.size(); ++action_handle) {
-    const auto &action = support_.get_problem().actions[action_handle];
+  for (size_t i = 0; i < support_.get_problem().actions.size(); ++i) {
+    const auto &action = support_.get_problem().actions[i];
     /* LOG_DEBUG(logger, "%s: %u", */
-    /*           model::to_string(action, support_.get_problem()).c_str(), */
+    /*           normalized::to_string(action, support_.get_problem()).c_str(),
+     */
     /*           variable_counter); */
     actions_.push_back(variable_counter++);
 
-    parameters_[action_handle].resize(action.parameters.size());
+    parameters_[i].resize(action.parameters.size());
 
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
@@ -315,34 +364,29 @@ void ForeachEncoder::init_sat_vars() {
       if (parameter.constant) {
         continue;
       }
-      parameters_[action_handle][parameter_pos].reserve(
-          support_.get_constants_of_type(parameter.type).size());
-      for (size_t i = 0;
-           i < support_.get_constants_of_type(parameter.type).size(); ++i) {
+      auto handle = normalized::TypeHandle{parameter.index};
+      parameters_[i][parameter_pos].reserve(
+          support_.get_constants_of_type(handle).size());
+      for (size_t j = 0; j < support_.get_constants_of_type(handle).size();
+           ++j) {
         /* LOG_DEBUG(logger, "Parameter %lu, index %lu: %u", */
         /*           parameters_[action_handle][parameter_pos].size(), i, */
         /*           variable_counter); */
-        parameters_[action_handle][parameter_pos].push_back(variable_counter++);
+        parameters_[i][parameter_pos].push_back(variable_counter++);
       }
     }
   }
 
-  predicates_.resize(support_.get_num_predicates());
-  for (model::PredicateHandle predicate_handle = 0;
-       predicate_handle < support_.get_num_predicates(); ++predicate_handle) {
-    predicates_[predicate_handle].resize(
-        support_.get_ground_predicates(predicate_handle).size());
-    for (const auto &[ground_predicate, ground_predicate_handle] :
-         support_.get_ground_predicates(predicate_handle)) {
-      if (support_.is_rigid(ground_predicate, false)) {
-        /* assert(false); */
-        predicates_[predicate_handle][ground_predicate_handle] = SAT;
-      } else if (support_.is_rigid(ground_predicate, true)) {
-        /* assert(false); */
-        predicates_[predicate_handle][ground_predicate_handle] = UNSAT;
-      } else {
-        predicates_[predicate_handle][ground_predicate_handle] = variable_counter++;
-      }
+  predicates_.resize(support_.get_instantiations().size());
+  for (const auto &[instantiation, handle] : support_.get_instantiations()) {
+    if (support_.is_rigid(handle, true)) {
+      /* assert(false); */
+      predicates_[handle] = SAT;
+    } else if (support_.is_rigid(handle, false)) {
+      /* assert(false); */
+      predicates_[handle] = UNSAT;
+    } else {
+      predicates_[handle] = variable_counter++;
     }
   }
   helpers_.resize(num_helpers_);

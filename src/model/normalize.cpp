@@ -21,9 +21,9 @@ normalize_atomic_condition(const BaseAtomicCondition &condition) noexcept {
       normalized::PredicateHandle{condition.get_predicate()->id};
   for (const auto &a : condition.get_arguments()) {
     if (auto c = std::get_if<const Constant *>(&a)) {
-      result.arguments.emplace_back(true, (*c)->id);
+      result.arguments.push_back({true, (*c)->id});
     } else if (auto p = std::get_if<const Parameter *>(&a)) {
-      result.arguments.emplace_back(false, (*c)->id);
+      result.arguments.push_back({false, (*p)->id});
     } else {
       assert(false);
     }
@@ -75,7 +75,7 @@ normalize_action(const Action &action) noexcept {
     for (const auto &condition : junction->get_conditions()) {
       normalized::Action new_action{};
       for (const auto &p : action.parameters) {
-        new_action.parameters.emplace_back(false, p->type->id);
+        new_action.parameters.push_back({false, p->type->id});
       }
       for (const auto &cond : to_list(condition)) {
         new_action.preconditions.push_back(normalize_atomic_condition(*cond));
@@ -86,7 +86,7 @@ normalize_action(const Action &action) noexcept {
   } else {
     normalized::Action new_action{};
     for (const auto &p : action.parameters) {
-      new_action.parameters.emplace_back(false, p->type->id);
+      new_action.parameters.push_back({false, p->type->id});
     }
     for (const auto &cond : to_list(precondition)) {
       new_action.preconditions.push_back(normalize_atomic_condition(*cond));
@@ -104,22 +104,22 @@ std::optional<normalized::Problem> normalize(const Problem &problem) noexcept {
   normalized_problem.requirements = problem.get_requirements();
 
   for (const auto &type : problem.get_types()) {
-    normalized_problem.types.emplace_back(
-        normalized::TypeHandle{type->supertype->id});
+    normalized_problem.types.push_back(
+        {normalized::TypeHandle{type->supertype->id}});
     normalized_problem.type_names.push_back(type->name);
   }
 
   for (const auto &constant : problem.get_constants()) {
-    normalized_problem.constants.emplace_back(
-        normalized::TypeHandle{constant->type->id});
+    normalized_problem.constants.push_back(
+        {normalized::TypeHandle{constant->type->id}});
     normalized_problem.constant_names.push_back(constant->name);
   }
 
   for (const auto &predicate : problem.get_predicates()) {
     normalized_problem.predicates.emplace_back();
     for (const auto &type : predicate->parameter_types) {
-      normalized_problem.predicates.back().parameter_types.emplace_back(
-          normalized::TypeHandle{type->id});
+      normalized_problem.predicates.back().parameter_types.push_back(
+          {normalized::TypeHandle{type->id}});
     }
     normalized_problem.predicate_names.push_back(predicate->name);
   }
@@ -171,19 +171,21 @@ std::optional<normalized::Problem> normalize(const Problem &problem) noexcept {
   for (const auto &action : problem.get_actions()) {
     LOG_INFO(normalize_logger, "Normalizing action \'%s\'...",
              action->name.c_str());
-    auto new_actions = normalize_action(action);
+    auto new_actions = normalize_action(*action);
     LOG_INFO(normalize_logger, "resulted in %u STRIPS actions",
              new_actions.size());
     normalized_problem.actions.insert(normalized_problem.actions.cend(),
                                       new_actions.begin(), new_actions.end());
+    normalized_problem.action_names.insert(
+        normalized_problem.action_names.end(), action->name);
   }
 
   auto goal =
       std::dynamic_pointer_cast<Condition>(problem.get_goal())->to_dnf();
   for (const auto &predicate : to_list(goal)) {
-    normalized_problem.goal.emplace_back(
-        instantiate(normalize_atomic_condition(*predicate)),
-        predicate->positive());
+    normalized_problem.goal.push_back(
+        {instantiate(normalize_atomic_condition(*predicate)),
+         predicate->positive()});
   }
   return normalized_problem;
 }

@@ -2,8 +2,10 @@
 #define SAT_PLANNER_HPP
 
 #include "config.hpp"
-#include "model/model.hpp"
+#include "model/normalized_problem.hpp"
 #include "model/preprocess.hpp"
+#include "model/support.hpp"
+#include "model/to_string.hpp"
 #include "planning/planner.hpp"
 #include "sat/formula.hpp"
 #include "sat/ipasir_solver.hpp"
@@ -19,36 +21,21 @@ namespace planning {
 template <typename Encoding> class SatPlanner : public Planner {
 public:
   using EncodingFormula = sat::Formula<typename Encoding::Variable>;
-  explicit SatPlanner(model::Problem problem)
-      : Planner{std::move(problem)}, support_{problem_} {}
 
   static std::unique_ptr<sat::Solver>
   get_solver(const Config &config) noexcept {
-    switch(config.solver) {
-      case Config::Solver::Ipasir:
-        return std::make_unique<sat::IpasirSolver>();
-      default:
-        return std::unique_ptr<sat::Solver>{};
+    switch (config.solver) {
+    case Config::Solver::Ipasir:
+      return std::make_unique<sat::IpasirSolver>();
+    default:
+      return std::unique_ptr<sat::Solver>{};
     }
   }
 
-  Plan plan(const Config &config) noexcept final {
-    if (config.preprocess != Config::Preprocess::None) {
-      PRINT_INFO("Preprocessing...");
-      preprocess::preprocess(problem_, support_, config);
-      PRINT_DEBUG("Preprocessed problem:\n%s",
-                model::to_string(problem_).c_str());
-    }
-    if (std::any_of(support_.get_problem().goal.begin(),
-                    support_.get_problem().goal.end(), [this](const auto &p) {
-                      return support_.is_rigid(
-                          p, !p.negated);
-                    })) {
-      PRINT_INFO("Problem is trivially unsolvable");
-      return {};
-    }
+  Planner::Plan plan(const normalized::Problem &problem,
+                     const Config &config) noexcept final {
     PRINT_INFO("Encoding...");
-    Encoding encoding{support_, config};
+    Encoding encoding{problem, config};
     return solve(config, encoding);
   }
 
@@ -58,8 +45,8 @@ protected:
     size_t constant_index;
   };
 
-  SatPlanner(const SatPlanner &planner) = default;
-  SatPlanner(SatPlanner &&planner) = default;
+  /* SatPlanner(const SatPlanner &planner) = default; */
+  /* SatPlanner(SatPlanner &&planner) = default; */
   SatPlanner &operator=(const SatPlanner &planner) = default;
   SatPlanner &operator=(SatPlanner &&planner) = default;
 
@@ -70,16 +57,21 @@ private:
     *solver << static_cast<int>(Encoding::SAT) << 0;
     *solver << -static_cast<int>(Encoding::UNSAT) << 0;
     LOG_DEBUG(logger, "Initial state");
-    add_formula(solver.get(), encoding, encoding.get_initial_clauses(), 0);
+    add_formula(solver.get(), encoding, encoding.get_init(), 0);
     LOG_DEBUG(logger, "Universal clauses");
     add_formula(solver.get(), encoding, encoding.get_universal_clauses(), 0);
-    LOG_DEBUG(logger, "Transition clauses");
-    add_formula(solver.get(), encoding, encoding.get_transition_clauses(), 0);
-    unsigned int step = 1;
+    unsigned int step = 0;
+    double current_step = 1.0;
     while (config.max_steps == 0 || step < config.max_steps) {
-      LOG_DEBUG(logger, "Universal clauses");
-      add_formula(solver.get(), encoding, encoding.get_universal_clauses(),
-                  step);
+      do {
+        LOG_DEBUG(logger, "Transition clauses");
+        add_formula(solver.get(), encoding, encoding.get_transition_clauses(),
+                    step);
+        ++step;
+        LOG_DEBUG(logger, "Universal clauses");
+        add_formula(solver.get(), encoding, encoding.get_universal_clauses(),
+                    step);
+      } while (step < static_cast<unsigned int>(current_step));
       if (config.max_steps > 0) {
         PRINT_INFO("Solving step %u/%u", step, config.max_steps);
       } else {
@@ -92,10 +84,7 @@ private:
         PRINT_INFO("Plan found");
         return encoding.extract_plan(*model, step);
       }
-      LOG_DEBUG(logger, "Transition clauses");
-      add_formula(solver.get(), encoding, encoding.get_transition_clauses(),
-                  step);
-      ++step;
+      current_step *= config.step_factor;
     }
     PRINT_INFO("No plan could be found within %u steps", config.max_steps);
     return {};
@@ -120,8 +109,6 @@ private:
       }
     }
   }
-
-  support::Support support_;
 };
 
 } // namespace planning

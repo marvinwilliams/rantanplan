@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <iostream>
 #include <numeric>
 #include <variant>
 #include <vector>
@@ -61,19 +62,17 @@ inline std::pair<Condition, bool>
 ground(const Condition &predicate, const std::vector<Parameter> &parameters) {
   Condition new_predicate;
   new_predicate.definition = predicate.definition;
-  new_predicate.negated = predicate.negated;
+  new_predicate.positive = predicate.positive;
 
   bool grounded = true;
-  for (auto &arg : predicate.arguments) {
+  for (const auto &arg : predicate.arguments) {
     if (arg.constant) {
       new_predicate.arguments.push_back(arg);
+    } else if (parameters[arg.index].constant) {
+      new_predicate.arguments.push_back(parameters[arg.index]);
     } else {
-      if (parameters[arg.index].constant) {
-        new_predicate.arguments.push_back(parameters[arg.index]);
-      } else {
-        new_predicate.arguments.push_back(arg);
-        grounded = false;
-      }
+      new_predicate.arguments.push_back(arg);
+      grounded = false;
     }
   }
   return {std::move(new_predicate), grounded};
@@ -90,17 +89,19 @@ inline Action ground(const Action &action,
   new_action.pre_instantiated = action.pre_instantiated;
   new_action.eff_instantiated = action.eff_instantiated;
   for (const auto &pred : action.preconditions) {
-    if (auto [new_pred, grounded] = ground(pred, action.parameters); grounded) {
+    if (auto [new_pred, grounded] = ground(pred, new_action.parameters);
+        grounded) {
       new_action.pre_instantiated.emplace_back(instantiate(new_pred),
-                                               pred.negated);
+                                               pred.positive);
     } else {
       new_action.preconditions.push_back(std::move(new_pred));
     }
   }
   for (const auto &pred : action.effects) {
-    if (auto [new_pred, grounded] = ground(pred, action.parameters); grounded) {
+    if (auto [new_pred, grounded] = ground(pred, new_action.parameters);
+        grounded) {
       new_action.eff_instantiated.emplace_back(instantiate(new_pred),
-                                               pred.negated);
+                                               pred.positive);
     } else {
       new_action.effects.push_back(std::move(new_pred));
     }
@@ -121,13 +122,13 @@ inline bool is_grounded(const Condition &predicate,
                      });
 }
 
-inline ParameterMapping
-get_mapping(const std::vector<Parameter> &parameters,
-            const Condition &predicate) noexcept {
-  std::vector<std::vector<ParameterHandle>> parameter_matches{
-      parameters.size()};
+inline ParameterMapping get_mapping(const std::vector<Parameter> &parameters,
+                                    const Condition &predicate) noexcept {
+  std::vector<std::vector<ParameterHandle>> parameter_matches(
+      parameters.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
     if (!predicate.arguments[i].constant) {
+      assert(!parameters[predicate.arguments[i].index].constant);
       parameter_matches[predicate.arguments[i].index].push_back(
           ParameterHandle{i});
     }
@@ -146,25 +147,24 @@ get_mapping(const std::vector<Parameter> &parameters,
 inline ParameterAssignment
 get_assignment(const ParameterMapping &mapping,
                const std::vector<ConstantHandle> &arguments) noexcept {
-  assert(arguments.size() == mapping.size());
+  assert(mapping.size() == arguments.size());
   ParameterAssignment assignment;
   for (size_t i = 0; i < mapping.size(); ++i) {
-    assert(mapping[i].first < action.parameters.size());
     assignment.emplace_back(mapping[i].first, arguments[i]);
   }
   return assignment;
 }
 
-inline PredicateInstantiationHandle
-get_handle(const PredicateInstantiation &predicate, size_t num_constants) {
+inline InstantiationHandle get_handle(const PredicateInstantiation &predicate,
+                                      size_t num_constants) {
   size_t factor = 1;
   size_t result = 0;
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    assert(result <= result + arguments[i] * factor); // Overflow
+    assert(result <= result + predicate.arguments[i] * factor); // Overflow
     result += predicate.arguments[i] * factor;
     factor *= num_constants;
   }
-  return PredicateInstantiationHandle{result};
+  return InstantiationHandle{result};
 }
 
 inline size_t get_num_grounded(
@@ -240,7 +240,8 @@ void for_each_assignment(const Condition &predicate,
 
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;
-    std::vector<ConstantHandle> constants(combination.size());
+    std::vector<ConstantHandle> constants;
+    constants.reserve(combination.size());
     for (size_t i = 0; i < combination.size(); ++i) {
       assert(!parameters[mapping[i].first].constant);
       constants.push_back(constants_by_type[parameters[mapping[i].first].index]
@@ -270,7 +271,7 @@ inline bool is_instantiatable(const Condition &predicate,
                               std::vector<Parameter> parameters,
                               const std::vector<Constant> &constants,
                               const std::vector<Type> &types) noexcept {
-  assert(predicate.arguments.size() == arguments.size());
+  assert(predicate.arguments.size() == instantiation.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
     if (predicate.arguments[i].constant) {
       if (predicate.arguments[i].index != instantiation[i]) {

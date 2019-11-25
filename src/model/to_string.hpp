@@ -1,7 +1,6 @@
 #ifndef TO_STRING_HPP
 #define TO_STRING_HPP
 
-#include "model/problem.hpp"
 #include "model/normalized_problem.hpp"
 
 #include <string>

@@ -43,7 +43,7 @@ Handle<Parameter> Action::add_parameter(std::string name, Handle<Type> type) {
   return {parameters.back().get(), this, problem};
 }
 
-void Action::set_precondition(std::unique_ptr<Precondition> precondition) {
+void Action::set_precondition(std::shared_ptr<Precondition> precondition) {
   if (problem != precondition->get_problem() ||
       this != precondition->get_action()) {
     throw ModelException{"Precondition not constructed for this action"};
@@ -56,7 +56,7 @@ void Action::set_precondition(std::unique_ptr<Precondition> precondition) {
   this->precondition = std::move(precondition);
 }
 
-void Action::set_effect(std::unique_ptr<Effect> effect) {
+void Action::set_effect(std::shared_ptr<Effect> effect) {
   if (problem != effect->get_problem() || this != effect->get_action()) {
     throw ModelException{"Effect not constructed for this action"};
   }
@@ -141,7 +141,8 @@ Handle<Predicate> Problem::add_predicate(std::string name) {
       predicates_.end()) {
     throw ModelException{"Predicate \'" + name + "\' already exists"};
   }
-  predicates_.push_back(std::make_unique<Predicate>(std::move(name), this));
+  predicates_.push_back(
+      std::make_unique<Predicate>(std::move(name), predicates_.size()));
   return {predicates_.back().get(), this};
 }
 
@@ -176,7 +177,7 @@ Handle<Parameter> Problem::add_parameter(Handle<Action> action,
 }
 
 void Problem::set_precondition(Handle<Action> action,
-                               std::unique_ptr<Precondition> precondition) {
+                               std::shared_ptr<Precondition> precondition) {
   if (this != action.get_problem()) {
     throw ModelException{"Action is not from this problem"};
   }
@@ -184,14 +185,14 @@ void Problem::set_precondition(Handle<Action> action,
 }
 
 void Problem::set_effect(Handle<Action> action,
-                         std::unique_ptr<Effect> effect) {
+                         std::shared_ptr<Effect> effect) {
   if (this != action.get_problem()) {
     throw ModelException{"Action is not from this problem"};
   }
   action.p_->set_effect(std::move(effect));
 }
 
-void Problem::add_init(std::unique_ptr<FreePredicate> init) {
+void Problem::add_init(std::shared_ptr<FreePredicate> init) {
   if (this != init->get_problem()) {
     throw ModelException{"Init predicate is not from this problem"};
   }
@@ -199,7 +200,7 @@ void Problem::add_init(std::unique_ptr<FreePredicate> init) {
   init_.push_back(std::move(init));
 }
 
-void Problem::set_goal(std::unique_ptr<GoalCondition> goal) {
+void Problem::set_goal(std::shared_ptr<GoalCondition> goal) {
   if (this != goal->get_problem()) {
     throw ModelException{"Goal is not from this problem"};
   }

@@ -1,20 +1,18 @@
 #include "model/preprocess.hpp"
 #include "config.hpp"
 #include "logging/logging.hpp"
-#include "model/model.hpp"
-#include "model/model_utils.hpp"
+#include "model/normalized_problem.hpp"
 #include "model/to_string.hpp"
+#include "model/utils.hpp"
 
 #include <limits>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace preprocess {
+logging::Logger preprocess_logger = logging::Logger{"Preprocess"};
 
-logging::Logger logger = logging::Logger{"Preprocess"};
-
-using namespace model;
+using namespace normalized;
 
 struct PreprocessSupport {
   explicit PreprocessSupport(const Problem &problem) noexcept
@@ -118,7 +116,8 @@ struct PreprocessSupport {
     /*                        bool valid = false; */
     /*                        for (const auto &valid_assignment : */
     /*                             action_assignments[action_handle]) { */
-    /*                          if (is_unifiable(valid_assignment, assignment)) { */
+    /*                          if (is_unifiable(valid_assignment, assignment))
+     * { */
     /*                            valid = true; */
     /*                            break; */
     /*                          } */
@@ -143,7 +142,8 @@ struct PreprocessSupport {
     /*                        bool valid = false; */
     /*                        for (const auto &valid_assignment : */
     /*                             action_assignments[action_handle]) { */
-    /*                          if (is_unifiable(valid_assignment, assignment)) { */
+    /*                          if (is_unifiable(valid_assignment, assignment))
+     * { */
     /*                            valid = true; */
     /*                            break; */
     /*                          } */
@@ -162,24 +162,18 @@ struct PreprocessSupport {
     /* } */
   }
 
-  std::vector<GroundPredicate> ground_predicates;
+  std::vector<PredicateInstantiation> instantiations;
 
-  std::unordered_map<GroundPredicate, GroundPredicateHandle,
-                     hash::GroundPredicate>
-      ground_predicate_lookup;
+  std::unordered_map<PredicateInstantiation, InstantiationHandle>
+      instantiation_lookup;
 
-  std::unordered_map<PredicateHandle, std::vector<GroundPredicateHandle>,
-                     hash::Handle<PredicateDefinition>>
+  std::unordered_map<PredicateHandle, std::vector<InstantiationHandle>>
       initial_state;
 
   std::vector<std::vector<ParameterAssignment>> action_assignments;
 
-  std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      pos_rigid;
-  std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      neg_rigid;
+  std::vector<std::unordered_set<InstantiationHandle>> pos_rigid;
+  std::vector<std::unordered_set<InstantiationHandle>> neg_rigid;
 
   const Problem &problem;
 };
@@ -387,6 +381,4 @@ void preprocess(Problem &problem, const Config &config) {
       problem.action_groundings.push_back({ActionHandle{i}, assignment});
     }
   }
-} // namespace preprocess
-
-} // namespace preprocess
+}

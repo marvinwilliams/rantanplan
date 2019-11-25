@@ -3,14 +3,10 @@
 
 #include "config.hpp"
 #include "logging/logging.hpp"
-#include "model/model.hpp"
+#include "model/normalized_problem.hpp"
 
-namespace preprocess {
+extern logging::Logger preprocess_logger;
 
-extern logging::Logger logger;
-
-void preprocess(model::Problem &problem, const Config &config);
-
-} // namespace preprocess
+void preprocess(normalized::Problem &problem, const Config &config);
 
 #endif /* end of include guard: PREPROCESS_HPP */

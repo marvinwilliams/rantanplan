@@ -90,7 +90,7 @@ struct PredicateInstantiation {
   std::vector<ConstantHandle> arguments;
 };
 
-using PredicateInstantiationHandle = Handle<PredicateInstantiation>;
+using InstantiationHandle = Handle<PredicateInstantiation>;
 
 inline bool operator==(const PredicateInstantiation &first,
                        const PredicateInstantiation &second) {

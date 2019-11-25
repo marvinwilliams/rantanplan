@@ -45,13 +45,10 @@ private:
 };
 
 struct Type {
-  friend Problem;
-
   std::string name;
   const Type *supertype;
   size_t id;
 
-private:
   Type(std::string name, const Type *supertype, size_t id)
       : name{std::move(name)}, supertype{supertype}, id{id} {}
 };
@@ -59,41 +56,33 @@ private:
 bool is_subtype(const Type *first, const Type *second);
 
 struct Predicate {
-  friend Problem;
-
   std::string name;
   std::vector<const Type *> parameter_types;
   size_t id;
 
-private:
   Predicate(std::string name, size_t id) : name{std::move(name)}, id{id} {}
 };
 
 struct Constant {
-  friend Problem;
-
   std::string name;
   const Type *type;
   size_t id;
 
-private:
   Constant(std::string name, const Type *type, size_t id)
       : name{std::move(name)}, type{type}, id{id} {}
 };
 
-struct Action;
 
 struct Parameter {
-  friend Action;
-
   std::string name;
   const Type *type;
   size_t id;
 
-private:
   Parameter(std::string name, const Type *type, size_t id)
       : name{std::move(name)}, type{type}, id{id} {}
 };
+
+struct Action;
 
 template <> class Handle<Parameter> {
 public:

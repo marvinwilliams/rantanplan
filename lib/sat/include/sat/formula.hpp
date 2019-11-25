@@ -18,13 +18,13 @@ static const detail::end_clause_t EndClause;
 
 template <typename Variable> struct Formula {
   struct Literal {
-    constexpr explicit Literal(Variable variable, bool negated = false)
-        : variable{variable}, negated{negated} {}
+    constexpr explicit Literal(Variable variable, bool positive = true)
+        : variable{variable}, positive{positive} {}
 
-    Literal operator!() { return Literal{variable, !negated}; }
+    Literal operator!() { return Literal{variable, !positive}; }
 
     Variable variable;
-    bool negated;
+    bool positive;
   };
 
   struct Clause {

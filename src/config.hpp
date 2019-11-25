@@ -44,6 +44,7 @@ struct Config {
   Planner planner = Planner::Foreach;
   Solver solver = Solver::Ipasir;
   std::string plan_file = "";
+  double step_factor = 1.2;
   unsigned int max_steps = 0; // 0: Infinity
 
   // Number of dnf clauses with more than 1 literal to be converted to cnf.

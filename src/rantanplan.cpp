@@ -1,24 +1,23 @@
 #include "build_config.hpp"
 #include "config.hpp"
-/* #include "encoding/encoding.hpp" */
-/* #include "encoding/foreach.hpp" */
+#include "encoding/foreach.hpp"
 /* #include "encoding/sequential_1.hpp" */
 /* #include "encoding/sequential_2.hpp" */
 /* #include "encoding/sequential_3.hpp" */
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
-#include "model/problem.hpp"
 #include "model/normalize.hpp"
-/* #include "model/preprocess.hpp" */
-/* #include "model/support.hpp" */
-/* #include "model/to_string.hpp" */
+#include "model/normalized_problem.hpp"
+#include "model/preprocess.hpp"
+#include "model/problem.hpp"
+#include "model/support.hpp"
+#include "model/to_string.hpp"
 #include "options/options.hpp"
 #include "pddl/ast.hpp"
 #include "pddl/parser.hpp"
 #include "pddl/pddl_visitor.hpp"
-#include "pddl/tokens.hpp"
-/* #include "planning/planner.hpp" */
-/* #include "planning/sat_planner.hpp" */
+#include "planning/planner.hpp"
+#include "planning/sat_planner.hpp"
 
 #include <climits>
 #include <memory>
@@ -98,6 +97,7 @@ options::Options set_options(const std::string &name) {
                                 "\'"};
         }
       });
+  options.add_option<double>({"step-factor", 'f'}, "Step factor");
   options.add_option<std::string>({"plan-file", 'o'},
                                   "File to output the plan to");
   options.add_option<bool>({"logging", 'v'}, "Enable debug logging");
@@ -152,6 +152,11 @@ void set_config(const options::Options &options, Config &config) {
     config.solver = solver.value;
   }
 
+  const auto &factor = options.get<double>("step-factor");
+  if (factor.count > 0) {
+    config.step_factor = factor.value;
+  }
+
   const auto &plan_file = options.get<std::string>("plan-file");
   if (plan_file.count > 0) {
     config.plan_file = plan_file.value;
@@ -163,35 +168,34 @@ void set_config(const options::Options &options, Config &config) {
   }
 }
 
-/* std::unique_ptr<planning::Planner> get_planner(const Config &config, */
-/*                                                const model::Problem &problem)
- * { */
-/*   switch (config.planner) { */
-/* case Config::Planner::Sequential1: */
-/*   PRINT_INFO("Using sequential encoding 1"); */
-/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
- */
-/*       problem); */
-/* case Config::Planner::Sequential2: */
-/*   PRINT_INFO("Using sequential encoding 2"); */
-/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
- */
-/*       problem); */
-/* case Config::Planner::Sequential3: */
-/*   PRINT_INFO("Using sequential encoding 3"); */
-/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
- */
-/*       problem); */
-/* case Config::Planner::Foreach: */
-/*   PRINT_INFO("Using foreach encoding"); */
-/*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
- */
-/*       problem); */
-/* default: */
-/*   assert(false); */
-/*   return std::unique_ptr<planning::Planner>{}; */
-/* } */
-/* } */
+std::unique_ptr<planning::Planner> get_planner(const Config &config) {
+  switch (config.planner) {
+  /* case Config::Planner::Sequential1: */
+  /*   PRINT_INFO("Using sequential encoding 1"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+
+  /*       problem); */
+  /* case Config::Planner::Sequential2: */
+  /*   PRINT_INFO("Using sequential encoding 2"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+
+  /*       problem); */
+  /* case Config::Planner::Sequential3: */
+  /*   PRINT_INFO("Using sequential encoding 3"); */
+  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
+   */
+
+  /*       problem); */
+  case Config::Planner::Foreach:
+    PRINT_INFO("Using foreach encoding");
+    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>();
+  default:
+    assert(false);
+    return std::unique_ptr<planning::Planner>{};
+  }
+}
 
 int main(int argc, char *argv[]) {
   auto options = set_options(argv[0]);
@@ -225,9 +229,9 @@ int main(int argc, char *argv[]) {
       config.log_level < 2 ? logging::Level::INFO : logging::Level::DEBUG);
 
   if (config.log_level > 0) {
-    model::normalize_logger.add_appender(logging::default_appender);
+    normalize_logger.add_appender(logging::default_appender);
     /* support::logger.add_appender(logging::default_appender); */
-    /* preprocess::logger.add_appender(logging::default_appender); */
+    preprocess_logger.add_appender(logging::default_appender);
   }
   if (config.log_level > 2) {
     pddl::Parser::logger.add_appender(logging::default_appender);
@@ -274,34 +278,35 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  PRINT_INFO("Normalizing problem..."); 
-  auto problem = model::normalize(*abstract_problem); 
-  PRINT_DEBUG("Normalized problem:\n%s", model::to_string(problem).c_str());
+  PRINT_INFO("Normalizing problem...");
+  auto problem = normalize(*abstract_problem);
+  PRINT_DEBUG("Normalized problem:\n%s", to_string(*problem).c_str());
 
-  /* if (config.planner == Config::Planner::Preprocess) { */
-  /*   PRINT_INFO("Preprocessing..."); */
-  /*   preprocess::preprocess(problem, config); */
-  /*   PRINT_INFO("Preprocessing successful"); */
-  /*   PRINT_DEBUG("Preprocessed problem:\n%s",
-   * model::to_string(problem).c_str()); */
-  /*   return 0; */
-  /* } */
+  if (config.preprocess_mode != Config::PreprocessMode::None) {
+    PRINT_INFO("Preprocessing...");
+    preprocess(*problem, config);
+    PRINT_INFO("Preprocessing successful");
+    PRINT_DEBUG("Preprocessed problem:\n%s", ::to_string(*problem).c_str());
+  }
+  if (config.planner == Config::Planner::Preprocess) {
+    return 0;
+  }
 
-  /* auto planner = get_planner(config, problem); */
-  /* assert(planner); */
+  auto planner = get_planner(config);
+  assert(planner);
 
-  /* auto plan = planner->plan(config); */
+  auto plan = planner->plan(*problem, config);
 
-  /* if (plan.empty()) { */
-  /*   return 1; */
-  /* } */
+  if (plan.empty()) {
+    return 1;
+  }
 
-  /* if (config.plan_file == "") { */
-  /*   std::cout << planner->to_string(plan) << std::endl; */
-  /* } else { */
-  /*   std::ofstream s{config.plan_file}; */
-  /*   s << planner->to_string(plan); */
-  /* } */
+  if (config.plan_file == "") {
+    std::cout << planner->to_string(plan, *problem) << std::endl;
+  } else {
+    std::ofstream s{config.plan_file};
+    s << planner->to_string(plan, *problem);
+  }
 
   return 0;
 }

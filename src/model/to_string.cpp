@@ -1,14 +1,15 @@
 #include "model/to_string.hpp"
 #include "model/normalized_problem.hpp"
-#include "model/problem.hpp"
 
 #include <cassert>
 #include <sstream>
 #include <string>
 #include <variant>
 
-std::string to_string(normalized::TypeHandle type,
-                      const normalized::Problem &problem) {
+using namespace normalized;
+
+std::string to_string(TypeHandle type,
+                      const Problem &problem) {
   const auto &t = problem.types[type];
   std::stringstream ss;
   ss << problem.type_names[type];
@@ -18,8 +19,8 @@ std::string to_string(normalized::TypeHandle type,
   return ss.str();
 }
 
-std::string to_string(normalized::ConstantHandle constant,
-                      const normalized::Problem &problem) {
+std::string to_string(ConstantHandle constant,
+                      const Problem &problem) {
   const auto &c = problem.constants[constant];
   std::stringstream ss;
   ss << problem.constant_names[constant];
@@ -29,8 +30,8 @@ std::string to_string(normalized::ConstantHandle constant,
   return ss.str();
 }
 
-std::string to_string(normalized::PredicateHandle predicate,
-                      const normalized::Problem &problem) {
+std::string to_string(PredicateHandle predicate,
+                      const Problem &problem) {
   const auto &p = problem.predicates[predicate];
   std::stringstream ss;
   ss << problem.predicate_names[predicate] << '(';
@@ -46,11 +47,11 @@ std::string to_string(normalized::PredicateHandle predicate,
   return ss.str();
 }
 
-std::string to_string(const normalized::Condition &predicate,
-                      const normalized::Action &action,
-                      const normalized::Problem &problem) {
+std::string to_string(const Condition &predicate,
+                      const Action &action,
+                      const Problem &problem) {
   std::stringstream ss;
-  if (predicate.negated) {
+  if (!predicate.positive) {
     ss << '!';
   }
   ss << problem.predicate_names[predicate.definition];
@@ -65,17 +66,17 @@ std::string to_string(const normalized::Condition &predicate,
     } else {
       assert(!action.parameters[it->index].constant);
       ss << '[' << problem.type_names[action.parameters[it->index].index]
-         << ']';
+         << "] #" << it->index;
     }
   }
   ss << ')';
   return ss.str();
 }
 
-std::string to_string(const normalized::Condition &predicate,
-                      const normalized::Problem &problem) {
+std::string to_string(const Condition &predicate,
+                      const Problem &problem) {
   std::stringstream ss;
-  if (predicate.negated) {
+  if (!predicate.positive) {
     ss << '!';
   }
   ss << problem.predicate_names[predicate.definition];
@@ -92,8 +93,8 @@ std::string to_string(const normalized::Condition &predicate,
   return ss.str();
 }
 
-std::string to_string(const normalized::PredicateInstantiation &predicate,
-                      const normalized::Problem &problem) {
+std::string to_string(const PredicateInstantiation &predicate,
+                      const Problem &problem) {
   std::stringstream ss;
   ss << problem.predicate_names[predicate.definition];
   ss << '(';
@@ -108,17 +109,17 @@ std::string to_string(const normalized::PredicateInstantiation &predicate,
   return ss.str();
 }
 
-/* std::string to_string(const normalized::Condition &condition, */
-/*                       const normalized::Problem &problem) { */
+/* std::string to_string(const Condition &condition, */
+/*                       const Problem &problem) { */
 /*   std::stringstream ss; */
 /*   if (std::holds_alternative<Junction>(condition)) { */
-/*     const normalized::Junction &junction = std::get<Junction>(condition); */
+/*     const Junction &junction = std::get<Junction>(condition); */
 /*     ss << '('; */
 /*     for (auto it = junction.arguments.cbegin(); it !=
  * junction.arguments.cend(); */
 /*          ++it) { */
 /*       if (it != junction.arguments.cbegin()) { */
-/*         ss << (junction.connective == normalized::Junction::Connective::And
+/*         ss << (junction.connective == Junction::Connective::And
  */
 /*                    ? " ∧ " */
 /*                    : " ∨ "); */
@@ -127,15 +128,15 @@ std::string to_string(const normalized::PredicateInstantiation &predicate,
 /*     } */
 /*     ss << ')'; */
 /*   } else { */
-/*     const normalized::ConditionPredicate &predicate = */
+/*     const ConditionPredicate &predicate = */
 /*         std::get<ConditionPredicate>(condition); */
 /*     ss << to_string(predicate, problem); */
 /*   } */
 /*   return ss.str(); */
 /* } */
 
-std::string to_string(normalized::ActionHandle action,
-                      const normalized::Problem &problem) {
+std::string to_string(ActionHandle action,
+                      const Problem &problem) {
   const auto &a = problem.actions[action];
   std::stringstream ss;
   ss << problem.action_names[action] << '(';
@@ -161,7 +162,7 @@ std::string to_string(normalized::ActionHandle action,
   return ss.str();
 }
 
-std::string to_string(const normalized::Problem &problem) {
+std::string to_string(const Problem &problem) {
   std::stringstream ss;
   ss << "Domain: " << problem.domain_name << '\n';
   ss << "Problem: " << problem.problem_name << '\n';
@@ -172,19 +173,19 @@ std::string to_string(const normalized::Problem &problem) {
   ss << '\n';
   ss << "Types:" << '\n';
   for (size_t i = 0; i < problem.types.size(); ++i) {
-    ss << '\t' << to_string(normalized::TypeHandle{i}, problem) << '\n';
+    ss << '\t' << to_string(TypeHandle{i}, problem) << '\n';
   }
   ss << "Constants:" << '\n';
   for (size_t i = 0; i < problem.constants.size(); ++i) {
-    ss << '\t' << to_string(normalized::ConstantHandle{i}, problem) << '\n';
+    ss << '\t' << to_string(ConstantHandle{i}, problem) << '\n';
   }
   ss << "Predicates:" << '\n';
   for (size_t i = 0; i < problem.predicates.size(); ++i) {
-    ss << '\t' << to_string(normalized::PredicateHandle{i}, problem) << '\n';
+    ss << '\t' << to_string(PredicateHandle{i}, problem) << '\n';
   }
   ss << "Actions:" << '\n';
   for (size_t i = 0; i < problem.actions.size(); ++i) {
-    ss << '\t' << to_string(normalized::ActionHandle{i}, problem) << '\n';
+    ss << '\t' << to_string(ActionHandle{i}, problem) << '\n';
   }
   ss << "Initial state:" << '\n';
   for (auto &predicate : problem.init) {
@@ -192,8 +193,8 @@ std::string to_string(const normalized::Problem &problem) {
   }
   ss << '\n';
   ss << "Goal:" << '\n';
-  for (auto &[predicate, negated] : problem.goal) {
-    ss << '\t' << (negated ? "not " : "") << to_string(predicate, problem)
+  for (auto &[predicate, positive] : problem.goal) {
+    ss << '\t' << (positive ? "" : "not ") << to_string(predicate, problem)
        << '\n';
   }
   return ss.str();

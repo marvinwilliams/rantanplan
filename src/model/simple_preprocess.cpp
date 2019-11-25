@@ -1,24 +1,24 @@
 #include "config.hpp"
 #include "logging/logging.hpp"
 #include "model/model.hpp"
-#include "model/model_utils.hpp"
 #include "model/preprocess.hpp"
 #include "model/to_string.hpp"
+#include "model/utils.hpp"
 
 #include <limits>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace preprocess {
+logging::Logger preprocess_logger = logging::Logger{"Preprocess"};
 
-logging::Logger logger = logging::Logger{"Preprocess"};
-
-using namespace model;
+using namespace normalized;
 
 struct PreprocessSupport {
   explicit PreprocessSupport(const Problem &problem) noexcept
-      : pos_rigid(problem.predicates.size()),
+      : init(problem.predicates.size()),
+        constants_by_type(problem.types.size()),
+        pos_rigid(problem.predicates.size()),
         neg_rigid(problem.predicates.size()),
         pos_tested(problem.predicates.size()),
         neg_tested(problem.predicates.size()), problem{problem} {
@@ -36,45 +36,75 @@ struct PreprocessSupport {
           }));
     }
 
-    action_assignments.reserve(problem.actions.size());
+    partially_instantiated_actions.reserve(problem.actions.size());
     for (const auto &action : problem.actions) {
-      action_assignments.push_back(
-          {ParameterAssignment(action.parameters.size())});
+      partially_instantiated_actions.push_back({action});
     }
 
-    initial_state.resize(problem.predicates.size());
-    for (const PredicateEvaluation &predicate : problem.initial_state) {
-      assert(!predicate.negated);
-      auto ground_predicate = GroundPredicate{predicate};
-      initial_state[predicate.definition].insert(get_ground_predicate_handle(
-          problem, predicate.definition, ground_predicate.arguments));
+    for (const auto &p : problem.init) {
+      init[p.definition].insert(get_handle(p, problem.constants.size()));
+    }
+
+    for (size_t i = 0; i < problem.constants.size(); ++i) {
+      const auto &c = problem.constants[i];
+      auto t = c.type;
+      constants_by_type[c.type].push_back(ConstantHandle{i});
+      while (problem.types[t].parent != t) {
+        t = problem.types[t].parent;
+        constants_by_type[t].push_back(ConstantHandle{i});
+      }
     }
   }
 
-  bool is_trivially_rigid(const GroundPredicate &predicate,
-                          bool negated) const {
-    auto handle = get_ground_predicate_handle(problem, predicate.definition,
-                                              predicate.arguments);
-    if ((initial_state[predicate.definition].count(handle) > 0) == negated) {
+  bool is_trivially_rigid(const PredicateInstantiation &predicate,
+                          bool positive) const {
+    auto handle = get_handle(predicate, problem.constants.size());
+    bool in_init = init[predicate.definition].find(handle) !=
+                   init[predicate.definition].end();
+    if (in_init != positive) {
       return false;
     }
     return trivially_rigid[predicate.definition];
   }
 
-  bool is_rigid(const GroundPredicate &predicate, bool negated) const {
-    auto handle = get_ground_predicate_handle(problem, predicate.definition,
-                                              predicate.arguments);
-    auto &rigid = (negated ? neg_rigid : pos_rigid)[predicate.definition];
-    auto &tested = (negated ? neg_tested : pos_tested)[predicate.definition];
-    if (rigid.count(handle)) {
+  bool has_effect(const Action &action, const PredicateInstantiation &predicate,
+                  bool positive) const {
+    for (const auto &[effect, eff_positive] : action.eff_instantiated) {
+      if (eff_positive == positive &&
+          effect.definition == predicate.definition &&
+          get_handle(effect, problem.constants.size()) ==
+              get_handle(predicate, problem.constants.size())) {
+        return true;
+      }
+    }
+    for (const auto &effect : action.effects) {
+      if (effect.definition == predicate.definition &&
+          effect.positive == positive) {
+        if (is_instantiatable(effect, predicate.arguments, action.parameters,
+                              problem.constants, problem.types)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool is_rigid(const PredicateInstantiation &predicate, bool positive) const {
+    auto handle = get_handle(predicate, problem.constants.size());
+    auto &rigid = (positive ? pos_rigid : neg_rigid)[predicate.definition];
+    auto &tested = (positive ? pos_tested : neg_tested)[predicate.definition];
+
+    if (rigid.find(handle) != rigid.end()) {
       return true;
     }
-    if (tested.count(handle)) {
+    if (tested.find(handle) != tested.end()) {
       return false;
     }
+
     tested.insert(handle);
-    bool is_initial = initial_state[predicate.definition].count(handle) > 0;
-    if (is_initial == negated) {
+    bool is_init = init[predicate.definition].find(handle) !=
+                   init[predicate.definition].end();
+    if (is_init != positive) {
       return false;
     }
     if (trivially_rigid[predicate.definition]) {
@@ -82,20 +112,13 @@ struct PreprocessSupport {
       return true;
     }
     for (size_t i = 0; i < problem.actions.size(); ++i) {
-      const auto &action = problem.actions[i];
-      for (const auto &effect : action.effects) {
-        if (effect.definition == predicate.definition &&
-            effect.negated != negated) {
-          if (is_groundable(problem, action,
-                            ParameterAssignment(action.parameters.size()),
-                            effect, predicate.arguments)) {
-            for (const auto &assignment : action_assignments[i]) {
-              if (is_groundable(problem, action, assignment, effect,
-                                predicate.arguments)) {
-                return false;
-              }
-            }
-          }
+      const auto &base_action = problem.actions[i];
+      if (!has_effect(base_action, predicate, !positive)) {
+        continue;
+      }
+      for (const auto &action : partially_instantiated_actions[i]) {
+        if (has_effect(action, predicate, !positive)) {
+          return false;
         }
       }
     }
@@ -103,10 +126,10 @@ struct PreprocessSupport {
     return true;
   }
 
-  template <typename Function> void refine(Function &&best_predicate) {
-    LOG_INFO(logger, "New grounding iteration with %lu action(s)",
-             std::accumulate(action_assignments.begin(),
-                             action_assignments.end(), 0ul,
+  template <typename Function> void refine(Function &&predicate_to_ground) {
+    LOG_INFO(preprocess_logger, "New grounding iteration with %lu action(s)",
+             std::accumulate(partially_instantiated_actions.begin(),
+                             partially_instantiated_actions.end(), 0ul,
                              [](size_t sum, const auto &assignments) {
                                return sum + assignments.size();
                              }));
@@ -117,23 +140,13 @@ struct PreprocessSupport {
     std::for_each(neg_tested.begin(), neg_tested.end(),
                   [](auto &t) { t.clear(); });
     for (size_t i = 0; i < problem.actions.size(); ++i) {
-      const auto &action = problem.actions[i];
-      std::vector<ParameterAssignment> new_assignments;
-      for (size_t j = 0; j < action_assignments[i].size(); ++j) {
-        const auto &assignment = action_assignments[i][j];
+      std::vector<Action> new_actions;
+      for (const auto &action : partially_instantiated_actions[i]) {
         bool valid = true;
-        std::vector<size_t> to_check;
-        for (size_t k = 0; k < action.preconditions.size(); ++k) {
-          const auto &predicate = action.preconditions[k];
-          if (is_grounded(assignment, predicate)) {
-            auto ground_predicate =
-                GroundPredicate{problem, action, assignment, predicate};
-            if (is_rigid(ground_predicate, !predicate.negated)) {
-              valid = false;
-              break;
-            }
-          } else {
-            to_check.push_back(k);
+        for (const auto &[predicate, positive] : action.pre_instantiated) {
+          if (is_rigid(predicate, !positive)) {
+            valid = false;
+            break;
           }
         }
 
@@ -142,109 +155,89 @@ struct PreprocessSupport {
           continue;
         }
 
-        if (to_check.empty()) {
-          new_assignments.push_back(assignment);
+        const Condition *to_ground = predicate_to_ground(action.preconditions);
+
+        if (!to_ground) {
+          new_actions.push_back(action);
           continue;
         }
 
-        size_t min_value = std::numeric_limits<size_t>::max();
-        const PredicateEvaluation *predicate_to_ground = nullptr;
-
-        for (size_t k : to_check) {
-          const auto &predicate = action.preconditions[k];
-          size_t value = best_predicate(action, assignment, predicate);
-          if (value < min_value) {
-            min_value = value;
-            predicate_to_ground = &predicate;
-          }
-        }
-
-        /* for (size_t k : to_check) { */
-        /*   const auto &predicate = action.preconditions[k]; */
-        /*   size_t num_new = */
-        /*       get_num_grounded(problem, action, assignment, predicate); */
-        /*   if (num_new < min_num_new) { */
-        /*     min_num_new = num_new; */
-        /*     predicate_to_ground = &predicate; */
-        /*   } */
-        /* } */
-
-        assert(predicate_to_ground);
-
         refinement_possible = true;
 
-        for_grounded_predicate(
-            problem, action, assignment, *predicate_to_ground,
-            [&](ParameterAssignment predicate_assignment) {
-              for (size_t k = 0; k < action.parameters.size(); ++k) {
-                if (assignment[k]) {
-                  assert(!predicate_assignment[k]);
-                  predicate_assignment[k] = *assignment[k];
-                }
-              }
-              for (size_t k = 0; k < action.preconditions.size(); ++k) {
-                const auto &predicate = action.preconditions[k];
-                if (is_grounded(assignment, predicate)) {
-                  auto ground_predicate =
-                      GroundPredicate{problem, action, assignment, predicate};
-                  if (is_rigid(ground_predicate, !predicate.negated)) {
-                    valid = false;
-                    break;
-                  }
+        for_each_assignment(
+            *to_ground, action.parameters,
+            [this, &action,
+             &new_actions](const ParameterAssignment &assignment) {
+              Action new_action = ground(action, assignment);
+              bool valid = true;
+              for (const auto &[predicate, positive] :
+                   new_action.pre_instantiated) {
+                if (is_rigid(predicate, !positive)) {
+                  valid = false;
+                  break;
                 }
               }
               if (valid) {
-                new_assignments.push_back(std::move(predicate_assignment));
+                new_actions.push_back(std::move(new_action));
               }
-            });
+            },
+            constants_by_type);
       }
-      action_assignments[i] = std::move(new_assignments);
+      partially_instantiated_actions[i] = std::move(new_actions);
     }
   }
 
-  std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      initial_state;
+  std::vector<std::unordered_set<InstantiationHandle>> init;
+  std::vector<std::vector<ConstantHandle>> constants_by_type;
 
   bool refinement_possible = true;
-  std::vector<std::vector<ParameterAssignment>> action_assignments;
+  std::vector<std::vector<Action>> partially_instantiated_actions;
   std::vector<bool> trivially_rigid;
-  mutable std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      pos_rigid;
-  mutable std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      neg_rigid;
-  mutable std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      pos_tested;
-  mutable std::vector<
-      std::unordered_set<GroundPredicateHandle, hash::Handle<GroundPredicate>>>
-      neg_tested;
+  mutable std::vector<std::unordered_set<InstantiationHandle>> pos_rigid;
+  mutable std::vector<std::unordered_set<InstantiationHandle>> neg_rigid;
+  mutable std::vector<std::unordered_set<InstantiationHandle>> pos_tested;
+  mutable std::vector<std::unordered_set<InstantiationHandle>> neg_tested;
   const Problem &problem;
 };
 
 void preprocess(Problem &problem, const Config &config) {
   if (config.preprocess_mode == Config::PreprocessMode::None) {
-    LOG_INFO(logger, "No preprocessing done");
+    LOG_INFO(preprocess_logger, "No preprocessing done");
     return;
   }
 
-  LOG_INFO(logger, "Generating preprocessing support...");
+  LOG_INFO(preprocess_logger, "Generating preprocessing support...");
   PreprocessSupport support{problem};
 
+  auto select_min_grounded =
+      [&support](const std::vector<Condition> &conditions) {
+        size_t min_value = std::numeric_limits<size_t>::max();
+        const Condition *min = nullptr;
+
+        for (const auto &condition : conditions) {
+          size_t value =
+              get_num_grounded(condition.arguments, support.constants_by_type);
+          if (value < min_value) {
+            min_value = value;
+            min = &condition;
+          }
+        }
+        return min;
+      };
+
   while (support.refinement_possible) {
-    support.refine([&problem](const auto &action, const auto &assignment,
-                              const auto &predicate) {
-      return get_num_grounded(problem, action, assignment, predicate);
-    });
+    support.refine(select_min_grounded);
   }
 
-  for (size_t i = 0; i < problem.actions.size(); ++i) {
-    for (const auto &assignment : support.action_assignments[i]) {
-      problem.action_groundings.push_back({ActionHandle{i}, assignment});
+  size_t num_actions = problem.actions.size();
+  problem.actions.clear();
+  auto action_names = std::move(problem.action_names);
+  problem.action_names.clear(); // noop
+
+  for (size_t i = 0; i < num_actions; ++i) {
+    for (auto &action : support.partially_instantiated_actions[i]) {
+      problem.actions.push_back(std::move(action));
+      problem.action_names.push_back(action_names[i]);
     }
   }
 }
-
-} // namespace preprocess
