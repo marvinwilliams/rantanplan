@@ -21,9 +21,9 @@ normalize_atomic_condition(const BaseAtomicCondition &condition) noexcept {
       normalized::PredicateHandle{condition.get_predicate()->id};
   for (const auto &a : condition.get_arguments()) {
     if (auto c = std::get_if<const Constant *>(&a)) {
-      result.arguments.push_back({true, (*c)->id});
+      result.arguments.emplace_back(normalized::ConstantHandle{(*c)->id});
     } else if (auto p = std::get_if<const Parameter *>(&a)) {
-      result.arguments.push_back({false, (*p)->id});
+      result.arguments.emplace_back(normalized::ParameterHandle{(*p)->id});
     } else {
       assert(false);
     }
@@ -75,7 +75,7 @@ normalize_action(const Action &action) noexcept {
     for (const auto &condition : junction->get_conditions()) {
       normalized::Action new_action{};
       for (const auto &p : action.parameters) {
-        new_action.parameters.push_back({false, p->type->id});
+        new_action.parameters.emplace_back(normalized::TypeHandle{p->type->id});
       }
       for (const auto &cond : to_list(condition)) {
         new_action.preconditions.push_back(normalize_atomic_condition(*cond));
@@ -86,7 +86,7 @@ normalize_action(const Action &action) noexcept {
   } else {
     normalized::Action new_action{};
     for (const auto &p : action.parameters) {
-      new_action.parameters.push_back({false, p->type->id});
+      new_action.parameters.emplace_back(normalized::TypeHandle{p->type->id});
     }
     for (const auto &cond : to_list(precondition)) {
       new_action.preconditions.push_back(normalize_atomic_condition(*cond));
@@ -97,7 +97,7 @@ normalize_action(const Action &action) noexcept {
   return new_actions;
 }
 
-std::optional<normalized::Problem> normalize(const Problem &problem) noexcept {
+normalized::Problem normalize(const Problem &problem) noexcept {
   normalized::Problem normalized_problem{};
   normalized_problem.domain_name = problem.get_domain_name();
   normalized_problem.problem_name = problem.get_problem_name();
@@ -129,33 +129,7 @@ std::optional<normalized::Problem> normalize(const Problem &problem) noexcept {
     auto condition = normalize_atomic_condition(*predicate);
     auto instantiation = instantiate(condition);
     if (predicate->positive()) {
-      if (std::find(normalized_problem.init.begin(),
-                    normalized_problem.init.end(),
-                    instantiation) == normalized_problem.init.end()) {
-        normalized_problem.init.push_back(instantiation);
-      } else {
-        LOG_WARN(normalize_logger, "Found duplicate init predicate '%s'",
-                 to_string(instantiation, normalized_problem).c_str());
-      }
-    } else {
-      if (std::find(negative_init.begin(), negative_init.end(),
-                    instantiation) == negative_init.end()) {
-        negative_init.push_back(instantiation);
-      } else {
-        LOG_WARN(normalize_logger,
-                 "Found duplicate negated init predicate '%s'",
-                 to_string(instantiation, normalized_problem).c_str());
-      }
-    }
-  }
-
-  for (const auto &predicate : negative_init) {
-    if (std::find(normalized_problem.init.begin(),
-                  normalized_problem.init.end(),
-                  predicate) != normalized_problem.init.end()) {
-      LOG_ERROR(normalize_logger, "Found contradicting init predicate '%s'",
-                to_string(predicate, normalized_problem).c_str());
-      return std::nullopt;
+      normalized_problem.init.push_back(instantiation);
     }
   }
 
@@ -187,5 +161,8 @@ std::optional<normalized::Problem> normalize(const Problem &problem) noexcept {
         {instantiate(normalize_atomic_condition(*predicate)),
          predicate->positive()});
   }
+  LOG_DEBUG(normalize_logger, "Normalized problem:\n%s",
+            to_string(normalized_problem).c_str());
+
   return normalized_problem;
 }

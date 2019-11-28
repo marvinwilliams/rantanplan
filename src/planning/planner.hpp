@@ -9,8 +9,6 @@
 #include <utility>
 #include <vector>
 
-namespace planning {
-
 class Planner {
 public:
   using Plan = std::vector<std::pair<normalized::ActionHandle,
@@ -25,7 +23,5 @@ public:
   std::string to_string(const Plan &plan,
                         const normalized::Problem &problem) const noexcept;
 };
-
-} // namespace planning
 
 #endif /* end of include guard: PLANNER_HPP */

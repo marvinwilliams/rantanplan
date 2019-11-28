@@ -36,8 +36,8 @@ inline PredicateInstantiation instantiate(const Condition &predicate) noexcept {
   std::vector<ConstantHandle> args;
   args.reserve(predicate.arguments.size());
   for (const auto &arg : predicate.arguments) {
-    assert(arg.constant);
-    args.push_back(ConstantHandle{arg.index});
+    assert(arg.is_constant());
+    args.push_back(arg.get_constant());
   }
   return PredicateInstantiation{predicate.definition, std::move(args)};
 }
@@ -48,11 +48,11 @@ instantiate(const Condition &predicate,
   std::vector<ConstantHandle> args;
   args.reserve(predicate.arguments.size());
   for (const auto &arg : predicate.arguments) {
-    if (arg.constant) {
-      args.push_back(ConstantHandle{arg.index});
+    if (arg.is_constant()) {
+      args.push_back(arg.get_constant());
     } else {
-      assert(parameters[arg.index].constant);
-      args.push_back(ConstantHandle{parameters[arg.index].index});
+      assert(parameters[arg.get_parameter()].is_constant());
+      args.push_back(parameters[arg.get_parameter()].get_constant());
     }
   }
   return PredicateInstantiation{predicate.definition, std::move(args)};
@@ -66,12 +66,13 @@ ground(const Condition &predicate, const std::vector<Parameter> &parameters) {
 
   bool grounded = true;
   for (const auto &arg : predicate.arguments) {
-    if (arg.constant) {
-      new_predicate.arguments.push_back(arg);
-    } else if (parameters[arg.index].constant) {
-      new_predicate.arguments.push_back(parameters[arg.index]);
+    if (arg.is_constant()) {
+      new_predicate.arguments.emplace_back(arg.get_constant());
+    } else if (parameters[arg.get_parameter()].is_constant()) {
+      new_predicate.arguments.emplace_back(
+          parameters[arg.get_parameter()].get_constant());
     } else {
-      new_predicate.arguments.push_back(arg);
+      new_predicate.arguments.emplace_back(arg.get_parameter());
       grounded = false;
     }
   }
@@ -83,8 +84,7 @@ inline Action ground(const Action &action,
   Action new_action;
   new_action.parameters = action.parameters;
   for (const auto &[p, c] : assignment) {
-    new_action.parameters[p].constant = true;
-    new_action.parameters[p].index = c;
+    new_action.parameters[p].set(c);
   }
   new_action.pre_instantiated = action.pre_instantiated;
   new_action.eff_instantiated = action.eff_instantiated;
@@ -111,14 +111,15 @@ inline Action ground(const Action &action,
 
 inline bool is_grounded(const Condition &predicate) noexcept {
   return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
-                     [](const auto &arg) { return arg.constant; });
+                     [](const auto &arg) { return arg.is_constant(); });
 }
 
 inline bool is_grounded(const Condition &predicate,
                         const std::vector<Parameter> &parameters) noexcept {
   return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
                      [&parameters](const auto &arg) {
-                       return arg.constant || parameters[arg.index].constant;
+                       return arg.is_constant() ||
+                              parameters[arg.get_parameter()].is_constant();
                      });
 }
 
@@ -127,9 +128,9 @@ inline ParameterMapping get_mapping(const std::vector<Parameter> &parameters,
   std::vector<std::vector<ParameterHandle>> parameter_matches(
       parameters.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (!predicate.arguments[i].constant) {
-      assert(!parameters[predicate.arguments[i].index].constant);
-      parameter_matches[predicate.arguments[i].index].push_back(
+    if (!predicate.arguments[i].is_constant()) {
+      assert(!parameters[predicate.arguments[i].get_parameter()].is_constant());
+      parameter_matches[predicate.arguments[i].get_parameter()].push_back(
           ParameterHandle{i});
     }
   }
@@ -184,11 +185,26 @@ inline size_t get_num_grounded(const std::vector<Parameter> &parameters,
   return std::accumulate(
       parameters.begin(), parameters.end(), 1ul,
       [&constants_by_type](size_t product, const Parameter &param) {
-        return param.constant ? product
-                              : product * constants_by_type[param.index].size();
+        return param.is_constant()
+                   ? product
+                   : product * constants_by_type[param.get_type()].size();
       });
 }
 
+inline size_t get_num_grounded(const std::vector<Argument> &arguments,
+                               const std::vector<Parameter> &parameters,
+                               const std::vector<std::vector<ConstantHandle>>
+                                   &constants_by_type) noexcept {
+  return std::accumulate(
+      arguments.begin(), arguments.end(), 1ul,
+      [&parameters, &constants_by_type](size_t product, const Argument &arg) {
+        return arg.is_constant()
+                   ? product
+                   : product * constants_by_type[parameters[arg.get_parameter()]
+                                                     .get_type()]
+                                   .size();
+      });
+}
 template <typename Function>
 void for_each_instantiation(const Predicate &predicate, Function f,
                             const std::vector<std::vector<ConstantHandle>>
@@ -221,8 +237,8 @@ void for_each_assignment(const Condition &predicate,
                              &constants_by_type) noexcept {
   std::vector<ConstantHandle> arguments(predicate.arguments.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (predicate.arguments[i].constant) {
-      arguments[i] = ConstantHandle{predicate.arguments[i].index};
+    if (predicate.arguments[i].is_constant()) {
+      arguments[i] = predicate.arguments[i].get_constant();
     }
   }
 
@@ -231,9 +247,9 @@ void for_each_assignment(const Condition &predicate,
   std::vector<size_t> argument_sizes;
   argument_sizes.reserve(mapping.size());
   for (const auto &p : mapping) {
-    assert(!parameters[p.first].constant);
+    assert(!parameters[p.first].is_constant());
     argument_sizes.push_back(
-        constants_by_type[parameters[p.first].index].size());
+        constants_by_type[parameters[p.first].get_type()].size());
   }
 
   auto combination_iterator = CombinationIterator{argument_sizes};
@@ -243,9 +259,10 @@ void for_each_assignment(const Condition &predicate,
     std::vector<ConstantHandle> constants;
     constants.reserve(combination.size());
     for (size_t i = 0; i < combination.size(); ++i) {
-      assert(!parameters[mapping[i].first].constant);
-      constants.push_back(constants_by_type[parameters[mapping[i].first].index]
-                                           [combination[i]]);
+      assert(!parameters[mapping[i].first].is_constant());
+      constants.push_back(
+          constants_by_type[parameters[mapping[i].first].get_type()]
+                           [combination[i]]);
     }
     f(get_assignment(mapping, constants));
     ++combination_iterator;
@@ -257,8 +274,8 @@ inline bool is_unifiable(const std::vector<Parameter> &first,
   // Assumes same action, thus free parameters are not checked
   assert(first.size() == second.size());
   for (size_t i = 0; i < first.size(); ++i) {
-    if (first[i].constant && second[i].constant &&
-        first[i].index != second[i].index) {
+    if (first[i].is_constant() && second[i].is_constant() &&
+        first[i].get_constant() != second[i].get_constant()) {
       return false;
     }
   }
@@ -273,23 +290,22 @@ inline bool is_instantiatable(const Condition &predicate,
                               const std::vector<Type> &types) noexcept {
   assert(predicate.arguments.size() == instantiation.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (predicate.arguments[i].constant) {
-      if (predicate.arguments[i].index != instantiation[i]) {
+    if (predicate.arguments[i].is_constant()) {
+      if (predicate.arguments[i].get_constant() != instantiation[i]) {
         return false;
       }
     } else {
-      ParameterHandle handle = ParameterHandle{predicate.arguments[i].index};
-      if (parameters[handle].constant) {
-        if (ConstantHandle{parameters[handle].index} != instantiation[i]) {
+      auto handle = predicate.arguments[i].get_parameter();
+      if (parameters[handle].is_constant()) {
+        if (parameters[handle].get_constant() != instantiation[i]) {
           return false;
         }
       } else {
         if (!is_subtype(constants[instantiation[i]].type,
-                        TypeHandle{parameters[handle].index}, types)) {
+                        parameters[handle].get_type(), types)) {
           return false;
         }
-        parameters[handle].constant = true;
-        parameters[handle].index = instantiation[i];
+        parameters[handle].set(instantiation[i]);
       }
     }
   }

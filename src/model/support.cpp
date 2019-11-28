@@ -1,6 +1,7 @@
 #include "model/support.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized_problem.hpp"
+#include "model/to_string.hpp"
 #include "model/utils.hpp"
 #include "util/combinatorics.hpp"
 
@@ -10,11 +11,11 @@
 
 using namespace normalized;
 
-logging::Logger support_logger{"Support"};
+logging::Logger Support::logger{"Support"};
 
 Support::Support(const Problem &problem_) noexcept
     : constants_by_type_(problem_.types.size()), problem_{problem_} {
-  LOG_INFO(support_logger, "Sort constants by type...");
+  LOG_INFO(logger, "Sorting constants by type...");
   for (size_t i = 0; i < problem_.constants.size(); ++i) {
     const auto &c = problem_.constants[i];
     auto t = c.type;
@@ -25,17 +26,17 @@ Support::Support(const Problem &problem_) noexcept
     }
   }
 
-  LOG_INFO(support_logger, "Ground all predicates...");
+  LOG_INFO(logger, "Grounding all predicates...");
   instantiate_predicates();
   instantiated_ = true;
-  LOG_INFO(support_logger, "The problem_ has %u grounded predicates",
+  LOG_INFO(logger, "The problem has %u grounded predicates",
            instantiations_.size());
   init_.reserve(problem_.init.size());
   for (const auto &predicate : problem_.init) {
     assert(instantiations_.find(predicate) != instantiations_.end());
     init_.insert(instantiations_[predicate]);
   }
-  LOG_INFO(support_logger, "Compute predicate support...");
+  LOG_INFO(logger, "Computing predicate support...");
   set_predicate_support();
   predicate_support_constructed_ = true;
   /* for (size_t i = 0; i < problem_.predicates.size(); ++i) { */
@@ -57,14 +58,20 @@ Support::Support(const Problem &problem_) noexcept
 }
 
 void Support::instantiate_predicates() noexcept {
+  /* std::vector<PredicateInstantiation> tmp; */
+  instantiations_.reserve(1000000);
   for (size_t i = 0; i < problem_.predicates.size(); ++i) {
+    LOG_DEBUG(logger, "Grounding %s",
+              to_string(normalized::PredicateHandle{i}, problem_).c_str());
     for_each_instantiation(
         problem_.predicates[i],
         [this, i](std::vector<ConstantHandle> arguments) {
-          instantiations_.insert(
-              {PredicateInstantiation{normalized::PredicateHandle{i},
-                                      std::move(arguments)},
-               InstantiationHandle{instantiations_.size()}});
+      instantiations_.insert(
+          {PredicateInstantiation{normalized::PredicateHandle{i},
+                                  std::move(arguments)},
+           InstantiationHandle{instantiations_.size()}});
+      /* tmp.push_back(PredicateInstantiation{normalized::PredicateHandle{i}, */
+      /*                                      std::move(arguments)}); */
         },
         constants_by_type_);
   }
@@ -92,8 +99,7 @@ void Support::set_predicate_support() noexcept {
             auto &predicate_support = select_support(predicate.positive, false);
             auto parameters = action.parameters;
             for (const auto &[p, c] : assignment) {
-              parameters[p].constant = true;
-              parameters[p].index = c;
+              parameters[p].set(c);
             }
             auto instantiation = instantiate(predicate, parameters);
             predicate_support[instantiations_.at(instantiation)]
@@ -104,7 +110,7 @@ void Support::set_predicate_support() noexcept {
     }
     for (const auto &[predicate, positive] : action.eff_instantiated) {
       auto &predicate_support =
-          positive ? pos_effect_support_ : pos_effect_support_;
+          positive ? pos_effect_support_ : neg_effect_support_;
       predicate_support[instantiations_.at(predicate)][ActionHandle{i}]
           .emplace_back();
     }
@@ -115,8 +121,7 @@ void Support::set_predicate_support() noexcept {
             auto &predicate_support = select_support(predicate.positive, true);
             auto parameters = action.parameters;
             for (const auto &[p, c] : assignment) {
-              parameters[p].constant = true;
-              parameters[p].index = c;
+              parameters[p].set(c);
             }
             auto instantiation = instantiate(predicate, parameters);
             predicate_support[instantiations_[instantiation]][ActionHandle{i}]

@@ -12,12 +12,12 @@
 #include <variant>
 #include <vector>
 
-extern logging::Logger support_logger;
-
 class Support {
 public:
   using PredicateSupport = std::vector<std::unordered_map<
       normalized::ActionHandle, std::vector<normalized::ParameterAssignment>>>;
+  static logging::Logger logger;
+
 
   explicit Support(const normalized::Problem &problem_) noexcept;
   Support(const Support &support) = delete;

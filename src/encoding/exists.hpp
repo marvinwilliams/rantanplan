@@ -1,11 +1,11 @@
-#ifndef FOREACH_HPP
-#define FOREACH_HPP
+#ifndef EXISTS_HPP
+#define EXISTS_HPP
 
 #include "config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized_problem.hpp"
-#include "model/utils.hpp"
 #include "model/support.hpp"
+#include "model/utils.hpp"
 #include "planning/planner.hpp"
 #include "sat/formula.hpp"
 #include "sat/model.hpp"
@@ -21,7 +21,7 @@
 #include <variant>
 #include <vector>
 
-class ForeachEncoder {
+class ExistsEncoder {
 
 public:
   static constexpr unsigned int DONTCARE = 0;
@@ -54,8 +54,8 @@ public:
   using Formula = sat::Formula<Variable>;
   using Literal = Formula::Literal;
 
-  explicit ForeachEncoder(const normalized::Problem& problem,
-                          const Config &config) noexcept;
+  explicit ExistsEncoder(const normalized::Problem &problem,
+                         const Config &config) noexcept;
 
   int get_sat_var(Literal literal, unsigned int step) const;
   Planner::Plan extract_plan(const sat::Model &model, unsigned int step) const
@@ -96,4 +96,4 @@ private:
   Formula goal_;
 };
 
-#endif /* end of include guard: FOREACH_HPP */
+#endif /* end of include guard: EXISTS_HPP */

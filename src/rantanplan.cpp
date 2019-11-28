@@ -1,9 +1,8 @@
 #include "build_config.hpp"
 #include "config.hpp"
+#include "encoding/exists.hpp"
 #include "encoding/foreach.hpp"
-/* #include "encoding/sequential_1.hpp" */
-/* #include "encoding/sequential_2.hpp" */
-/* #include "encoding/sequential_3.hpp" */
+#include "encoding/sequential.hpp"
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
@@ -24,6 +23,8 @@
 #include <string>
 #include <unistd.h>
 
+logging::Logger main_logger{"Main"};
+
 void print_version() noexcept {
   char hostname[HOST_NAME_MAX];
   gethostname(hostname, HOST_NAME_MAX);
@@ -37,20 +38,29 @@ options::Options set_options(const std::string &name) {
   options.add_positional_option<std::string>("domain", "The pddl domain file");
   options.add_positional_option<std::string>("problem",
                                              "The pddl problem file");
+  options.add_option<Config::PlanningMode>(
+      {"mode", 'c'}, "Planning mode", [](auto input, auto &mode) {
+        if (input == "parse") {
+          mode = Config::PlanningMode::Parse;
+        } else if (input == "normalize") {
+          mode = Config::PlanningMode::Normalize;
+        } else if (input == "preprocess") {
+          mode = Config::PlanningMode::Preprocess;
+        } else if (input == "plan") {
+          mode = Config::PlanningMode::Plan;
+        } else {
+          throw ConfigException{"Unknown planning mode \'" +
+                                std::string{input} + "\'"};
+        }
+      });
   options.add_option<Config::Planner>(
       {"planner", 'x'}, "Planner to use", [](auto input, auto &planner) {
-        if (input == "seq1") {
-          planner = Config::Planner::Sequential1;
-        } else if (input == "seq2") {
-          planner = Config::Planner::Sequential2;
-        } else if (input == "seq3") {
-          planner = Config::Planner::Sequential3;
+        if (input == "seq") {
+          planner = Config::Planner::Sequential;
         } else if (input == "foreach") {
           planner = Config::Planner::Foreach;
-        } else if (input == "parse") {
-          planner = Config::Planner::Parse;
-        } else if (input == "preprocess") {
-          planner = Config::Planner::Preprocess;
+        } else if (input == "exists") {
+          planner = Config::Planner::Exists;
         } else {
           throw ConfigException{"Unknown planner \'" + std::string{input} +
 
@@ -129,6 +139,10 @@ void set_config(const options::Options &options, Config &config) {
   } else {
     throw ConfigException{"Problem file required"};
   }
+  const auto &mode = options.get<Config::PlanningMode>("mode");
+  if (mode.count > 0) {
+    config.mode = mode.value;
+  }
 
   const auto &planner = options.get<Config::Planner>("planner");
   if (planner.count > 0) {
@@ -168,33 +182,21 @@ void set_config(const options::Options &options, Config &config) {
   }
 }
 
-std::unique_ptr<planning::Planner> get_planner(const Config &config) {
+std::unique_ptr<Planner> get_planner(const Config &config) {
   switch (config.planner) {
-  /* case Config::Planner::Sequential1: */
-  /*   PRINT_INFO("Using sequential encoding 1"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-
-  /*       problem); */
-  /* case Config::Planner::Sequential2: */
-  /*   PRINT_INFO("Using sequential encoding 2"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-
-  /*       problem); */
-  /* case Config::Planner::Sequential3: */
-  /*   PRINT_INFO("Using sequential encoding 3"); */
-  /*   return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>(
-   */
-
-  /*       problem); */
+  case Config::Planner::Sequential:
+    LOG_INFO(main_logger, "Using sequential encoding");
+    /* return std::make_unique<SatPlanner<SequentialEncoder>>(); */
+    return std::make_unique<SatPlanner<ForeachEncoder>>();
   case Config::Planner::Foreach:
-    PRINT_INFO("Using foreach encoding");
-    return std::make_unique<planning::SatPlanner<encoding::ForeachEncoder>>();
-  default:
-    assert(false);
-    return std::unique_ptr<planning::Planner>{};
+    LOG_INFO(main_logger, "Using foreach encoding");
+    return std::make_unique<SatPlanner<ForeachEncoder>>();
+  case Config::Planner::Exists:
+    LOG_INFO(main_logger, "Using exists encoding");
+    /* return std::make_unique<SatPlanner<ExistsEncoder>>(); */
+    return std::make_unique<SatPlanner<ForeachEncoder>>();
   }
+  return std::make_unique<SatPlanner<ForeachEncoder>>();
 }
 
 int main(int argc, char *argv[]) {
@@ -230,8 +232,12 @@ int main(int argc, char *argv[]) {
 
   if (config.log_level > 0) {
     normalize_logger.add_appender(logging::default_appender);
-    /* support::logger.add_appender(logging::default_appender); */
+    Support::logger.add_appender(logging::default_appender);
     preprocess_logger.add_appender(logging::default_appender);
+    Planner::logger.add_appender(logging::default_appender);
+    /* SequentialEncoder::logger.add_appender(logging::default_appender); */
+    ForeachEncoder::logger.add_appender(logging::default_appender);
+    /* ExistsEncoder::logger.add_appender(logging::default_appender); */
   }
   if (config.log_level > 2) {
     pddl::Parser::logger.add_appender(logging::default_appender);
@@ -273,39 +279,43 @@ int main(int argc, char *argv[]) {
   /* PRINT_DEBUG("Abstract problem:\n%s", */
   /*             model::to_string(*abstract_problem).c_str()); */
 
-  if (config.planner == Config::Planner::Parse) {
+  if (config.mode == Config::PlanningMode::Parse) {
     PRINT_INFO("Parsing successful");
     return 0;
   }
 
-  PRINT_INFO("Normalizing problem...");
+  PRINT_INFO("Normalizing...");
   auto problem = normalize(*abstract_problem);
-  PRINT_DEBUG("Normalized problem:\n%s", to_string(*problem).c_str());
-
+  if (config.mode == Config::PlanningMode::Normalize) {
+    PRINT_INFO("Normalizing successful");
+    return 0;
+  }
   if (config.preprocess_mode != Config::PreprocessMode::None) {
     PRINT_INFO("Preprocessing...");
-    preprocess(*problem, config);
+    preprocess(problem);
     PRINT_INFO("Preprocessing successful");
-    PRINT_DEBUG("Preprocessed problem:\n%s", ::to_string(*problem).c_str());
+  } else {
+    PRINT_INFO("Skipping preprocessing");
   }
-  if (config.planner == Config::Planner::Preprocess) {
+  LOG_INFO(main_logger, "Problem has %lu actions", problem.actions.size());
+  if (config.mode == Config::PlanningMode::Preprocess) {
     return 0;
   }
 
   auto planner = get_planner(config);
-  assert(planner);
 
-  auto plan = planner->plan(*problem, config);
+  PRINT_INFO("Planning...");
+  auto plan = planner->plan(problem, config);
 
   if (plan.empty()) {
     return 1;
   }
 
   if (config.plan_file == "") {
-    std::cout << planner->to_string(plan, *problem) << std::endl;
+    std::cout << planner->to_string(plan, problem) << std::endl;
   } else {
     std::ofstream s{config.plan_file};
-    s << planner->to_string(plan, *problem);
+    s << planner->to_string(plan, problem);
   }
 
   return 0;

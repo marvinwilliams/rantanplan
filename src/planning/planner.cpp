@@ -4,9 +4,7 @@
 #include "model/model.hpp"
 #include <string>
 
-namespace planning {
-
-logging::Logger Planner::logger{"Planning"};
+logging::Logger Planner::logger{"Planner"};
 
 std::string Planner::to_string(const Plan &plan,
                                const normalized::Problem &problem) const
@@ -26,5 +24,3 @@ std::string Planner::to_string(const Plan &plan,
   }
   return ss.str();
 }
-
-} // namespace planning

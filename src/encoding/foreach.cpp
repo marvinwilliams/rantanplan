@@ -5,20 +5,19 @@
 #include "model/support.hpp"
 #include "planning/planner.hpp"
 
-namespace encoding {
-
 logging::Logger ForeachEncoder::logger{"Foreach"};
 
 ForeachEncoder::ForeachEncoder(const normalized::Problem &problem,
                                const Config &config) noexcept
     : support_{problem} {
   num_helpers_ = 0;
+  LOG_INFO(logger, "Encoding...");
   encode_init();
   encode_actions();
-  parameter_implies_predicate(false, false);
-  parameter_implies_predicate(false, true);
-  parameter_implies_predicate(true, false);
   parameter_implies_predicate(true, true);
+  parameter_implies_predicate(true, false);
+  parameter_implies_predicate(false, true);
+  parameter_implies_predicate(false, false);
   interference(false);
   interference(true);
   frame_axioms(false, config.dnf_threshold);
@@ -60,10 +59,10 @@ int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
          static_cast<int>(variable + step * num_vars_);
 }
 
-planning::Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
+Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
                                                      unsigned int step) const
     noexcept {
-  planning::Planner::Plan plan;
+  Planner::Plan plan;
   for (unsigned int s = 0; s < step; ++s) {
     for (size_t i = 0; i < support_.get_num_actions(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
@@ -72,15 +71,16 @@ planning::Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
           auto &parameter = action.parameters[parameter_pos];
-          if (parameter.constant) {
-            constants.push_back(normalized::ConstantHandle{parameter.index});
+          if (parameter.is_constant()) {
+            constants.push_back(parameter.get_constant());
           } else {
-            auto type_handle = normalized::TypeHandle{parameter.index};
             for (size_t j = 0;
-                 j < support_.get_constants_of_type(type_handle).size(); ++j) {
+                 j <
+                 support_.get_constants_of_type(parameter.get_type()).size();
+                 ++j) {
               if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
                 constants.push_back(
-                    support_.get_constants_of_type(type_handle)[j]);
+                    support_.get_constants_of_type(parameter.get_type())[j]);
                 break;
               }
             }
@@ -108,26 +108,23 @@ void ForeachEncoder::encode_init() noexcept {
 }
 
 void ForeachEncoder::encode_actions() {
-  for (normalized::ActionHandle action_handle{0};
-       action_handle < support_.get_problem().actions.size(); ++action_handle) {
-    const auto &action = support_.get_problem().actions[action_handle];
+  for (size_t i = 0; i < support_.get_num_actions(); ++i) {
+    const auto &action = support_.get_problem().actions[i];
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.constant) {
+      if (parameter.is_constant()) {
         continue;
       }
       size_t number_arguments =
-          support_
-              .get_constants_of_type(normalized::TypeHandle{parameter.index})
-              .size();
+          support_.get_constants_of_type(parameter.get_type()).size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
-      auto action_var = ActionVariable{action_handle};
+      auto action_var = ActionVariable{normalized::ActionHandle{i}};
       for (size_t constant_index = 0; constant_index < number_arguments;
            ++constant_index) {
-        auto parameter_var =
-            ParameterVariable{action_handle, parameter_pos, constant_index};
+        auto parameter_var = ParameterVariable{normalized::ActionHandle{i},
+                                               parameter_pos, constant_index};
         universal_clauses_ << Literal{parameter_var, false};
         universal_clauses_ << Literal{action_var, true};
         universal_clauses_ << sat::EndClause;
@@ -160,13 +157,13 @@ void ForeachEncoder::parameter_implies_predicate(bool positive,
             assert(!support_.get_problem()
                         .actions[action_handle]
                         .parameters[parameter_index]
-                        .constant);
+                        .is_constant());
 
-            const auto &constants = support_.get_constants_of_type(
-                normalized::TypeHandle{support_.get_problem()
-                                           .actions[action_handle]
-                                           .parameters[parameter_index]
-                                           .index});
+            const auto &constants =
+                support_.get_constants_of_type(support_.get_problem()
+                                                   .actions[action_handle]
+                                                   .parameters[parameter_index]
+                                                   .get_type());
             auto it =
                 std::find(constants.begin(), constants.end(), constant_handle);
             assert(it != constants.end());
@@ -207,13 +204,13 @@ void ForeachEncoder::interference(bool positive) {
                 assert(!support_.get_problem()
                             .actions[p_action_handle]
                             .parameters[parameter_index]
-                            .constant);
+                            .is_constant());
 
                 const auto &constants = support_.get_constants_of_type(
-                    normalized::TypeHandle{support_.get_problem()
-                                               .actions[p_action_handle]
-                                               .parameters[parameter_index]
-                                               .index});
+                    support_.get_problem()
+                        .actions[p_action_handle]
+                        .parameters[parameter_index]
+                        .get_type());
                 auto it = std::find(constants.begin(), constants.end(),
                                     constant_handle);
                 assert(it != constants.end());
@@ -232,13 +229,13 @@ void ForeachEncoder::interference(bool positive) {
                 assert(!support_.get_problem()
                             .actions[e_action_handle]
                             .parameters[parameter_index]
-                            .constant);
+                            .is_constant());
 
                 const auto &constants = support_.get_constants_of_type(
-                    normalized::TypeHandle{support_.get_problem()
-                                               .actions[e_action_handle]
-                                               .parameters[parameter_index]
-                                               .index});
+                    support_.get_problem()
+                        .actions[e_action_handle]
+                        .parameters[parameter_index]
+                        .get_type());
                 auto it = std::find(constants.begin(), constants.end(),
                                     constant_handle);
                 assert(it != constants.end());
@@ -285,13 +282,13 @@ void ForeachEncoder::frame_axioms(bool positive, size_t dnf_threshold) {
             assert(!support_.get_problem()
                         .actions[action_handle]
                         .parameters[parameter_index]
-                        .constant);
+                        .is_constant());
 
-            const auto &constants = support_.get_constants_of_type(
-                normalized::TypeHandle{support_.get_problem()
-                                           .actions[action_handle]
-                                           .parameters[parameter_index]
-                                           .index});
+            const auto &constants =
+                support_.get_constants_of_type(support_.get_problem()
+                                                   .actions[action_handle]
+                                                   .parameters[parameter_index]
+                                                   .get_type());
             auto it =
                 std::find(constants.begin(), constants.end(), constant_handle);
             assert(it != constants.end());
@@ -306,13 +303,13 @@ void ForeachEncoder::frame_axioms(bool positive, size_t dnf_threshold) {
             assert(!support_.get_problem()
                         .actions[action_handle]
                         .parameters[parameter_index]
-                        .constant);
+                        .is_constant());
 
-            const auto &constants = support_.get_constants_of_type(
-                normalized::TypeHandle{support_.get_problem()
-                                           .actions[action_handle]
-                                           .parameters[parameter_index]
-                                           .index});
+            const auto &constants =
+                support_.get_constants_of_type(support_.get_problem()
+                                                   .actions[action_handle]
+                                                   .parameters[parameter_index]
+                                                   .get_type());
             auto it =
                 std::find(constants.begin(), constants.end(), constant_handle);
             assert(it != constants.end());
@@ -343,7 +340,7 @@ void ForeachEncoder::assume_goal() {
 }
 
 void ForeachEncoder::init_sat_vars() {
-  PRINT_INFO("Initializing sat variables...");
+  LOG_INFO(logger, "Initializing sat variables...");
   unsigned int variable_counter = UNSAT + 1;
 
   actions_.reserve(support_.get_problem().actions.size());
@@ -361,13 +358,13 @@ void ForeachEncoder::init_sat_vars() {
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.constant) {
+      if (parameter.is_constant()) {
         continue;
       }
-      auto handle = normalized::TypeHandle{parameter.index};
       parameters_[i][parameter_pos].reserve(
-          support_.get_constants_of_type(handle).size());
-      for (size_t j = 0; j < support_.get_constants_of_type(handle).size();
+          support_.get_constants_of_type(parameter.get_type()).size());
+      for (size_t j = 0;
+           j < support_.get_constants_of_type(parameter.get_type()).size();
            ++j) {
         /* LOG_DEBUG(logger, "Parameter %lu, index %lu: %u", */
         /*           parameters_[action_handle][parameter_pos].size(), i, */
@@ -394,7 +391,5 @@ void ForeachEncoder::init_sat_vars() {
     helpers_[i] = variable_counter++;
   }
   num_vars_ = variable_counter - 3;
-  PRINT_INFO("Representation uses %u variables", num_vars_);
+  LOG_INFO(logger, "Representation uses %u variables", num_vars_);
 }
-
-} // namespace encoding

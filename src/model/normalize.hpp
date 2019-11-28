@@ -5,7 +5,6 @@
 #include "model/normalized_problem.hpp"
 #include "model/problem.hpp"
 
-#include <optional>
 #include <vector>
 
 extern logging::Logger normalize_logger;
@@ -15,10 +14,11 @@ normalize_atomic_condition(const BaseAtomicCondition &condition) noexcept;
 
 Condition normalize_condition(const Condition &condition) noexcept;
 
-std::vector<std::shared_ptr<BaseAtomicCondition>> to_list(const Condition &condition) noexcept;
+std::vector<std::shared_ptr<BaseAtomicCondition>>
+to_list(const Condition &condition) noexcept;
 
 std::vector<normalized::Action> normalize_action(const Action &action) noexcept;
 
-std::optional<normalized::Problem> normalize(const Problem &problem) noexcept;
+normalized::Problem normalize(const Problem &problem) noexcept;
 
 #endif /* end of include guard: NORMALIZE_HPP */

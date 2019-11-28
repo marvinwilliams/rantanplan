@@ -69,7 +69,7 @@ template <typename Variable> struct Formula {
   void at_most_one(std::vector<Variable> group) {
     for (size_t i = 0; i + 1 < group.size(); ++i) {
       for (size_t j = i + 1; j < group.size(); ++j) {
-        *this << Literal{group[i], true} << Literal{group[j], true}
+        *this << Literal{group[i], false} << Literal{group[j], false}
               << EndClause;
       }
     }

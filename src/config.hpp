@@ -20,14 +20,8 @@ private:
 };
 
 struct Config {
-  enum class Planner {
-    Sequential1,
-    Sequential2,
-    Sequential3,
-    Foreach,
-    Parse,
-    Preprocess
-  };
+  enum class PlanningMode { Parse, Normalize, Preprocess, Plan };
+  enum class Planner { Sequential, Foreach, Exists };
   enum class PreprocessMode { None, Rigid, Preconditions, Full };
   enum class PreprocessPriority { New, Pruned };
   enum class Solver { Ipasir };
@@ -35,6 +29,7 @@ struct Config {
   // General
   std::string domain_file;
   std::string problem_file;
+  PlanningMode mode = PlanningMode::Plan;
 
   // Preprocess
   PreprocessMode preprocess_mode = PreprocessMode::Rigid;
@@ -48,7 +43,7 @@ struct Config {
   unsigned int max_steps = 0; // 0: Infinity
 
   // Number of dnf clauses with more than 1 literal to be converted to cnf.
-  // Above this limit, helper variables are introudced
+  // Above this limit, helper variables are introduced
   unsigned int dnf_threshold = 16;
 
   // Logging

@@ -68,16 +68,115 @@ struct Constant {
 
 using ConstantHandle = Handle<Constant>;
 
-struct Parameter {
-  bool constant;
-  size_t index;
+class Parameter {
+public:
+  Parameter(ConstantHandle c) : is_constant_{true}, constant_{c} {}
+  Parameter(TypeHandle t) : is_constant_{false}, type_{t} {}
+  Parameter(const Parameter &other) : is_constant_{other.is_constant_} {
+    if (other.is_constant_) {
+      constant_ = other.constant_;
+    } else {
+      type_ = other.type_;
+    }
+  }
+
+  Parameter &operator=(const Parameter &other) {
+    is_constant_ = other.is_constant_;
+    if (other.is_constant_) {
+      constant_ = other.constant_;
+    } else {
+      type_ = other.type_;
+    }
+    return *this;
+  }
+
+  void set(ConstantHandle c) {
+    is_constant_ = true;
+    constant_ = c;
+  }
+
+  void set(TypeHandle t) {
+    is_constant_ = false;
+    type_ = t;
+  }
+
+  ConstantHandle get_constant() const {
+    assert(is_constant_);
+    return constant_;
+  }
+
+  TypeHandle get_type() const {
+    assert(!is_constant_);
+    return type_;
+  }
+
+  bool is_constant() const { return is_constant_; }
+
+private:
+  bool is_constant_;
+  union {
+    ConstantHandle constant_;
+    TypeHandle type_;
+  };
 };
 
 using ParameterHandle = Handle<Parameter>;
 
+class Argument {
+public:
+  Argument(ConstantHandle c) : is_constant_{true}, constant_{c} {}
+  Argument(ParameterHandle p) : is_constant_{false}, parameter_{p} {}
+  Argument(const Argument &other) : is_constant_{other.is_constant_} {
+    if (other.is_constant_) {
+      constant_ = other.constant_;
+    } else {
+      parameter_ = other.parameter_;
+    }
+  }
+
+  Argument &operator=(const Argument &other) {
+    is_constant_ = other.is_constant_;
+    if (other.is_constant()) {
+      constant_ = other.constant_;
+    } else {
+      parameter_ = other.parameter_;
+    }
+    return *this;
+  }
+
+  void set(ConstantHandle c) {
+    is_constant_ = true;
+    constant_ = c;
+  }
+
+  void set(ParameterHandle p) {
+    is_constant_ = false;
+    parameter_ = p;
+  }
+
+  ConstantHandle get_constant() const {
+    assert(is_constant_);
+    return constant_;
+  }
+
+  ParameterHandle get_parameter() const {
+    assert(!is_constant_);
+    return parameter_;
+  }
+
+  bool is_constant() const { return is_constant_; }
+
+private:
+  bool is_constant_;
+  union {
+    ConstantHandle constant_;
+    ParameterHandle parameter_;
+  };
+};
+
 struct Condition {
   PredicateHandle definition;
-  std::vector<Parameter> arguments;
+  std::vector<Argument> arguments;
   bool positive = true;
 };
 
