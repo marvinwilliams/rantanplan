@@ -7,6 +7,6 @@
 
 extern logging::Logger preprocess_logger;
 
-void preprocess(normalized::Problem &problem );
+void preprocess(normalized::Problem &problem, const Config& config);
 
 #endif /* end of include guard: PREPROCESS_HPP */

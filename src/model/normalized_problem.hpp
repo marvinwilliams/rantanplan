@@ -174,6 +174,8 @@ private:
   };
 };
 
+using ArgumentHandle = Handle<Argument>;
+
 struct Condition {
   PredicateHandle definition;
   std::vector<Argument> arguments;

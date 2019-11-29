@@ -66,12 +66,13 @@ void Support::instantiate_predicates() noexcept {
     for_each_instantiation(
         problem_.predicates[i],
         [this, i](std::vector<ConstantHandle> arguments) {
-      instantiations_.insert(
-          {PredicateInstantiation{normalized::PredicateHandle{i},
-                                  std::move(arguments)},
-           InstantiationHandle{instantiations_.size()}});
-      /* tmp.push_back(PredicateInstantiation{normalized::PredicateHandle{i}, */
-      /*                                      std::move(arguments)}); */
+          instantiations_.insert(
+              {PredicateInstantiation{normalized::PredicateHandle{i},
+                                      std::move(arguments)},
+               InstantiationHandle{instantiations_.size()}});
+          /* tmp.push_back(PredicateInstantiation{normalized::PredicateHandle{i},
+           */
+          /*                                      std::move(arguments)}); */
         },
         constants_by_type_);
   }
@@ -93,8 +94,9 @@ void Support::set_predicate_support() noexcept {
     }
 
     for (const auto &predicate : action.preconditions) {
-      for_each_assignment(
-          predicate, action.parameters,
+      for_each_action_instantiation(
+          action.parameters,
+          get_mapping(action.parameters, predicate).parameters,
           [&](ParameterAssignment assignment) {
             auto &predicate_support = select_support(predicate.positive, false);
             auto parameters = action.parameters;
@@ -115,8 +117,9 @@ void Support::set_predicate_support() noexcept {
           .emplace_back();
     }
     for (const auto &predicate : action.effects) {
-      for_each_assignment(
-          predicate, action.parameters,
+      for_each_action_instantiation(
+          action.parameters,
+          get_mapping(action.parameters, predicate).parameters,
           [&](ParameterAssignment assignment) {
             auto &predicate_support = select_support(predicate.positive, true);
             auto parameters = action.parameters;

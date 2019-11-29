@@ -227,11 +227,13 @@ struct PreprocessSupport {
                   [](auto &t) { t.clear(); });
   }
 
-  std::pair<bool, bool> simplify(Action &action) {
+  enum class SimplifyResult { Unchanged, Changed, Invalid };
+
+  SimplifyResult simplify(Action &action) {
     if (std::any_of(
             action.pre_instantiated.begin(), action.pre_instantiated.end(),
             [this](const auto &p) { return is_rigid(p.first, !p.second); })) {
-      return {false, true};
+      return SimplifyResult::Invalid;
     }
     bool changed = false;
     if (auto it = std::remove_if(
@@ -246,7 +248,7 @@ struct PreprocessSupport {
                     action.eff_instantiated.end(), [this](const auto &p) {
                       return is_effectless(p.first, p.second);
                     })) {
-      return {false, true};
+      return SimplifyResult::Invalid;
     }
     if (auto it = std::remove_if(
             action.pre_instantiated.begin(), action.pre_instantiated.end(),
@@ -255,10 +257,10 @@ struct PreprocessSupport {
       action.pre_instantiated.erase(it, action.pre_instantiated.end());
       changed = true;
     }
-    return {true, changed};
+    return changed ? SimplifyResult::Changed : SimplifyResult::Unchanged;
   }
 
-  template <typename Function> void refine(Function &&predicate_to_ground) {
+  template <typename Function> void refine(Function &&select_parameters) {
     LOG_INFO(preprocess_logger, "New grounding iteration with %lu action(s)",
              std::accumulate(partially_instantiated_actions.begin(),
                              partially_instantiated_actions.end(), 0ul,
@@ -268,33 +270,39 @@ struct PreprocessSupport {
 
     refinement_possible = false;
     reset_tested();
+    size_t num_parameters = 0;
+    size_t num_constant_parameters = 0;
     for (size_t i = 0; i < problem.actions.size(); ++i) {
       std::vector<Action> new_actions;
       for (auto &action : partially_instantiated_actions[i]) {
-        auto [valid, changed] = simplify(action);
-        if (!valid || changed) {
+        if (auto result = simplify(action);
+            result != SimplifyResult::Unchanged) {
           refinement_possible = true;
-          if (!valid) {
+          if (result == SimplifyResult::Invalid) {
             continue;
           }
         }
 
-        const Condition *to_ground =
-            predicate_to_ground(action.preconditions, action.parameters);
+        auto to_ground = select_parameters(action);
 
-        if (!to_ground) {
+        if (to_ground.empty()) {
           new_actions.push_back(action);
           continue;
         }
 
         refinement_possible = true;
 
-        for_each_assignment(
-            *to_ground, action.parameters,
-            [&action, &new_actions,
+        for_each_action_instantiation(
+            action.parameters, to_ground,
+            [&action, &new_actions, &num_parameters, &num_constant_parameters,
              this](const ParameterAssignment &assignment) {
               auto new_action = ground(action, assignment);
-              if (auto [valid, changed] = simplify(new_action); valid) {
+              if (auto result = simplify(new_action);
+                  result != SimplifyResult::Invalid) {
+                num_parameters += new_action.parameters.size();
+                num_constant_parameters += static_cast<size_t>(std::count_if(
+                    new_action.parameters.begin(), new_action.parameters.end(),
+                    [](const auto &p) { return p.is_constant(); }));
                 new_actions.push_back(std::move(new_action));
               }
             },
@@ -302,6 +310,8 @@ struct PreprocessSupport {
       }
       partially_instantiated_actions[i] = std::move(new_actions);
     }
+    printf("Ratio: %f\n",
+           static_cast<float>(num_constant_parameters) / num_parameters);
   }
 
   std::vector<std::unordered_set<InstantiationHandle>> init;
@@ -325,29 +335,61 @@ struct PreprocessSupport {
   const Problem &problem;
 };
 
-void preprocess(Problem &problem) {
+void preprocess(Problem &problem, const Config &config) {
   LOG_INFO(preprocess_logger, "Generating preprocessing support...");
   PreprocessSupport support{problem};
 
-  auto select_min_grounded =
-      [&support](const std::vector<Condition> &conditions,
-                 const std::vector<Parameter> &parameters) {
-        size_t min_value = std::numeric_limits<size_t>::max();
-        const Condition *min = nullptr;
+  auto select_free = [](const Action &action) {
+    auto first_free =
+        std::find_if(action.parameters.begin(), action.parameters.end(),
+                     [](const auto &p) { return !p.is_constant(); });
+    if (first_free == action.parameters.end()) {
+      return std::vector<ParameterHandle>{};
+    }
+    return std::vector<ParameterHandle>{ParameterHandle{static_cast<size_t>(
+        std::distance(action.parameters.begin(), first_free))}};
+  };
 
-        for (const auto &condition : conditions) {
-          size_t value = get_num_grounded(condition.arguments, parameters,
-                                          support.constants_by_type);
-          if (value < min_value) {
-            min_value = value;
-            min = &condition;
-          }
-        }
-        return min;
-      };
+  auto select_min_new = [&support, &select_free](const Action &action) {
+    auto min = std::min_element(
+        action.preconditions.begin(), action.preconditions.end(),
+        [&support, &action](const auto &c1, const auto &c2) {
+          return get_num_grounded(c1.arguments, action.parameters,
+                                  support.constants_by_type) <
+                 get_num_grounded(c2.arguments, action.parameters,
+                                  support.constants_by_type);
+        });
+    if (min == action.preconditions.end()) {
+      return select_free(action);
+    }
+    return get_mapping(action.parameters, *min).parameters;
+  };
+
+  auto select_max_rigid = [&support, &select_free](const Action &action) {
+    auto max = std::max_element(
+        action.preconditions.begin(), action.preconditions.end(),
+        [&support](const auto &c1, const auto &c2) {
+          return (c1.positive ? support.neg_rigid
+                              : support.pos_rigid)[c1.definition]
+                     .size() > (c2.positive ? support.neg_rigid
+                                            : support.pos_rigid)[c2.definition]
+                                   .size();
+        });
+    if (max == action.preconditions.end()) {
+      return select_free(action);
+    }
+    return get_mapping(action.parameters, *max).parameters;
+  };
 
   while (support.refinement_possible) {
-    support.refine(select_min_grounded);
+    if (config.preprocess_priority == Config::PreprocessPriority::New) {
+      support.refine(select_min_new);
+    } else if (config.preprocess_priority ==
+               Config::PreprocessPriority::Rigid) {
+      support.refine(select_max_rigid);
+    } else if (config.preprocess_priority == Config::PreprocessPriority::Free) {
+      support.refine(select_free);
+    }
   }
 
   size_t num_actions = problem.actions.size();

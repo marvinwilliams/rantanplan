@@ -89,8 +89,10 @@ options::Options set_options(const std::string &name) {
       [](auto input, auto &priority) {
         if (input == "new") {
           priority = Config::PreprocessPriority::New;
-        } else if (input == "pruned") {
-          priority = Config::PreprocessPriority::Pruned;
+        } else if (input == "rigid") {
+          priority = Config::PreprocessPriority::Rigid;
+        } else if (input == "free") {
+          priority = Config::PreprocessPriority::Free;
         } else {
           throw ConfigException{"Unknown preprocessing mode \'" +
                                 std::string{input} + "\'"};
@@ -292,7 +294,7 @@ int main(int argc, char *argv[]) {
   }
   if (config.preprocess_mode != Config::PreprocessMode::None) {
     PRINT_INFO("Preprocessing...");
-    preprocess(problem);
+    preprocess(problem, config);
     PRINT_INFO("Preprocessing successful");
   } else {
     PRINT_INFO("Skipping preprocessing");

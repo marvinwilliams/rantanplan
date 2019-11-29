@@ -13,10 +13,17 @@
 
 namespace normalized {
 
-using ParameterMapping =
-    std::vector<std::pair<ParameterHandle, std::vector<ParameterHandle>>>;
-using ParameterAssignment =
-    std::vector<std::pair<ParameterHandle, ConstantHandle>>;
+struct ParameterMapping {
+  std::vector<ParameterHandle> parameters;
+  std::vector<std::vector<ArgumentHandle>> arguments;
+};
+
+struct Assignment {
+  ParameterHandle parameter;
+  ConstantHandle constant;
+};
+
+using ParameterAssignment = std::vector<Assignment>;
 
 inline bool is_subtype(TypeHandle subtype, TypeHandle type,
                        const std::vector<Type> &types) noexcept {
@@ -58,13 +65,12 @@ instantiate(const Condition &predicate,
   return PredicateInstantiation{predicate.definition, std::move(args)};
 }
 
-inline std::pair<Condition, bool>
-ground(const Condition &predicate, const std::vector<Parameter> &parameters) {
+inline Condition ground(const Condition &predicate,
+                 const std::vector<Parameter> &parameters) {
   Condition new_predicate;
   new_predicate.definition = predicate.definition;
   new_predicate.positive = predicate.positive;
 
-  bool grounded = true;
   for (const auto &arg : predicate.arguments) {
     if (arg.is_constant()) {
       new_predicate.arguments.emplace_back(arg.get_constant());
@@ -73,10 +79,14 @@ ground(const Condition &predicate, const std::vector<Parameter> &parameters) {
           parameters[arg.get_parameter()].get_constant());
     } else {
       new_predicate.arguments.emplace_back(arg.get_parameter());
-      grounded = false;
     }
   }
-  return {std::move(new_predicate), grounded};
+  return new_predicate;
+}
+
+inline bool is_grounded(const Condition &predicate) noexcept {
+  return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
+                     [](const auto &arg) { return arg.is_constant(); });
 }
 
 inline Action ground(const Action &action,
@@ -89,8 +99,8 @@ inline Action ground(const Action &action,
   new_action.pre_instantiated = action.pre_instantiated;
   new_action.eff_instantiated = action.eff_instantiated;
   for (const auto &pred : action.preconditions) {
-    if (auto [new_pred, grounded] = ground(pred, new_action.parameters);
-        grounded) {
+    if (auto new_pred = ground(pred, new_action.parameters);
+        is_grounded(new_pred)) {
       new_action.pre_instantiated.emplace_back(instantiate(new_pred),
                                                pred.positive);
     } else {
@@ -98,8 +108,8 @@ inline Action ground(const Action &action,
     }
   }
   for (const auto &pred : action.effects) {
-    if (auto [new_pred, grounded] = ground(pred, new_action.parameters);
-        grounded) {
+    if (auto new_pred = ground(pred, new_action.parameters);
+        is_grounded(new_pred)) {
       new_action.eff_instantiated.emplace_back(instantiate(new_pred),
                                                pred.positive);
     } else {
@@ -109,36 +119,22 @@ inline Action ground(const Action &action,
   return new_action;
 }
 
-inline bool is_grounded(const Condition &predicate) noexcept {
-  return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
-                     [](const auto &arg) { return arg.is_constant(); });
-}
-
-inline bool is_grounded(const Condition &predicate,
-                        const std::vector<Parameter> &parameters) noexcept {
-  return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
-                     [&parameters](const auto &arg) {
-                       return arg.is_constant() ||
-                              parameters[arg.get_parameter()].is_constant();
-                     });
-}
-
 inline ParameterMapping get_mapping(const std::vector<Parameter> &parameters,
                                     const Condition &predicate) noexcept {
-  std::vector<std::vector<ParameterHandle>> parameter_matches(
-      parameters.size());
+  std::vector<std::vector<ArgumentHandle>> parameter_matches(parameters.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
     if (!predicate.arguments[i].is_constant()) {
       assert(!parameters[predicate.arguments[i].get_parameter()].is_constant());
       parameter_matches[predicate.arguments[i].get_parameter()].push_back(
-          ParameterHandle{i});
+          ArgumentHandle{i});
     }
   }
 
   ParameterMapping mapping;
   for (size_t i = 0; i < parameters.size(); ++i) {
     if (!parameter_matches[i].empty()) {
-      mapping.emplace_back(ParameterHandle{i}, std::move(parameter_matches[i]));
+      mapping.parameters.emplace_back(i);
+      mapping.arguments.push_back(std::move(parameter_matches[i]));
     }
   }
 
@@ -146,12 +142,12 @@ inline ParameterMapping get_mapping(const std::vector<Parameter> &parameters,
 }
 
 inline ParameterAssignment
-get_assignment(const ParameterMapping &mapping,
+get_assignment(const std::vector<ParameterHandle> &parameters,
                const std::vector<ConstantHandle> &arguments) noexcept {
-  assert(mapping.size() == arguments.size());
+  assert(parameters.size() == arguments.size());
   ParameterAssignment assignment;
-  for (size_t i = 0; i < mapping.size(); ++i) {
-    assignment.emplace_back(mapping[i].first, arguments[i]);
+  for (size_t i = 0; i < parameters.size(); ++i) {
+    assignment.push_back({parameters[i], arguments[i]});
   }
   return assignment;
 }
@@ -205,6 +201,7 @@ inline size_t get_num_grounded(const std::vector<Argument> &arguments,
                                    .size();
       });
 }
+
 template <typename Function>
 void for_each_instantiation(const Predicate &predicate, Function f,
                             const std::vector<std::vector<ConstantHandle>>
@@ -231,40 +228,31 @@ void for_each_instantiation(const Predicate &predicate, Function f,
 }
 
 template <typename Function>
-void for_each_assignment(const Condition &predicate,
-                         const std::vector<Parameter> &parameters, Function f,
-                         const std::vector<std::vector<ConstantHandle>>
-                             &constants_by_type) noexcept {
-  std::vector<ConstantHandle> arguments(predicate.arguments.size());
-  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (predicate.arguments[i].is_constant()) {
-      arguments[i] = predicate.arguments[i].get_constant();
-    }
+void for_each_action_instantiation(
+    const std::vector<Parameter> &parameters,
+    const std::vector<ParameterHandle> &to_ground, Function &&f,
+    const std::vector<std::vector<ConstantHandle>> &constants_by_type) {
+  std::vector<size_t> argument_size_list;
+  argument_size_list.reserve(to_ground.size());
+  for (auto handle : to_ground) {
+    assert(!parameters[handle].is_constant());
+    argument_size_list.push_back(
+        constants_by_type[parameters[handle].get_type()].size());
   }
 
-  ParameterMapping mapping = get_mapping(parameters, predicate);
-
-  std::vector<size_t> argument_sizes;
-  argument_sizes.reserve(mapping.size());
-  for (const auto &p : mapping) {
-    assert(!parameters[p.first].is_constant());
-    argument_sizes.push_back(
-        constants_by_type[parameters[p.first].get_type()].size());
-  }
-
-  auto combination_iterator = CombinationIterator{argument_sizes};
+  auto combination_iterator = CombinationIterator{argument_size_list};
 
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;
-    std::vector<ConstantHandle> constants;
-    constants.reserve(combination.size());
+    ParameterAssignment assignment;
+    assignment.reserve(combination.size());
     for (size_t i = 0; i < combination.size(); ++i) {
-      assert(!parameters[mapping[i].first].is_constant());
-      constants.push_back(
-          constants_by_type[parameters[mapping[i].first].get_type()]
-                           [combination[i]]);
+      assert(!parameters[to_ground[i]].is_constant());
+      auto type = parameters[to_ground[i]].get_type();
+      assignment.push_back(
+          {to_ground[i], constants_by_type[type][combination[i]]});
     }
-    f(get_assignment(mapping, constants));
+    f(std::move(assignment));
     ++combination_iterator;
   }
 }
@@ -282,7 +270,7 @@ inline bool is_unifiable(const std::vector<Parameter> &first,
   return true;
 }
 
-// Copy parameters to try to find the grounding
+// Copy parameters to try to find a valid instantiation
 inline bool is_instantiatable(const Condition &predicate,
                               const std::vector<ConstantHandle> &instantiation,
                               std::vector<Parameter> parameters,

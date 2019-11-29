@@ -23,7 +23,7 @@ struct Config {
   enum class PlanningMode { Parse, Normalize, Preprocess, Plan };
   enum class Planner { Sequential, Foreach, Exists };
   enum class PreprocessMode { None, Rigid, Preconditions, Full };
-  enum class PreprocessPriority { New, Pruned };
+  enum class PreprocessPriority { New, Rigid, Free };
   enum class Solver { Ipasir };
 
   // General
@@ -39,7 +39,7 @@ struct Config {
   Planner planner = Planner::Foreach;
   Solver solver = Solver::Ipasir;
   std::string plan_file = "";
-  double step_factor = 1.2;
+  double step_factor = 1.4;
   unsigned int max_steps = 0; // 0: Infinity
 
   // Number of dnf clauses with more than 1 literal to be converted to cnf.
