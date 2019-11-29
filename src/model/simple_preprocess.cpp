@@ -58,6 +58,12 @@ struct PreprocessSupport {
     for (const auto &p : problem.init) {
       init[p.definition].insert(get_handle(p, problem.constants.size()));
     }
+    for (const auto &[p, positive] : problem.goal) {
+      assert(goal[p.definition].find(get_handle(p, problem.constants.size())) ==
+             goal[p.definition].end());
+      goal[p.definition].try_emplace(get_handle(p, problem.constants.size()),
+                                     positive);
+    }
 
     for (size_t i = 0; i < problem.constants.size(); ++i) {
       const auto &c = problem.constants[i];
@@ -84,9 +90,8 @@ struct PreprocessSupport {
   bool is_trivially_effectless(const PredicateInstantiation &predicate,
                                bool positive) const {
     auto handle = get_handle(predicate, problem.constants.size());
-    if (auto in_goal = goal[predicate.definition].find(handle);
-        in_goal != goal[predicate.definition].end() &&
-        in_goal->second == positive) {
+    if (auto it = goal[predicate.definition].find(handle);
+        it != goal[predicate.definition].end() && it->second == positive) {
       return false;
     }
     return trivially_effectless[predicate.definition];
@@ -95,10 +100,7 @@ struct PreprocessSupport {
   bool has_effect(const Action &action, const PredicateInstantiation &predicate,
                   bool positive) const {
     for (const auto &[effect, eff_positive] : action.eff_instantiated) {
-      if (eff_positive == positive &&
-          effect.definition == predicate.definition &&
-          get_handle(effect, problem.constants.size()) ==
-              get_handle(predicate, problem.constants.size())) {
+      if (eff_positive == positive && effect == predicate) {
         return true;
       }
     }
@@ -118,10 +120,7 @@ struct PreprocessSupport {
                         const PredicateInstantiation &predicate,
                         bool positive) const {
     for (const auto &[precondition, pre_positive] : action.pre_instantiated) {
-      if (pre_positive == positive &&
-          precondition.definition == predicate.definition &&
-          get_handle(precondition, problem.constants.size()) ==
-              get_handle(predicate, problem.constants.size())) {
+      if (pre_positive == positive && precondition == predicate) {
         return true;
       }
     }
@@ -204,17 +203,59 @@ struct PreprocessSupport {
     }
     for (size_t i = 0; i < problem.actions.size(); ++i) {
       const auto &action = problem.actions[i];
-      if (!has_precondition(action, predicate, !positive)) {
+      if (!has_precondition(action, predicate, positive)) {
         continue;
       }
       for (const auto &action : partially_instantiated_actions[i]) {
-        if (has_precondition(action, predicate, !positive)) {
+        if (has_precondition(action, predicate, positive)) {
           return false;
         }
       }
     }
     effectless.insert(handle);
     return true;
+  }
+
+  void reset_tested() {
+    std::for_each(pos_rigid_tested.begin(), pos_rigid_tested.end(),
+                  [](auto &t) { t.clear(); });
+    std::for_each(neg_rigid_tested.begin(), neg_rigid_tested.end(),
+                  [](auto &t) { t.clear(); });
+    std::for_each(pos_effectless_tested.begin(), pos_effectless_tested.end(),
+                  [](auto &t) { t.clear(); });
+    std::for_each(neg_effectless_tested.begin(), neg_effectless_tested.end(),
+                  [](auto &t) { t.clear(); });
+  }
+
+  std::pair<bool, bool> simplify(Action &action) {
+    if (std::any_of(
+            action.pre_instantiated.begin(), action.pre_instantiated.end(),
+            [this](const auto &p) { return is_rigid(p.first, !p.second); })) {
+      return {false, true};
+    }
+    bool changed = false;
+    if (auto it = std::remove_if(
+            action.eff_instantiated.begin(), action.eff_instantiated.end(),
+            [this](const auto &p) { return is_rigid(p.first, p.second); });
+        it != action.eff_instantiated.end()) {
+      action.eff_instantiated.erase(it, action.eff_instantiated.end());
+      changed = true;
+    }
+    if (action.effects.empty() &&
+        std::all_of(action.eff_instantiated.begin(),
+                    action.eff_instantiated.end(), [this](const auto &p) {
+                      return is_effectless(p.first, p.second);
+                    })) {
+      return {false, true};
+    }
+    if (auto it = std::remove_if(
+            action.pre_instantiated.begin(), action.pre_instantiated.end(),
+            [this](const auto &p) { return is_rigid(p.first, p.second); });
+        it != action.pre_instantiated.end()) {
+      action.pre_instantiated.erase(it, action.pre_instantiated.end());
+      changed = true;
+    }
+    return {true, changed};
   }
 
   template <typename Function> void refine(Function &&predicate_to_ground) {
@@ -226,44 +267,16 @@ struct PreprocessSupport {
                              }));
 
     refinement_possible = false;
-    std::for_each(pos_rigid_tested.begin(), pos_rigid_tested.end(),
-                  [](auto &t) { t.clear(); });
-    std::for_each(neg_rigid_tested.begin(), neg_rigid_tested.end(),
-                  [](auto &t) { t.clear(); });
-    std::for_each(pos_effectless_tested.begin(), pos_effectless_tested.end(),
-                  [](auto &t) { t.clear(); });
-    std::for_each(neg_effectless_tested.begin(), neg_effectless_tested.end(),
-                  [](auto &t) { t.clear(); });
+    reset_tested();
     for (size_t i = 0; i < problem.actions.size(); ++i) {
       std::vector<Action> new_actions;
       for (auto &action : partially_instantiated_actions[i]) {
-        if (std::any_of(action.pre_instantiated.begin(),
-                        action.pre_instantiated.end(), [this](const auto &p) {
-                          return is_rigid(p.first, !p.second);
-                        })) {
+        auto [valid, changed] = simplify(action);
+        if (!valid || changed) {
           refinement_possible = true;
-          continue;
-        }
-        if (auto it = std::remove_if(
-                action.pre_instantiated.begin(), action.pre_instantiated.end(),
-                [this](const auto &p) { return is_rigid(p.first, p.second); });
-            it != action.pre_instantiated.end()) {
-          refinement_possible = true;
-          action.pre_instantiated.erase(it, action.pre_instantiated.end());
-        }
-        if (auto it = std::remove_if(
-                action.eff_instantiated.begin(), action.eff_instantiated.end(),
-                [this](const auto &p) {
-                  return is_effectless(p.first, p.second) ||
-                         is_rigid(p.first, p.second);
-                });
-            it != action.eff_instantiated.end()) {
-          refinement_possible = true;
-          action.eff_instantiated.erase(it, action.eff_instantiated.end());
-        }
-        if (action.eff_instantiated.empty() && action.effects.empty()) {
-          refinement_possible = true;
-          continue;
+          if (!valid) {
+            continue;
+          }
         }
 
         const Condition *to_ground =
@@ -278,8 +291,12 @@ struct PreprocessSupport {
 
         for_each_assignment(
             *to_ground, action.parameters,
-            [&action, &new_actions](const ParameterAssignment &assignment) {
-              new_actions.push_back(ground(action, assignment));
+            [&action, &new_actions,
+             this](const ParameterAssignment &assignment) {
+              auto new_action = ground(action, assignment);
+              if (auto [valid, changed] = simplify(new_action); valid) {
+                new_actions.push_back(std::move(new_action));
+              }
             },
             constants_by_type);
       }

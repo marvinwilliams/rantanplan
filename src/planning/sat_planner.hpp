@@ -26,10 +26,8 @@ public:
     switch (config.solver) {
     case Config::Solver::Ipasir:
       return std::make_unique<sat::IpasirSolver>();
-    default:
-      assert(false);
-      return std::unique_ptr<sat::Solver>{};
     }
+    return std::make_unique<sat::IpasirSolver>();
   }
 
   Planner::Plan plan(const normalized::Problem &problem,

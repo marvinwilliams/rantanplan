@@ -19,6 +19,6 @@ to_list(const Condition &condition) noexcept;
 
 std::vector<normalized::Action> normalize_action(const Action &action) noexcept;
 
-normalized::Problem normalize(const Problem &problem) noexcept;
+normalized::Problem normalize(const Problem &problem);
 
 #endif /* end of include guard: NORMALIZE_HPP */

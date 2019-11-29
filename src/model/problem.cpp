@@ -197,21 +197,6 @@ void Problem::add_init(std::shared_ptr<FreePredicate> init) {
     throw ModelException{"Init predicate is not from this problem"};
   }
   init->check_complete();
-  if (auto it =
-          std::find_if(init_.begin(), init_.end(),
-                       [&init](const auto &i) {
-                         return init->get_predicate() == i->get_predicate() &&
-                                init->get_arguments() == i->get_arguments();
-                       });
-      it != init_.end()) {
-    if ((*it)->positive() == init->positive()) {
-      throw ModelException{"Found duplicate init predicate \'" +
-                           init->get_predicate()->name + "\'"};
-    } else {
-      throw ModelException{"Found contradicting init predicate \'" +
-                           init->get_predicate()->name + "\'"};
-    }
-  }
   init_.push_back(std::move(init));
 }
 

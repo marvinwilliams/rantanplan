@@ -97,7 +97,7 @@ normalize_action(const Action &action) noexcept {
   return new_actions;
 }
 
-normalized::Problem normalize(const Problem &problem) noexcept {
+normalized::Problem normalize(const Problem &problem) {
   normalized::Problem normalized_problem{};
   normalized_problem.domain_name = problem.get_domain_name();
   normalized_problem.problem_name = problem.get_problem_name();
@@ -129,7 +129,32 @@ normalized::Problem normalize(const Problem &problem) noexcept {
     auto condition = normalize_atomic_condition(*predicate);
     auto instantiation = instantiate(condition);
     if (predicate->positive()) {
-      normalized_problem.init.push_back(instantiation);
+      if (std::find(normalized_problem.init.begin(),
+                    normalized_problem.init.end(),
+                    instantiation) == normalized_problem.init.end()) {
+        normalized_problem.init.push_back(instantiation);
+      } else {
+        LOG_WARN(normalize_logger, "Found duplicate init predicate '%s'",
+                 to_string(instantiation, normalized_problem).c_str());
+      }
+    } else {
+      if (std::find(negative_init.begin(), negative_init.end(),
+                    instantiation) == negative_init.end()) {
+        negative_init.push_back(instantiation);
+      } else {
+        LOG_WARN(normalize_logger,
+                 "Found duplicate negated init predicate '%s'",
+                 to_string(instantiation, normalized_problem).c_str());
+      }
+    }
+  }
+
+  for (const auto &predicate : negative_init) {
+    if (std::find(normalized_problem.init.begin(),
+                  normalized_problem.init.end(),
+                  predicate) != normalized_problem.init.end()) {
+      throw ModelException{"Found contradicting init predicate \'" +
+                           to_string(predicate, normalized_problem) + "\'"};
     }
   }
 
@@ -157,9 +182,23 @@ normalized::Problem normalize(const Problem &problem) noexcept {
   auto goal =
       std::dynamic_pointer_cast<Condition>(problem.get_goal())->to_dnf();
   for (const auto &predicate : to_list(goal)) {
+    auto instantiation = instantiate(normalize_atomic_condition(*predicate));
+    if (auto it = std::find_if(normalized_problem.goal.begin(),
+                               normalized_problem.goal.end(),
+                               [&instantiation](const auto &g) {
+                                 return instantiation == g.first;
+                               });
+        it != normalized_problem.goal.end()) {
+      if (it->second == predicate->positive()) {
+        LOG_WARN(normalize_logger, "Found duplicate goal predicate '%s'",
+                 to_string(instantiation, normalized_problem).c_str());
+      } else {
+        throw ModelException{
+            "Found conflicting goal predicates, problem unsolvable"};
+      }
+    }
     normalized_problem.goal.push_back(
-        {instantiate(normalize_atomic_condition(*predicate)),
-         predicate->positive()});
+        {std::move(instantiation), predicate->positive()});
   }
   LOG_DEBUG(normalize_logger, "Normalized problem:\n%s",
             to_string(normalized_problem).c_str());
