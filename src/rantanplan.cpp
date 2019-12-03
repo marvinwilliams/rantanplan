@@ -110,6 +110,7 @@ options::Options set_options(const std::string &name) {
         }
       });
   options.add_option<double>({"step-factor", 'f'}, "Step factor");
+  options.add_option<size_t>({"num-iterations", 'i'}, "Num iterations");
   options.add_option<std::string>({"plan-file", 'o'},
                                   "File to output the plan to");
   options.add_option<bool>({"logging", 'v'}, "Enable debug logging");
@@ -171,6 +172,11 @@ void set_config(const options::Options &options, Config &config) {
   const auto &factor = options.get<double>("step-factor");
   if (factor.count > 0) {
     config.step_factor = factor.value;
+  }
+
+  const auto &iter = options.get<size_t>("num-iterations");
+  if (iter.count > 0) {
+    config.num_iterations = iter.value;
   }
 
   const auto &plan_file = options.get<std::string>("plan-file");

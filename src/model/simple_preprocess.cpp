@@ -270,8 +270,8 @@ struct PreprocessSupport {
 
     refinement_possible = false;
     reset_tested();
-    size_t num_parameters = 0;
-    size_t num_constant_parameters = 0;
+    /* size_t num_parameters = 0; */
+    /* size_t num_constant_parameters = 0; */
     for (size_t i = 0; i < problem.actions.size(); ++i) {
       std::vector<Action> new_actions;
       for (auto &action : partially_instantiated_actions[i]) {
@@ -294,15 +294,18 @@ struct PreprocessSupport {
 
         for_each_action_instantiation(
             action.parameters, to_ground,
-            [&action, &new_actions, &num_parameters, &num_constant_parameters,
+            [&action,
+             &new_actions, /* &num_parameters, &num_constant_parameters,*/
              this](const ParameterAssignment &assignment) {
               auto new_action = ground(action, assignment);
               if (auto result = simplify(new_action);
                   result != SimplifyResult::Invalid) {
-                num_parameters += new_action.parameters.size();
-                num_constant_parameters += static_cast<size_t>(std::count_if(
-                    new_action.parameters.begin(), new_action.parameters.end(),
-                    [](const auto &p) { return p.is_constant(); }));
+                /* num_parameters += new_action.parameters.size(); */
+                /* num_constant_parameters += static_cast<size_t>(std::count_if(
+                 */
+                /* new_action.parameters.begin(), new_action.parameters.end(),
+                 */
+                /* [](const auto &p) { return p.is_constant(); })); */
                 new_actions.push_back(std::move(new_action));
               }
             },
@@ -310,8 +313,8 @@ struct PreprocessSupport {
       }
       partially_instantiated_actions[i] = std::move(new_actions);
     }
-    printf("Ratio: %f\n",
-           static_cast<float>(num_constant_parameters) / num_parameters);
+    /* printf("Ratio: %f\n", */
+    /*        static_cast<float>(num_constant_parameters) / num_parameters); */
   }
 
   std::vector<std::unordered_set<InstantiationHandle>> init;
@@ -381,7 +384,9 @@ void preprocess(Problem &problem, const Config &config) {
     return get_mapping(action.parameters, *max).parameters;
   };
 
-  while (support.refinement_possible) {
+  size_t num_iteration = 0;
+  while (support.refinement_possible &&
+         num_iteration++ < config.num_iterations) {
     if (config.preprocess_priority == Config::PreprocessPriority::New) {
       support.refine(select_min_new);
     } else if (config.preprocess_priority ==
