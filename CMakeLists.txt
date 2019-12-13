@@ -96,7 +96,7 @@ if(DEBUG_BUILD)
 else()
   set(CMAKE_BUILD_TYPE "Release")
   add_compile_options(
-    -O3
+    -O3 -g
     )
   if (NOT STATIC_GLIBC)
     add_compile_options(

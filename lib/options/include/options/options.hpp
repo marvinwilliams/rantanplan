@@ -21,9 +21,7 @@ public:
   explicit OptionException(std::string message) noexcept
       : message_{std::move(message)} {}
 
-  [[nodiscard]] inline const char *what() const noexcept override {
-    return message_.c_str();
-  }
+  inline const char *what() const noexcept override { return message_.c_str(); }
 
 private:
   std::string message_;
@@ -94,7 +92,7 @@ public:
     parser_(input, state_.value);
   }
 
-  [[nodiscard]] const OptionState<T> &get() const override { return state_; }
+  const OptionState<T> &get() const override { return state_; }
 
 private:
   OptionState<T> state_;
@@ -109,7 +107,7 @@ public:
   void parse(std::string_view) override { ++state_.count; }
   bool is_flag() override { return true; }
 
-  [[nodiscard]] const OptionState<bool> &get() const override { return state_; }
+  const OptionState<bool> &get() const override { return state_; }
 
 private:
   OptionState<bool> state_;
@@ -235,7 +233,7 @@ public:
     }
   }
 
-  [[nodiscard]] bool exists(std::string_view name) const {
+  bool exists(std::string_view name) const {
     auto match = options_.find(std::string{name});
     if (match != options_.end()) {
       return true;
@@ -246,12 +244,11 @@ public:
     return match_positional != positional_options_.cend();
   }
 
-  [[nodiscard]] bool present(std::string_view name) const {
+  bool present(std::string_view name) const {
     return find_option_(name).get().count > 0;
   }
 
-  template <typename T>
-  [[nodiscard]] const OptionState<T> &get(std::string_view name) const {
+  template <typename T> const OptionState<T> &get(std::string_view name) const {
     const auto &option = find_option_(name);
     try {
       return dynamic_cast<const OptionState<T> &>(option.get());
@@ -299,7 +296,7 @@ public:
   }
 
 private:
-  [[nodiscard]] const BaseOption &find_option_(std::string_view name) const {
+  const BaseOption &find_option_(std::string_view name) const {
     auto match = options_.find(std::string{name});
     if (match != options_.end()) {
       return *match->second;

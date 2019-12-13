@@ -17,12 +17,9 @@ public:
       : LexerException(location, "unknown error") {}
   explicit LexerException(std::string message) : message_{std::move(message)} {}
 
-  [[nodiscard]] inline const char *what() const noexcept override {
-    return message_.c_str();
-  }
+  inline const char *what() const noexcept override { return message_.c_str(); }
 
-  [[nodiscard]] inline const std::optional<Location> &location() const
-      noexcept {
+  inline const std::optional<Location> &location() const noexcept {
     return location_;
   }
 

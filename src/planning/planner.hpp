@@ -11,8 +11,9 @@
 
 class Planner {
 public:
-  using Plan = std::vector<std::pair<normalized::ActionHandle,
-                                     std::vector<normalized::ConstantHandle>>>;
+  using Plan =
+      std::vector<std::pair<const normalized::Action *,
+                            std::vector<const normalized::Constant *>>>;
 
   static logging::Logger logger;
 

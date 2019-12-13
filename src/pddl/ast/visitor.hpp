@@ -2,7 +2,7 @@
 #define VISITOR_HPP
 
 #include "lexer/location.hpp"
-#include "pddl/ast.hpp"
+#include "pddl/ast/ast.hpp"
 
 #include <memory>
 #include <variant>
@@ -11,6 +11,7 @@
 namespace pddl {
 
 namespace ast {
+
 /*This CRTP-Visitor provides the functionality to traverse the AST. Ther
  * traverse(*) method recursively traverses the AST and calls
  * visit_begin(*)/visit_end(*) on each element it encounters. The boolean return
@@ -255,4 +256,4 @@ private:
 
 } // namespace pddl
 
-#endif /* end of include guard: VISITOR_HPP */
+#endif /* end of include guard: AST_VISITOR_HPP */

@@ -4,8 +4,8 @@
 #include "config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized_problem.hpp"
-#include "model/utils.hpp"
 #include "model/support.hpp"
+#include "model/utils.hpp"
 #include "planning/planner.hpp"
 #include "sat/formula.hpp"
 #include "sat/model.hpp"
@@ -30,31 +30,15 @@ public:
 
   static logging::Logger logger;
 
-  struct ActionVariable {
-    normalized::ActionHandle action_handle;
+  struct Variable {
+    size_t sat_var;
+    bool this_step = true;
   };
 
-  struct PredicateVariable {
-    normalized::InstantiationHandle handle;
-    bool this_step;
-  };
-
-  struct ParameterVariable {
-    normalized::ActionHandle action_handle;
-    size_t parameter_index;
-    size_t constant_index;
-  };
-
-  struct HelperVariable {
-    size_t value;
-  };
-
-  using Variable = std::variant<ActionVariable, PredicateVariable,
-                                ParameterVariable, HelperVariable>;
   using Formula = sat::Formula<Variable>;
   using Literal = Formula::Literal;
 
-  explicit ForeachEncoder(const normalized::Problem& problem,
+  explicit ForeachEncoder(const normalized::Problem &problem,
                           const Config &config) noexcept;
 
   int get_sat_var(Literal literal, unsigned int step) const;
@@ -76,16 +60,15 @@ public:
 private:
   void encode_init() noexcept;
   void encode_actions();
-  void parameter_implies_predicate(bool positive, bool is_effect);
-  void interference(bool positive);
+  void parameter_implies_predicate();
+  void interference();
 
-  void frame_axioms(bool positive, size_t dnf_threshold);
+  void frame_axioms(size_t dnf_threshold);
   void assume_goal();
   void init_sat_vars();
 
   Support support_;
-  size_t num_vars_;
-  size_t num_helpers_ = 0;
+  size_t num_vars_ = 3;
   std::vector<unsigned int> predicates_;
   std::vector<unsigned int> actions_;
   std::vector<std::vector<std::vector<unsigned int>>> parameters_;

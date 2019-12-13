@@ -1,5 +1,6 @@
 #include "model/to_string.hpp"
-#include "model/normalized_problem.hpp"
+#include "model/normalized/model.hpp"
+#include "model/normalized/utils.hpp"
 
 #include <cassert>
 #include <sstream>
@@ -8,62 +9,55 @@
 
 using namespace normalized;
 
-std::string to_string(TypeHandle type, const Problem &problem) {
-  const auto &t = problem.types[type];
+std::string to_string(TypeIndex type, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.type_names[type];
-  if (t.parent != 0) {
-    ss << " - " << problem.type_names[t.parent];
+  ss << problem.get_name(type);
+  if (problem.get(type).supertype != type) {
+    ss << " - " << problem.get_name(problem.get(type).supertype);
   }
   return ss.str();
 }
 
-std::string to_string(ConstantHandle constant, const Problem &problem) {
-  const auto &c = problem.constants[constant];
+std::string to_string(ConstantIndex constant, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.constant_names[constant];
-  if (c.type != 0) {
-    ss << " - " << problem.type_names[c.type];
+  ss << problem.get_name(constant);
+  if (problem.constants[constant].type != TypeIndex{0}) {
+    ss << " - " << problem.get_name(problem.get(constant).type);
   }
   return ss.str();
 }
 
-std::string to_string(PredicateHandle predicate, const Problem &problem) {
-  const auto &p = problem.predicates[predicate];
+std::string to_string(PredicateIndex predicate, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.predicate_names[predicate] << '(';
-  for (auto it = p.parameter_types.cbegin(); it != p.parameter_types.cend();
-       ++it) {
-    if (it != p.parameter_types.cbegin()) {
+  ss << problem.get_name(predicate) << '(';
+  for (auto it = problem.get(predicate).parameter_types.cbegin();
+       it != problem.get(predicate).parameter_types.cend(); ++it) {
+    if (it != problem.get(predicate).parameter_types.cbegin()) {
       ss << ", ";
     }
-    /* ss << '?' << it->name; */
-    ss << problem.type_names[*it];
+    ss << problem.get_name(*it);
   }
   ss << ')';
   return ss.str();
 }
 
-std::string to_string(const Condition &predicate, const Action &action,
+std::string to_string(const Condition &condition, const Action &action,
                       const Problem &problem) {
   std::stringstream ss;
-  if (!predicate.positive) {
+  if (!condition.positive) {
     ss << '!';
   }
-  ss << problem.predicate_names[predicate.definition];
+  ss << problem.get_name(condition.definition);
   ss << '(';
-  for (auto it = predicate.arguments.cbegin(); it != predicate.arguments.cend();
+  for (auto it = condition.arguments.cbegin(); it != condition.arguments.cend();
        ++it) {
-    if (it != predicate.arguments.cbegin()) {
+    if (it != condition.arguments.cbegin()) {
       ss << ", ";
     }
     if (it->is_constant()) {
-      ss << problem.constant_names[it->get_constant()];
+      ss << problem.get_name(it->get_constant());
     } else {
-      assert(!action.parameters[it->get_parameter()].is_constant());
-      ss << '['
-         << problem
-                .type_names[action.parameters[it->get_parameter()].get_type()]
+      ss << '[' << problem.get_name(action.get(it->get_parameter()).get_type())
          << "] #" << it->get_parameter();
     }
   }
@@ -71,20 +65,19 @@ std::string to_string(const Condition &predicate, const Action &action,
   return ss.str();
 }
 
-std::string to_string(const Condition &predicate, const Problem &problem) {
+std::string to_string(const Condition &condition, const Problem &problem) {
   std::stringstream ss;
-  if (!predicate.positive) {
+  if (!condition.positive) {
     ss << '!';
   }
-  ss << problem.predicate_names[predicate.definition];
+  ss << problem.get_name(condition.definition);
   ss << '(';
-  for (auto it = predicate.arguments.cbegin(); it != predicate.arguments.cend();
+  for (auto it = condition.arguments.cbegin(); it != condition.arguments.cend();
        ++it) {
-    if (it != predicate.arguments.cbegin()) {
+    if (it != condition.arguments.cbegin()) {
       ss << ", ";
     }
-    assert(it->is_constant());
-    ss << problem.constant_names[it->get_constant()];
+    ss << problem.get_name(it->get_constant());
   }
   ss << ')';
   return ss.str();
@@ -93,73 +86,47 @@ std::string to_string(const Condition &predicate, const Problem &problem) {
 std::string to_string(const PredicateInstantiation &predicate,
                       const Problem &problem) {
   std::stringstream ss;
-  ss << problem.predicate_names[predicate.definition];
+  ss << problem.get_name(predicate.definition);
   ss << '(';
   for (auto it = predicate.arguments.cbegin(); it != predicate.arguments.cend();
        ++it) {
     if (it != predicate.arguments.cbegin()) {
       ss << ", ";
     }
-    ss << problem.constant_names[*it];
+    ss << problem.get_name(*it);
   }
   ss << ')';
   return ss.str();
 }
 
-/* std::string to_string(const Condition &condition, */
-/*                       const Problem &problem) { */
-/*   std::stringstream ss; */
-/*   if (std::holds_alternative<Junction>(condition)) { */
-/*     const Junction &junction = std::get<Junction>(condition); */
-/*     ss << '('; */
-/*     for (auto it = junction.arguments.cbegin(); it !=
- * junction.arguments.cend(); */
-/*          ++it) { */
-/*       if (it != junction.arguments.cbegin()) { */
-/*         ss << (junction.connective == Junction::Connective::And
- */
-/*                    ? " ∧ " */
-/*                    : " ∨ "); */
-/*       } */
-/*       ss << to_string(*it, problem); */
-/*     } */
-/*     ss << ')'; */
-/*   } else { */
-/*     const ConditionPredicate &predicate = */
-/*         std::get<ConditionPredicate>(condition); */
-/*     ss << to_string(predicate, problem); */
-/*   } */
-/*   return ss.str(); */
-/* } */
-
-std::string to_string(ActionHandle action, const Problem &problem) {
-  const auto &a = problem.actions[action];
+std::string to_string(const Action &action, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.action_names[action] << '(';
-  for (auto it = a.parameters.cbegin(); it != a.parameters.cend(); ++it) {
-    if (it != a.parameters.cbegin()) {
+  ss << problem.action_names[get_index(&action, problem)] << '(';
+  for (auto it = action.parameters.cbegin(); it != action.parameters.cend();
+       ++it) {
+    if (it != action.parameters.cbegin()) {
       ss << ", ";
     }
     if (it->is_constant()) {
-      ss << problem.constant_names[it->get_constant()];
+      ss << problem.get_name(it->get_constant());
     } else {
-      ss << '[' << problem.type_names[it->get_type()] << ']';
+      ss << '[' << problem.get_name(it->get_type()) << ']';
     }
   }
   ss << ')' << '\n';
   ss << '\t' << "Preconditions:" << '\n';
-  for (const auto &precondition : a.preconditions) {
-    ss << '\t' << '\t' << to_string(precondition, a, problem) << '\n';
+  for (const auto &precondition : action.preconditions) {
+    ss << '\t' << '\t' << to_string(precondition, action, problem) << '\n';
   }
-  for (const auto &[precondition, positive] : a.pre_instantiated) {
+  for (const auto &[precondition, positive] : action.pre_instantiated) {
     ss << '\t' << '\t' << (positive ? "" : "!")
        << to_string(precondition, problem) << '\n';
   }
   ss << '\t' << "Effects:" << '\n';
-  for (const auto &effect : a.effects) {
-    ss << '\t' << '\t' << to_string(effect, a, problem) << '\n';
+  for (const auto &effect : action.effects) {
+    ss << '\t' << '\t' << to_string(effect, action, problem) << '\n';
   }
-  for (const auto &[effect, positive] : a.eff_instantiated) {
+  for (const auto &[effect, positive] : action.eff_instantiated) {
     ss << '\t' << '\t' << (positive ? "" : "!") << to_string(effect, problem)
        << '\n';
   }
@@ -176,20 +143,20 @@ std::string to_string(const Problem &problem) {
   }
   ss << '\n';
   ss << "Types:" << '\n';
-  for (size_t i = 0; i < problem.types.size(); ++i) {
-    ss << '\t' << to_string(TypeHandle{i}, problem) << '\n';
+  for (const auto &type : problem.types) {
+    ss << '\t' << to_string(type, problem) << '\n';
   }
   ss << "Constants:" << '\n';
-  for (size_t i = 0; i < problem.constants.size(); ++i) {
-    ss << '\t' << to_string(ConstantHandle{i}, problem) << '\n';
+  for (const auto &constant : problem.constants) {
+    ss << '\t' << to_string(constant, problem) << '\n';
   }
   ss << "Predicates:" << '\n';
-  for (size_t i = 0; i < problem.predicates.size(); ++i) {
-    ss << '\t' << to_string(PredicateHandle{i}, problem) << '\n';
+  for (const auto &predicate : problem.predicates) {
+    ss << '\t' << to_string(predicate, problem) << '\n';
   }
   ss << "Actions:" << '\n';
-  for (size_t i = 0; i < problem.actions.size(); ++i) {
-    ss << '\t' << to_string(ActionHandle{i}, problem) << '\n';
+  for (const auto &action : problem.actions) {
+    ss << '\t' << to_string(action, problem) << '\n';
   }
   ss << "Initial state:" << '\n';
   for (auto &predicate : problem.init) {

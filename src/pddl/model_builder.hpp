@@ -1,10 +1,10 @@
-#ifndef PDDL_VISITOR_HPP
-#define PDDL_VISITOR_HPP
+#ifndef MODEL_BUILDER_HPP
+#define MODEL_BUILDER_HPP
 
 #include "logging/logging.hpp"
-#include "model/problem.hpp"
-#include "pddl/ast.hpp"
-#include "pddl/visitor.hpp"
+#include "model/parsed/model.hpp"
+#include "pddl/ast/ast.hpp"
+#include "pddl/ast/visitor.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -13,9 +13,9 @@
 
 namespace pddl {
 
-class PddlAstParser : public ast::Visitor<PddlAstParser> {
+class ModelBuilder : public ast::Visitor<ModelBuilder> {
 public:
-  friend ast::Visitor<PddlAstParser>;
+  friend ast::Visitor<ModelBuilder>;
 
   enum class State {
     Header,
@@ -32,12 +32,12 @@ public:
 
   static inline logging::Logger logger{"Ast"};
 
-  std::unique_ptr<Problem> parse(const AST &ast);
+  std::unique_ptr<parsed::Problem> parse(const ast::AST &ast);
 
 private:
-  using Visitor<PddlAstParser>::traverse;
-  using Visitor<PddlAstParser>::visit_begin;
-  using Visitor<PddlAstParser>::visit_end;
+  using Visitor<ModelBuilder>::traverse;
+  using Visitor<ModelBuilder>::visit_begin;
+  using Visitor<ModelBuilder>::visit_end;
 
   void reset();
   bool visit_begin(const ast::Domain &domain);
@@ -62,29 +62,29 @@ private:
   bool visit_begin(const ast::Precondition &);
   bool visit_begin(const ast::Negation &negation);
   bool visit_end(const ast::Negation &);
-  bool visit_begin(const ast::Predicate &ast_predicate);
+  bool visit_begin(const ast::Predicate &predicate);
   bool visit_end(const ast::Predicate &);
-  bool visit_begin(const ast::PredicateEvaluation &ast_predicate);
+  bool visit_begin(const ast::PredicateEvaluation &predicate);
   bool visit_begin(const ast::Conjunction &conjunction);
   bool visit_begin(const ast::Disjunction &disjunction);
   bool visit_end(const ast::Condition &condition);
-  bool visit_begin(const ast::Requirement &ast_requirement);
+  bool visit_begin(const ast::Requirement &requirement);
 
   State state_ = State::Header;
   bool positive_ = true;
-  Handle<Type> root_type_ = Handle<Type>{};
-  Handle<Type> current_type_ = Handle<Type>{};
-  Handle<Predicate> current_predicate_ = Handle<Predicate>{};
-  Handle<Action> current_action_ = Handle<Action>{};
-  std::vector<std::shared_ptr<Condition>> condition_stack_;
+  parsed::TypeHandle root_type_ = parsed::TypeHandle{};
+  parsed::TypeHandle current_type_ = parsed::TypeHandle{};
+  parsed::PredicateHandle current_predicate_ = parsed::PredicateHandle{};
+  parsed::ActionHandle current_action_ = parsed::ActionHandle{};
+  std::vector<std::shared_ptr<parsed::Condition>> condition_stack_;
   size_t num_requirements_ = 0;
   size_t num_types_ = 0;
   size_t num_constants_ = 0;
   size_t num_predicates_ = 0;
   size_t num_actions_ = 0;
-  std::unique_ptr<Problem> problem_;
+  std::unique_ptr<parsed::Problem> problem_;
 };
 
 } // namespace pddl
 
-#endif /* end of include guard: PDDL_VISITOR_HPP */
+#endif /* end of include guard: MODEL_BUILDER_HPP */

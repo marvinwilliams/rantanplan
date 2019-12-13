@@ -2,10 +2,10 @@
 #define PARSER_HPP
 
 #include "lexer/lexer.hpp"
-#include "pddl/ast.hpp"
+#include "logging/logging.hpp"
+#include "pddl/ast/ast.hpp"
 #include "pddl/parser_exception.hpp"
 #include "pddl/tokens.hpp"
-#include "logging/logging.hpp"
 
 #include <memory>
 #include <string>
@@ -20,7 +20,7 @@ public:
 
   static logging::Logger logger;
 
-  AST parse(const std::string &domain, const std::string &problem);
+  ast::AST parse(const std::string &domain, const std::string &problem);
 
 private:
   template <typename TokenType> void expect() {
@@ -37,7 +37,7 @@ private:
     lexer_.next();
   }
 
-  template <typename TokenType>[[nodiscard]] bool skip_if() {
+  template <typename TokenType> bool skip_if() {
     if (lexer_.has_type<TokenType>()) {
       lexer_.next();
       return true;
@@ -119,8 +119,8 @@ private:
   std::unique_ptr<ast::MetricDef> parse_metric();
   std::unique_ptr<ast::Domain> parse_domain();
   std::unique_ptr<ast::Problem> parse_problem();
-  void parse_domain(AST &ast);
-  void parse_problem(AST &ast);
+  void parse_domain(ast::AST &ast);
+  void parse_problem(ast::AST &ast);
 
   Lexer lexer_;
 };

@@ -1,4 +1,4 @@
-#include "model/problem.hpp"
+#include "model/parsed/model.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -7,18 +7,7 @@
 #include <variant>
 #include <vector>
 
-bool is_subtype(const Type *subtype, const Type *supertype) {
-  if (subtype == supertype) {
-    return true;
-  }
-  while (subtype->supertype != subtype) {
-    subtype = subtype->supertype;
-    if (subtype == supertype) {
-      return true;
-    }
-  }
-  return false;
-}
+namespace parsed {
 
 void BaseAtomicCondition::check_complete() const {
   assert(arguments_.size() <= predicate_->parameter_types.size());
@@ -29,8 +18,8 @@ void BaseAtomicCondition::check_complete() const {
   }
 }
 
-Handle<Parameter> Action::add_parameter(std::string name, Handle<Type> type) {
-  if (problem != type.get_problem()) {
+ParameterHandle Action::add_parameter(std::string name, TypeHandle type) {
+  if (problem != type.get_base()) {
     throw ModelException{"Type is not from the same problem"};
   }
   if (std::find_if(parameters.begin(), parameters.end(),
@@ -38,9 +27,9 @@ Handle<Parameter> Action::add_parameter(std::string name, Handle<Type> type) {
       parameters.end()) {
     throw ModelException{"Parameter \'" + name + "\' already exists"};
   }
-  parameters.push_back(std::make_unique<Parameter>(
-      Parameter{std::move(name), type.get(), parameters.size()}));
-  return {parameters.back().get(), this, problem};
+  parameters.push_back(
+      std::make_unique<Parameter>(Parameter{std::move(name), type.get()}));
+  return {parameters.back().get(), this};
 }
 
 void Action::set_precondition(std::shared_ptr<Precondition> precondition) {
@@ -67,13 +56,13 @@ void Action::set_effect(std::shared_ptr<Effect> effect) {
   this->effect = std::move(effect);
 }
 
-Handle<Parameter> Action::get_parameter(const std::string &name) const {
+ParameterHandle Action::get_parameter(const std::string &name) const {
   auto it = std::find_if(parameters.begin(), parameters.end(),
                          [&name](const auto &p) { return p->name == name; });
   if (it == parameters.end()) {
     throw ModelException{"Parameter \'" + name + "\' not found"};
   }
-  return {it->get(), this, problem};
+  return {it->get(), this};
 }
 
 void Problem::set_domain_name(std::string name) {
@@ -95,20 +84,19 @@ void Problem::set_problem_name(std::string name,
   problem_name_ = std::move(name);
 }
 
-Handle<Type> Problem::add_type(std::string name) {
+TypeHandle Problem::add_type(std::string name) {
   if (std::find_if(types_.begin(), types_.end(), [&name](const auto &t) {
         return t->name == name;
       }) != types_.end()) {
     throw ModelException{"Type \'" + name + "\' already exists"};
   }
-  types_.push_back(
-      std::make_unique<Type>(Type{std::move(name), nullptr, types_.size()}));
+  types_.push_back(std::make_unique<Type>(Type{std::move(name), nullptr}));
   types_.back()->supertype = types_.back().get();
   return {types_.back().get(), this};
 }
 
-Handle<Type> Problem::add_type(std::string name, Handle<Type> supertype) {
-  if (this != supertype.get_problem()) {
+TypeHandle Problem::add_type(std::string name, TypeHandle supertype) {
+  if (this != supertype.get_base()) {
     throw ModelException{"Supertype is not from this problem"};
   }
   if (std::find_if(types_.begin(), types_.end(), [&name](const auto &t) {
@@ -116,13 +104,13 @@ Handle<Type> Problem::add_type(std::string name, Handle<Type> supertype) {
       }) != types_.end()) {
     throw ModelException{"Type \'" + name + "\' already exists"};
   }
-  types_.push_back(std::make_unique<Type>(
-      Type{std::move(name), supertype.get(), types_.size()}));
+  types_.push_back(
+      std::make_unique<Type>(Type{std::move(name), supertype.get()}));
   return {types_.back().get(), this};
 }
 
-Handle<Constant> Problem::add_constant(std::string name, Handle<Type> type) {
-  if (this != type.get_problem()) {
+ConstantHandle Problem::add_constant(std::string name, TypeHandle type) {
+  if (this != type.get_base()) {
     throw ModelException{"Constant is not from this problem"};
   }
   if (std::find_if(constants_.begin(), constants_.end(),
@@ -130,12 +118,12 @@ Handle<Constant> Problem::add_constant(std::string name, Handle<Type> type) {
       constants_.end()) {
     throw ModelException{"Constant \'" + name + "\' already exists"};
   }
-  constants_.push_back(std::make_unique<Constant>(
-      Constant{std::move(name), type.get(), constants_.size()}));
+  constants_.push_back(
+      std::make_unique<Constant>(Constant{std::move(name), type.get()}));
   return {constants_.back().get(), this};
 }
 
-Handle<Predicate> Problem::add_predicate(std::string name) {
+PredicateHandle Problem::add_predicate(std::string name) {
   if (std::find_if(predicates_.begin(), predicates_.end(),
                    [&name](const auto &p) { return p->name == name; }) !=
       predicates_.end()) {
@@ -146,47 +134,44 @@ Handle<Predicate> Problem::add_predicate(std::string name) {
   return {predicates_.back().get(), this};
 }
 
-void Problem::add_parameter_type(Handle<Predicate> predicate,
-                                 Handle<Type> type) {
-  if (this != predicate.get_problem()) {
+void Problem::add_parameter_type(PredicateHandle predicate, TypeHandle type) {
+  if (this != predicate.get_base()) {
     throw ModelException{"Predicate is not from this problem"};
   }
-  if (this != type.get_problem()) {
+  if (this != type.get_base()) {
     throw ModelException{"Type is not from this problem"};
   }
   predicate.p_->parameter_types.push_back(type.get());
 }
 
-Handle<Action> Problem::add_action(std::string name) {
+ActionHandle Problem::add_action(std::string name) {
   if (std::find_if(actions_.begin(), actions_.end(), [&name](const auto &a) {
         return a->name == name;
       }) != actions_.end()) {
     throw ModelException{"Action \'" + name + "\' already exists"};
   }
-  actions_.push_back(
-      std::make_unique<Action>(Action{std::move(name), this, actions_.size()}));
+  actions_.push_back(std::make_unique<Action>(Action{std::move(name), this}));
   return {actions_.back().get(), this};
 }
 
-Handle<Parameter> Problem::add_parameter(Handle<Action> action,
-                                         std::string name, Handle<Type> type) {
-  if (this != action.get_problem()) {
+ParameterHandle Problem::add_parameter(ActionHandle action, std::string name,
+                                       TypeHandle type) {
+  if (this != action.get_base()) {
     throw ModelException{"Action is not from this problem"};
   }
   return action.p_->add_parameter(std::move(name), type);
 }
 
-void Problem::set_precondition(Handle<Action> action,
+void Problem::set_precondition(ActionHandle action,
                                std::shared_ptr<Precondition> precondition) {
-  if (this != action.get_problem()) {
+  if (this != action.get_base()) {
     throw ModelException{"Action is not from this problem"};
   }
   action.p_->set_precondition(std::move(precondition));
 }
 
-void Problem::set_effect(Handle<Action> action,
-                         std::shared_ptr<Effect> effect) {
-  if (this != action.get_problem()) {
+void Problem::set_effect(ActionHandle action, std::shared_ptr<Effect> effect) {
+  if (this != action.get_base()) {
     throw ModelException{"Action is not from this problem"};
   }
   action.p_->set_effect(std::move(effect));
@@ -210,7 +195,7 @@ void Problem::set_goal(std::shared_ptr<GoalCondition> goal) {
   goal_ = std::move(goal);
 }
 
-Handle<Type> Problem::get_type(const std::string &name) const {
+TypeHandle Problem::get_type(const std::string &name) const {
   auto it = std::find_if(types_.begin(), types_.end(),
                          [&name](const auto &t) { return t->name == name; });
   if (it == types_.end()) {
@@ -223,7 +208,7 @@ Handle<Type> Problem::get_type(const std::string &name) const {
   return {it->get(), this};
 }
 
-Handle<Constant> Problem::get_constant(const std::string &name) const {
+ConstantHandle Problem::get_constant(const std::string &name) const {
   auto it = std::find_if(constants_.begin(), constants_.end(),
                          [&name](const auto &c) { return c->name == name; });
   if (it == constants_.end()) {
@@ -232,7 +217,7 @@ Handle<Constant> Problem::get_constant(const std::string &name) const {
   return {it->get(), this};
 }
 
-Handle<Predicate> Problem::get_predicate(const std::string &name) const {
+PredicateHandle Problem::get_predicate(const std::string &name) const {
   auto it = std::find_if(predicates_.begin(), predicates_.end(),
                          [&name](const auto &p) { return p->name == name; });
   if (it == predicates_.end()) {
@@ -241,7 +226,7 @@ Handle<Predicate> Problem::get_predicate(const std::string &name) const {
   return {it->get(), this};
 }
 
-Handle<Action> Problem::get_action(const std::string &name) const {
+ActionHandle Problem::get_action(const std::string &name) const {
   auto it = std::find_if(actions_.begin(), actions_.end(),
                          [&name](const auto &a) { return a->name == name; });
   if (it == actions_.end()) {
@@ -249,3 +234,5 @@ Handle<Action> Problem::get_action(const std::string &name) const {
   }
   return {it->get(), this};
 }
+
+} // namespace parsed

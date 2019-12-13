@@ -287,8 +287,6 @@ struct Problem : Node {
   std::unique_ptr<ElementList> problem_body;
 };
 
-} // namespace ast
-
 /* The AST is built while parsing. It abstracts the entire input and can later
  * be traversed by a visitor. Most constructors only take unique pointers so
  * that the AST must be built inplace */
@@ -296,21 +294,23 @@ class AST {
 public:
   AST() {}
 
-  void set_domain(std::unique_ptr<ast::Domain> domain) {
+  void set_domain(std::unique_ptr<Domain> domain) {
     domain_ = std::move(domain);
   }
 
-  void set_problem(std::unique_ptr<ast::Problem> problem) {
+  void set_problem(std::unique_ptr<Problem> problem) {
     problem_ = std::move(problem);
   }
 
-  const ast::Domain *get_domain() const { return domain_.get(); }
-  const ast::Problem *get_problem() const { return problem_.get(); }
+  const Domain *get_domain() const { return domain_.get(); }
+  const Problem *get_problem() const { return problem_.get(); }
 
 private:
-  std::unique_ptr<ast::Domain> domain_;
-  std::unique_ptr<ast::Problem> problem_;
+  std::unique_ptr<Domain> domain_;
+  std::unique_ptr<Problem> problem_;
 };
+
+} // namespace ast
 
 } // namespace pddl
 

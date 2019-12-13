@@ -1,111 +1,99 @@
-#ifndef PROBLEM_HPP
-#define PROBLEM_HPP
+#ifndef PARSED_MODEL_HPP
+#define PARSED_MODEL_HPP
+
+#include "model/parsed/model_exception.hpp"
+#include "util/handle.hpp"
 
 #include <algorithm>
 #include <cassert>
 #include <exception>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <variant>
 #include <vector>
 
-class ModelException : public std::exception {
-public:
-  explicit ModelException(std::string message) : message_{std::move(message)} {}
-
-  [[nodiscard]] inline const char *what() const noexcept override {
-    return message_.c_str();
-  }
-
-private:
-  std::string message_;
-};
+namespace parsed {
 
 class Problem;
-
-template <typename T> class Handle {
-public:
-  friend Problem;
-
-  explicit Handle() : p_{nullptr}, problem_{nullptr} {}
-
-  const T *get() { return p_; }
-  const Problem *get_problem() { return problem_; }
-  const T &operator*() { return *p_; }
-  const T *operator->() { return p_; }
-  bool operator==(const Handle<T> &other) const {
-    return p_ == other.p_ && problem_ == other.problem_;
-  }
-
-private:
-  Handle(T *p, const Problem *problem) : p_{p}, problem_{problem} {}
-
-  T *p_;
-  const Problem *problem_;
-};
 
 struct Type {
   std::string name;
   const Type *supertype;
-  size_t id;
 
-  Type(std::string name, const Type *supertype, size_t id)
-      : name{std::move(name)}, supertype{supertype}, id{id} {}
+  Type(std::string name, const Type *supertype)
+      : name{std::move(name)}, supertype{supertype} {}
 };
 
-bool is_subtype(const Type *first, const Type *second);
+using TypeHandle = Handle<Type, Problem>;
+
+inline bool is_subtype(const Type *subtype, const Type *supertype) {
+  if (subtype == supertype) {
+    return true;
+  }
+  while (subtype->supertype != subtype) {
+    subtype = subtype->supertype;
+    if (subtype == supertype) {
+      return true;
+    }
+  }
+  return false;
+}
 
 struct Predicate {
   std::string name;
   std::vector<const Type *> parameter_types;
-  size_t id;
 
-  Predicate(std::string name, size_t id) : name{std::move(name)}, id{id} {}
+  Predicate(std::string name) : name{std::move(name)} {}
 };
+
+using PredicateHandle = Handle<Predicate, Problem>;
 
 struct Constant {
   std::string name;
   const Type *type;
-  size_t id;
 
-  Constant(std::string name, const Type *type, size_t id)
-      : name{std::move(name)}, type{type}, id{id} {}
+  Constant(std::string name, const Type *type)
+      : name{std::move(name)}, type{type} {}
 };
 
+using ConstantHandle = Handle<Constant, Problem>;
 
 struct Parameter {
   std::string name;
   const Type *type;
-  size_t id;
 
-  Parameter(std::string name, const Type *type, size_t id)
-      : name{std::move(name)}, type{type}, id{id} {}
+  Parameter(std::string name, const Type *type)
+      : name{std::move(name)}, type{type} {}
 };
 
 struct Action;
 
-template <> class Handle<Parameter> {
-public:
-  friend Action;
+using ActionHandle = Handle<Action, Problem>;
+using ParameterHandle = Handle<Parameter, Action>;
 
-  const Parameter *get() { return p_; }
-  const Action *get_action() { return action_; }
-  const Problem *get_problem() { return problem_; }
-  const Parameter &operator*() { return *p_; }
-  const Parameter *operator->() { return p_; }
-  bool operator==(const Handle<Parameter> &other) {
-    return p_ == other.p_ && action_ == other.action_ &&
-           problem_ == other.problem_;
-  }
+/* template <> class ParameterHandle { */
+/* public: */
+/*   friend Action; */
 
-private:
-  Handle(const Parameter *p, const Action *action, const Problem *problem)
-      : p_{p}, action_{action}, problem_{problem} {}
+/*   const Parameter *get() { return p_; } */
+/*   const Action *get_action() { return action_; } */
+/*   const Problem *get_problem() { return problem_; } */
+/*   const Parameter &operator*() { return *p_; } */
+/*   const Parameter *operator->() { return p_; } */
+/*   bool operator==(const ParameterHandle &other) { */
+/*     return p_ == other.p_ && action_ == other.action_ && */
+/*            problem_ == other.problem_; */
+/*   } */
 
-  const Parameter *p_;
-  const Action *action_;
-  const Problem *problem_;
-};
+/* private: */
+/*   Handle(const Parameter *p, const Action *action, const Problem *problem) */
+/*       : p_{p}, action_{action}, problem_{problem} {} */
+
+/*   const Parameter *p_; */
+/*   const Action *action_; */
+/*   const Problem *problem_; */
+/* }; */
 
 class Condition : public std::enable_shared_from_this<Condition> {
 public:
@@ -126,15 +114,15 @@ using Argument = std::variant<const Parameter *, const Constant *>;
 
 class BaseAtomicCondition : public Condition {
 public:
-  explicit BaseAtomicCondition(bool positive, Handle<Predicate> predicate)
+  explicit BaseAtomicCondition(bool positive, PredicateHandle predicate)
       : Condition{positive}, predicate_{predicate.get()} {}
 
-  virtual void add_bound_argument(Handle<Parameter> parameter) {
+  virtual void add_bound_argument(ParameterHandle parameter) {
     if (arguments_.size() == predicate_->parameter_types.size()) {
-      throw ModelException{"Number of arguments exceeded: Predicate \'" +
-                           predicate_->name + "\' takes " +
-                           std::to_string(predicate_->parameter_types.size()) +
-                           " arguments"};
+      throw parsed::ModelException{
+          "Number of arguments exceeded: Predicate \'" + predicate_->name +
+          "\' takes " + std::to_string(predicate_->parameter_types.size()) +
+          " arguments"};
     }
     if (!is_subtype(parameter->type,
                     predicate_->parameter_types[arguments_.size()])) {
@@ -147,7 +135,7 @@ public:
     arguments_.push_back(std::move(parameter.get()));
   }
 
-  virtual void add_constant_argument(Handle<Constant> constant) {
+  virtual void add_constant_argument(ConstantHandle constant) {
     if (arguments_.size() == predicate_->parameter_types.size()) {
       throw ModelException{"Number of arguments exceeded: Predicate \'" +
                            predicate_->name + "\' takes " +
@@ -254,6 +242,7 @@ public:
 
   JunctionOperator get_operator() const { return op_; }
   const auto &get_conditions() const { return conditions_; }
+  virtual ~BaseJunction() = default;
 
 protected:
   JunctionOperator op_;
@@ -270,8 +259,8 @@ public:
   virtual ~ConditionContext() = default;
 
 protected:
-  explicit ConditionContext(Handle<Action> action)
-      : action_{action.get()}, problem_{action.get_problem()} {}
+  explicit ConditionContext(ActionHandle action)
+      : action_{action.get()}, problem_{action.get_base()} {}
 
 private:
   const Action *action_;
@@ -295,9 +284,9 @@ class AtomicCondition : public BaseAtomicCondition, public ConditionContext<C> {
 public:
   template <bool Enable = true, typename = std::enable_if_t<
                                     Enable && C == ConditionContextType::Free>>
-  explicit AtomicCondition(bool positive, Handle<Predicate> predicate)
+  explicit AtomicCondition(bool positive, PredicateHandle predicate)
       : BaseAtomicCondition{positive, predicate}, ConditionContext<C>{
-                                                      predicate.get_problem()} {
+                                                      predicate.get_base()} {
     if (predicate->name == "=") {
       throw ModelException{"Predicate \'=\' can only be used in preconditions"};
     }
@@ -305,10 +294,10 @@ public:
 
   template <bool Enable = true, typename = std::enable_if_t<
                                     Enable && C != ConditionContextType::Free>>
-  explicit AtomicCondition(bool positive, Handle<Predicate> predicate,
-                           Handle<Action> action)
+  explicit AtomicCondition(bool positive, PredicateHandle predicate,
+                           ActionHandle action)
       : BaseAtomicCondition{positive, predicate}, ConditionContext<C>{action} {
-    if (predicate.get_problem() != action.get_problem()) {
+    if (predicate.get_base() != action.get_base()) {
       throw ModelException{
           "Predicate and action are not from the same problem"};
     }
@@ -317,19 +306,19 @@ public:
     }
   }
 
-  void add_bound_argument(Handle<Parameter> parameter) override {
+  void add_bound_argument(ParameterHandle parameter) override {
     if constexpr (C == ConditionContextType::Free) {
       throw ModelException{"Bound arguments are only allowed within actions"};
     } else {
-      if (ConditionContext<C>::get_action() != parameter.get_action()) {
+      if (ConditionContext<C>::get_action() != parameter.get_base()) {
         throw ModelException{"Parameter is not from the same action"};
       }
     }
     BaseAtomicCondition::add_bound_argument(parameter);
   }
 
-  void add_constant_argument(Handle<Constant> constant) override {
-    if (ConditionContext<C>::get_problem() != constant.get_problem()) {
+  void add_constant_argument(ConstantHandle constant) override {
+    if (ConditionContext<C>::get_problem() != constant.get_base()) {
       throw ModelException{"Constant is not from same problem"};
     }
     BaseAtomicCondition::add_constant_argument(constant);
@@ -344,7 +333,7 @@ public:
   explicit Junction(JunctionOperator op, bool positive, const Problem *problem)
       : BaseJunction{op, positive}, ConditionContext<C>{problem} {}
 
-  explicit Junction(JunctionOperator op, bool positive, Handle<Action> action)
+  explicit Junction(JunctionOperator op, bool positive, ActionHandle action)
       : BaseJunction{op, positive}, ConditionContext<C>{action} {
     if (C == ConditionContextType::Effect) {
       if (op != JunctionOperator::And || !positive) {
@@ -375,6 +364,15 @@ using Effect = ConditionContext<ConditionContextType::Effect>;
 using FreePredicate = AtomicCondition<ConditionContextType::Free>;
 using GoalCondition = ConditionContext<ConditionContextType::Free>;
 
+template <typename T>
+size_t get_index(const T *elem,
+                 const std::vector<std::unique_ptr<T>> &list) noexcept {
+  return static_cast<size_t>(std::distance(
+      list.begin(),
+      std::find_if(list.begin(), list.end(),
+                   [elem](const auto &e) { return e.get() == elem; })));
+}
+
 struct Action {
   friend Problem;
 
@@ -383,16 +381,19 @@ struct Action {
   std::shared_ptr<Precondition> precondition;
   std::shared_ptr<Effect> effect;
   const Problem *problem;
-  size_t id;
 
-  Handle<Parameter> add_parameter(std::string name, Handle<Type> type);
+  ParameterHandle add_parameter(std::string name, TypeHandle type);
   void set_precondition(std::shared_ptr<Precondition> precondition);
   void set_effect(std::shared_ptr<Effect> effect);
-  Handle<Parameter> get_parameter(const std::string &name) const;
+  ParameterHandle get_parameter(const std::string &name) const;
+
+  size_t get_index(const Parameter *parameter) const noexcept {
+    return parsed::get_index(parameter, parameters);
+  }
 
 private:
-  Action(std::string name, const Problem *problem, size_t id)
-      : name{std::move(name)}, problem{problem}, id{id} {}
+  Action(std::string name, const Problem *problem)
+      : name{std::move(name)}, problem{problem} {}
 };
 
 class Problem {
@@ -402,17 +403,17 @@ public:
   void add_requirement(std::string name) {
     requirements_.push_back(std::move(name));
   }
-  Handle<Type> add_type(std::string name);
-  Handle<Type> add_type(std::string name, Handle<Type> supertype);
-  Handle<Constant> add_constant(std::string name, Handle<Type> type);
-  Handle<Predicate> add_predicate(std::string name);
-  void add_parameter_type(Handle<Predicate> predicate, Handle<Type> type);
-  Handle<Action> add_action(std::string name);
-  Handle<Parameter> add_parameter(Handle<Action> action, std::string name,
-                                  Handle<Type> type);
-  void set_precondition(Handle<Action> action,
+  TypeHandle add_type(std::string name);
+  TypeHandle add_type(std::string name, TypeHandle supertype);
+  ConstantHandle add_constant(std::string name, TypeHandle type);
+  PredicateHandle add_predicate(std::string name);
+  void add_parameter_type(PredicateHandle predicate, TypeHandle type);
+  ActionHandle add_action(std::string name);
+  ParameterHandle add_parameter(ActionHandle action, std::string name,
+                                TypeHandle type);
+  void set_precondition(ActionHandle action,
                         std::shared_ptr<Precondition> precondition);
-  void set_effect(Handle<Action> action, std::shared_ptr<Effect> effect);
+  void set_effect(ActionHandle action, std::shared_ptr<Effect> effect);
   void add_init(std::shared_ptr<FreePredicate> init);
   void set_goal(std::shared_ptr<GoalCondition> goal);
 
@@ -425,12 +426,28 @@ public:
   const auto &get_constants() const { return constants_; }
   const auto &get_predicates() const { return predicates_; }
   const auto &get_actions() const { return actions_; }
-  Handle<Type> get_type(const std::string &name) const;
-  Handle<Constant> get_constant(const std::string &name) const;
-  Handle<Predicate> get_predicate(const std::string &name) const;
-  Handle<Action> get_action(const std::string &name) const;
+  TypeHandle get_type(const std::string &name) const;
+  ConstantHandle get_constant(const std::string &name) const;
+  PredicateHandle get_predicate(const std::string &name) const;
+  ActionHandle get_action(const std::string &name) const;
   const auto &get_init() const { return init_; }
   const auto &get_goal() const { return goal_; }
+
+  size_t get_index(const Type *type) const noexcept {
+    return parsed::get_index(type, types_);
+  }
+
+  size_t get_index(const Constant *constant) const noexcept {
+    return parsed::get_index(constant, constants_);
+  }
+
+  size_t get_index(const Predicate *predicate) const noexcept {
+    return parsed::get_index(predicate, predicates_);
+  }
+
+  size_t get_index(const Action *action) const noexcept {
+    return parsed::get_index(action, actions_);
+  }
 
 private:
   std::string domain_name_ = "";
@@ -444,4 +461,6 @@ private:
   std::shared_ptr<GoalCondition> goal_;
 };
 
-#endif /* end of include guard: PROBLEM_HPP */
+} // namespace parsed
+
+#endif /* end of include guard: PARSED_MODEL_HPP */

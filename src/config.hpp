@@ -11,7 +11,7 @@ public:
   explicit ConfigException(std::string message) noexcept
       : message_{std::move(message)} {}
 
-  [[nodiscard]] inline const char *what() const noexcept override {
+  inline const char *what() const noexcept override {
     return message_.c_str();
   }
 

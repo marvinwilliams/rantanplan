@@ -1,4 +1,4 @@
-#include "util/combinatorics.hpp"
+#include "util/combination_iterator.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -11,9 +11,7 @@ CombinationIterator::CombinationIterator(
       current_combination_(list_sizes_.size()) {
   number_combinations_ = std::accumulate(
       list_sizes_.cbegin(), list_sizes_.cend(), 1ul, std::multiplies<>());
-  if (number_combinations_ == 0) {
-    is_end_ = true;
-  }
+  is_end_ = (number_combinations_ == 0);
 }
 
 CombinationIterator &CombinationIterator::operator++() noexcept {
@@ -30,12 +28,6 @@ CombinationIterator &CombinationIterator::operator++() noexcept {
   }
   is_end_ = true;
   return *this;
-}
-
-CombinationIterator CombinationIterator::operator++(int) noexcept {
-  CombinationIterator old = *this;
-  ++(*this);
-  return old;
 }
 
 void CombinationIterator::reset() noexcept {

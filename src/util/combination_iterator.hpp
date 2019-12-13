@@ -1,5 +1,5 @@
-#ifndef COMBINATORICS_HPP
-#define COMBINATORICS_HPP
+#ifndef COMBINATION_ITERATOR_HPP
+#define COMBINATION_ITERATOR_HPP
 
 #include <iterator>
 #include <vector>
@@ -16,7 +16,11 @@ public:
 
   CombinationIterator &operator++() noexcept;
 
-  CombinationIterator operator++(int) noexcept;
+  CombinationIterator operator++(int) noexcept {
+    CombinationIterator old = *this;
+    ++(*this);
+    return old;
+  }
 
   void reset() noexcept;
 
@@ -36,10 +40,10 @@ public:
   inline bool end() const noexcept { return is_end_; }
 
 private:
-  bool is_end_ = false;
-  size_t number_combinations_ = 0;
+  bool is_end_;
+  size_t number_combinations_;
   const std::vector<size_t> list_sizes_;
   std::vector<size_t> current_combination_;
 };
 
-#endif /* end of include guard: COMBINATORICS_HPP */
+#endif /* end of include guard: COMBINATION_ITERATOR_HPP */
