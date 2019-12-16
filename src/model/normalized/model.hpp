@@ -140,6 +140,8 @@ private:
   };
 };
 
+using ArgumentIndex = Index<Argument>;
+
 struct Condition {
   PredicateIndex definition;
   std::vector<Argument> arguments;
@@ -202,6 +204,19 @@ struct Problem {
     return actions[action];
   }
 
+  TypeIndex get_index(const Type *type) const noexcept {
+    return {static_cast<size_t>(std::distance(&types.front(), type))};
+  }
+  ConstantIndex get_index(const Constant *constant) const noexcept {
+    return {static_cast<size_t>(std::distance(&constants.front(), constant))};
+  }
+  PredicateIndex get_index(const Predicate *predicate) const noexcept {
+    return {static_cast<size_t>(std::distance(&predicates.front(), predicate))};
+  }
+  ActionIndex get_index(const Action *action) const noexcept {
+    return {static_cast<size_t>(std::distance(&actions.front(), action))};
+  }
+
   const std::string &get_name(TypeIndex type) const noexcept {
     return type_names[type];
   }
@@ -213,6 +228,9 @@ struct Problem {
   }
   const std::string &get_name(ActionIndex action) const noexcept {
     return action_names[action];
+  }
+  template <typename T> const std::string &get_name(const T *t) const noexcept {
+    return get_name(get_index(t));
   }
 };
 

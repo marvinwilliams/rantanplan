@@ -3,13 +3,13 @@
 
 #include "config.hpp"
 #include "logging/logging.hpp"
-#include "model/normalized_problem.hpp"
-#include "model/support.hpp"
+#include "model/normalized/model.hpp"
+#include "encoding/support.hpp"
 #include "model/utils.hpp"
 #include "planning/planner.hpp"
 #include "sat/formula.hpp"
 #include "sat/model.hpp"
-#include "util/combinatorics.hpp"
+#include "util/combination_iterator.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -31,16 +31,16 @@ public:
   static logging::Logger logger;
 
   struct ActionVariable {
-    normalized::ActionHandle action_handle;
+    normalized::ActionIndex action_handle;
   };
 
   struct PredicateVariable {
-    normalized::InstantiationHandle handle;
+    normalized::InstantiationIndex handle;
     bool this_step;
   };
 
   struct ParameterVariable {
-    normalized::ActionHandle action_handle;
+    normalized::ActionIndex action_handle;
     size_t parameter_index;
     size_t constant_index;
   };

@@ -2,26 +2,25 @@
 #define INDEX_HPP
 
 #include <cstdint>
-#include <type_traits>
 #include <functional>
+#include <type_traits>
 
-template <typename T> class Index {
-public:
+template <typename T> struct Index {
   using value_type = uint_fast64_t;
   template <typename Integral,
             std::enable_if_t<std::is_integral_v<Integral>, int> = 0>
-  explicit Index(Integral i = 0) : i_{static_cast<value_type>(i)} {}
+  Index(Integral i = 0) : i{static_cast<value_type>(i)} {}
   Index(const Index &other) : Index{other.i} {}
   Index() : Index(0) {}
   Index &operator=(const Index<T> &other) {
-    i_ = other.i_;
+    i = other.i;
     return *this;
   }
 
-  inline operator value_type() const { return i_; }
+  inline operator value_type() const { return i; }
 
   inline Index &operator++() {
-    ++i_;
+    ++i;
     return *this;
   }
 
@@ -31,13 +30,12 @@ public:
     return old;
   }
 
-private:
-  value_type i_;
+  value_type i;
 };
 
 template <typename T>
 inline bool operator==(const Index<T> &first, const Index<T> &second) {
-  return first.i_ == second.i_;
+  return first.i == second.i;
 }
 
 template <typename T>
@@ -45,11 +43,16 @@ inline bool operator!=(const Index<T> &first, const Index<T> &second) {
   return !(first == second);
 }
 
+template <typename T>
+inline bool operator<(const Index<T> &first, const Index<T> &second) {
+  return first.i < second.i;
+}
+
 namespace std {
 
 template <typename T> struct hash<Index<T>> {
-  size_t operator()(Index<T> handle) const noexcept {
-    return std::hash<size_t>{}(handle.i);
+  size_t operator()(Index<T> index) const noexcept {
+    return std::hash<size_t>{}(index.i);
   }
 };
 
