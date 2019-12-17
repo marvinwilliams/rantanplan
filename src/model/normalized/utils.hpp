@@ -30,7 +30,6 @@ inline bool is_subtype(TypeIndex subtype, TypeIndex type,
 
 struct ParameterSelection {
   std::vector<ParameterIndex> parameters;
-  ActionIndex action;
 };
 
 struct ParameterMapping {
@@ -40,7 +39,6 @@ struct ParameterMapping {
 
 struct ParameterAssignment {
   std::vector<std::pair<ParameterIndex, ConstantIndex>> assignments;
-  ActionIndex action;
 };
 
 inline PredicateInstantiation instantiate(const Condition &predicate) noexcept {
@@ -83,17 +81,22 @@ inline bool update_arguments(Condition &condition, const Action &action) {
   return is_grounded;
 }
 
+inline bool is_grounded(const Condition &predicate) noexcept {
+  return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
+                     [](const auto &arg) { return arg.is_constant(); });
+}
+
 inline Action ground(const ParameterAssignment &assignment,
-                     const Problem &problem) noexcept {
+                     const Action &action) noexcept {
   Action new_action;
-  new_action.parameters = problem.get(assignment.action).parameters;
+  new_action.parameters = action.parameters;
   for (auto [p, c] : assignment.assignments) {
     new_action.parameters[p].set(c);
   }
-  new_action.pre_instantiated = problem.get(assignment.action).pre_instantiated;
-  new_action.eff_instantiated = problem.get(assignment.action).eff_instantiated;
+  new_action.pre_instantiated = action.pre_instantiated;
+  new_action.eff_instantiated = action.eff_instantiated;
 
-  for (auto pred : problem.get(assignment.action).preconditions) {
+  for (auto pred : action.preconditions) {
     if (bool is_grounded = update_arguments(pred, new_action); is_grounded) {
       new_action.pre_instantiated.emplace_back(instantiate(pred),
                                                pred.positive);
@@ -101,7 +104,7 @@ inline Action ground(const ParameterAssignment &assignment,
       new_action.preconditions.push_back(std::move(pred));
     }
   }
-  for (auto pred : problem.get(assignment.action).effects) {
+  for (auto pred : action.effects) {
     if (bool is_grounded = update_arguments(pred, new_action); is_grounded) {
       new_action.eff_instantiated.emplace_back(instantiate(pred),
                                                pred.positive);
@@ -112,11 +115,10 @@ inline Action ground(const ParameterAssignment &assignment,
   return new_action;
 }
 
-inline ParameterMapping get_mapping(ActionIndex action,
-                                    const Condition &predicate,
-                                    const Problem &problem) noexcept {
+inline ParameterMapping get_mapping(const Action &action,
+                                    const Condition &predicate) noexcept {
   std::vector<std::vector<ArgumentIndex>> parameter_matches(
-      problem.get(action).parameters.size());
+      action.parameters.size());
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
     if (!predicate.arguments[i].is_constant()) {
       parameter_matches[predicate.arguments[i].get_parameter()].emplace_back(i);
@@ -124,27 +126,44 @@ inline ParameterMapping get_mapping(ActionIndex action,
   }
 
   ParameterMapping mapping;
-  for (size_t i = 0; i < problem.get(action).parameters.size(); ++i) {
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
     if (!parameter_matches[i].empty()) {
       mapping.parameter_selection.parameters.emplace_back(i);
       mapping.arguments.push_back(std::move(parameter_matches[i]));
     }
   }
-  mapping.parameter_selection.action = action;
   return mapping;
+}
+
+inline ParameterSelection
+get_referenced_parameters(const Action &action,
+                          const Condition &predicate) noexcept {
+  std::vector<bool> parameter_matches(action.parameters.size(), false);
+  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
+    if (!predicate.arguments[i].is_constant()) {
+      parameter_matches[predicate.arguments[i].get_parameter()] = true;
+    }
+  }
+
+  ParameterSelection selection;
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
+    if (parameter_matches[i]) {
+      selection.parameters.emplace_back(i);
+    }
+  }
+  return selection;
 }
 
 inline ParameterAssignment
 get_assignment(const ParameterMapping &mapping,
                const std::vector<ConstantIndex> &arguments) noexcept {
-  assert(mapping.parameters.size() == arguments.size());
+  assert(mapping.parameter_selection.parameters.size() == arguments.size());
   ParameterAssignment assignment;
   assignment.assignments.reserve(mapping.parameter_selection.parameters.size());
   for (size_t i = 0; i < mapping.parameter_selection.parameters.size(); ++i) {
     assignment.assignments.push_back(
         {mapping.parameter_selection.parameters[i], arguments[i]});
   }
-  assignment.action = mapping.parameter_selection.action;
   return assignment;
 }
 
@@ -210,12 +229,12 @@ void for_each_instantiation(const Predicate &predicate, Function &&f,
 
 template <typename Function>
 void for_each_action_instantiation(const ParameterSelection &selection,
-                                   Function &&f, const Problem &problem) {
+                                   const Action &action, Function &&f,
+                                   const Problem &problem) {
   std::vector<size_t> argument_size_list;
   argument_size_list.reserve(selection.parameters.size());
-  const auto &action = problem.get(selection.action);
   for (auto p : selection.parameters) {
-    assert(!problem.get(action.get(p).is_constant()));
+    assert(!action.get(p).is_constant());
     argument_size_list.push_back(
         problem.constants_by_type[action.get(p).get_type()].size());
   }
@@ -233,48 +252,33 @@ void for_each_action_instantiation(const ParameterSelection &selection,
           selection.parameters[i],
           problem.constants_by_type[type][combination[i]]);
     }
-    assignment.action = selection.action;
     f(std::move(assignment));
     ++combination_iterator;
   }
 }
 
-/* inline bool is_unifiable(const std::vector<Parameter> &first, */
-/*                          const std::vector<Parameter> &second) noexcept {
- */
-/*   // Assumes same action, thus free parameters are not checked */
-/*   assert(first.size() == second.size()); */
-/*   for (size_t i = 0; i < first.size(); ++i) { */
-/*     if (first[i].is_constant() && second[i].is_constant() && */
-/*         first[i].get_constant() != second[i].get_constant()) { */
-/*       return false; */
-/*     } */
-/*   } */
-/*   return true; */
-/* } */
-
 inline bool is_instantiatable(const Condition &condition,
-                              const std::vector<ConstantIndex> &instantiation,
+                              const std::vector<ConstantIndex> &arguments,
                               const Action &action,
                               const Problem &problem) noexcept {
   auto parameters = action.parameters;
   for (size_t i = 0; i < condition.arguments.size(); ++i) {
     if (condition.arguments[i].is_constant()) {
-      if (condition.arguments[i].get_constant() != instantiation[i]) {
+      if (condition.arguments[i].get_constant() != arguments[i]) {
         return false;
       }
     } else {
       auto &p = parameters[condition.arguments[i].get_parameter()];
       if (p.is_constant()) {
-        if (p.get_constant() != instantiation[i]) {
+        if (p.get_constant() != arguments[i]) {
           return false;
         }
       } else {
-        if (!is_subtype(problem.get(instantiation[i]).type, p.get_type(),
+        if (!is_subtype(problem.get(arguments[i]).type, p.get_type(),
                         problem)) {
           return false;
         }
-        p.set(instantiation[i]);
+        p.set(arguments[i]);
       }
     }
   }

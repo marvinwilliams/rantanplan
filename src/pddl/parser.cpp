@@ -1,6 +1,6 @@
 #include "pddl/parser.hpp"
 #include "logging/logging.hpp"
-#include "pddl/ast.hpp"
+#include "pddl/ast/ast.hpp"
 #include "pddl/parser_exception.hpp"
 #include "pddl/tokens.hpp"
 
@@ -14,8 +14,8 @@ namespace pddl {
 
 logging::Logger Parser::logger{"Parser"};
 
-AST Parser::parse(const std::string &domain, const std::string &problem) {
-  AST ast;
+ast::AST Parser::parse(const std::string &domain, const std::string &problem) {
+  ast::AST ast;
   std::ifstream domain_in{domain};
   std::string domain_bytes{std::istreambuf_iterator<char>{domain_in},
                            std::istreambuf_iterator<char>{}};
@@ -592,13 +592,13 @@ std::unique_ptr<ast::Problem> Parser::parse_problem() {
                                         std::move(problem_body));
 }
 
-void Parser::parse_domain(AST &ast) {
+void Parser::parse_domain(ast::AST &ast) {
   skip_comments();
   auto domain = parse_domain();
   ast.set_domain(std::move(domain));
 }
 
-void Parser::parse_problem(AST &ast) {
+void Parser::parse_problem(ast::AST &ast) {
   skip_comments();
   auto problem = parse_problem();
   ast.set_problem(std::move(problem));

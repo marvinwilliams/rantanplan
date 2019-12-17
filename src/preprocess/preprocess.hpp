@@ -7,14 +7,14 @@
 #include "model/normalized/utils.hpp"
 #include "util/index.hpp"
 
-#include <cstdint>
 #include <unordered_map>
 
 extern logging::Logger preprocess_logger;
 
-using PredicateId = Index<normalized::PredicateInstantiation>;
-
 struct PreprocessSupport {
+  struct predicate_id_t {};
+  using PredicateId = Index<predicate_id_t>;
+
   explicit PreprocessSupport(const normalized::Problem &problem) noexcept;
   PredicateId get_id(const normalized::PredicateInstantiation &predicate) const
       noexcept;
@@ -42,7 +42,9 @@ struct PreprocessSupport {
   bool is_effectless(const normalized::PredicateInstantiation &predicate,
                      bool positive) const noexcept;
 
-  void reset_tested() noexcept;
+  size_t get_num_rigid(const normalized::Condition &condition,
+                       const normalized::Action &action,
+                       const normalized::Problem &problem) noexcept;
 
   enum class SimplifyResult { Unchanged, Changed, Invalid };
 
@@ -57,7 +59,8 @@ struct PreprocessSupport {
                              }));
 
     refinement_possible = false;
-    reset_tested();
+    rigid_tested.clear();
+    effectless_tested.clear();
     uint_fast64_t num_current_actions = 0;
     for (size_t i = 0; i < problem.actions.size(); ++i) {
       std::vector<normalized::Action> new_actions;
@@ -66,7 +69,7 @@ struct PreprocessSupport {
             result != SimplifyResult::Unchanged) {
           refinement_possible = true;
           if (result == SimplifyResult::Invalid) {
-            num_current_actions +=
+            num_pruned_actions +=
                 normalized::get_num_instantiated(action, problem);
             continue;
           }
@@ -83,15 +86,15 @@ struct PreprocessSupport {
         refinement_possible = true;
 
         for_each_action_instantiation(
-            selection,
+            selection, action,
             [&](const normalized::ParameterAssignment &assignment) {
-              auto new_action = ground(assignment, problem);
+              auto new_action = ground(assignment, action);
               if (auto result = simplify(new_action);
                   result != SimplifyResult::Invalid) {
                 new_actions.push_back(std::move(new_action));
                 num_current_actions += 1;
               } else {
-                num_current_actions +=
+                num_pruned_actions +=
                     normalized::get_num_instantiated(new_action, problem);
               }
             },
@@ -99,21 +102,24 @@ struct PreprocessSupport {
       }
       partially_instantiated_actions[i] = std::move(new_actions);
     }
-    LOG_INFO(preprocess_logger, "Progress: %d\n",
-             static_cast<double>(num_current_actions) / num_actions);
+    LOG_INFO(preprocess_logger, "Progress: %f",
+             static_cast<double>(num_current_actions + num_pruned_actions) /
+                 static_cast<double>(num_actions));
   }
 
   bool refinement_possible = true;
   uint_fast64_t num_actions;
+  uint_fast64_t num_pruned_actions = 0;
   std::vector<uint_fast64_t> predicate_id_offset;
   std::vector<bool> trivially_rigid;
   std::vector<bool> trivially_effectless;
   std::vector<std::vector<normalized::Action>> partially_instantiated_actions;
   std::vector<PredicateId> init;
   std::vector<std::pair<PredicateId, bool>> goal;
-  mutable std::unordered_map<PredicateId, bool> rigid;
+  mutable std::unordered_map<normalized::PredicateInstantiation, bool> rigid;
   mutable std::unordered_map<PredicateId, bool> rigid_tested;
-  mutable std::unordered_map<PredicateId, bool> effectless;
+  mutable std::unordered_map<normalized::PredicateInstantiation, bool>
+      effectless;
   mutable std::unordered_map<PredicateId, bool> effectless_tested;
   const normalized::Problem &problem;
 };

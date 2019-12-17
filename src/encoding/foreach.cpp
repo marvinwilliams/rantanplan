@@ -1,9 +1,13 @@
 #include "encoding/foreach.hpp"
 #include "config.hpp"
+#include "encoding/support.hpp"
 #include "logging/logging.hpp"
-#include "model/normalized_problem.hpp"
-#include "model/support.hpp"
+#include "model/normalized/model.hpp"
 #include "planning/planner.hpp"
+
+#include <algorithm>
+#include <iterator>
+#include <vector>
 
 using namespace normalized;
 
@@ -11,7 +15,7 @@ logging::Logger ForeachEncoder::logger{"Foreach"};
 
 ForeachEncoder::ForeachEncoder(const Problem &problem,
                                const Config &config) noexcept
-    : support_{problem} {
+    : problem_{problem}, support_{problem_} {
   init_sat_vars();
   LOG_INFO(logger, "Encoding...");
   encode_init();
@@ -25,7 +29,7 @@ ForeachEncoder::ForeachEncoder(const Problem &problem,
 }
 
 int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
-  size_t variable = 0;
+  uint_fast64_t variable = 0;
   variable = literal.variable.sat_var;
   if (variable == DONTCARE) {
     return static_cast<int>(SAT);
@@ -42,32 +46,29 @@ Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
                                            unsigned int step) const noexcept {
   Planner::Plan plan;
   for (unsigned int s = 0; s < step; ++s) {
-    for (size_t i = 0; i < support_.get_num_actions(); ++i) {
+    for (size_t i = 0; i < problem_.actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
-        const Action &action = support_.get_problem().actions[i];
-        std::vector<const Constant *> constants;
+        const Action &action = problem_.actions[i];
+        std::vector<ConstantIndex> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
           auto &parameter = action.parameters[parameter_pos];
           if (parameter.is_constant()) {
-            constants.push_back(&parameter.get_constant());
+            constants.push_back(parameter.get_constant());
           } else {
             for (size_t j = 0;
-                 j < support_.get_problem()
-                         .constants_by_type[get_index(&parameter.get_type(),
-                                                      support_.get_problem())]
-                         .size();
+                 j < problem_.constants_by_type[parameter.get_type()].size();
                  ++j) {
               if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
                 constants.push_back(
-                    support_.get_constants_of_type(parameter.get_type())[j]);
+                    problem_.constants_by_type[parameter.get_type()][j]);
                 break;
               }
             }
           }
           assert(constants.size() == parameter_pos + 1);
         }
-        plan.emplace_back(ActionHandle{i}, std::move(constants));
+        plan.emplace_back(ActionIndex{i}, std::move(constants));
       }
     }
   }
@@ -76,15 +77,15 @@ Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
 
 void ForeachEncoder::encode_init() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    auto literal = Literal{PredicateVariable{InstantiationHandle{i}, true},
-                           support_.is_init(InstantiationHandle{i})};
+    auto literal = Literal{Variable{predicates_[i]},
+                           support_.is_init(Support::PredicateId{i})};
     init_ << literal << sat::EndClause;
   }
 }
 
-void ForeachEncoder::encode_actions() {
-  for (size_t i = 0; i < support_.get_num_actions(); ++i) {
-    const auto &action = support_.get_problem().actions[i];
+void ForeachEncoder::encode_actions() noexcept {
+  for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    const auto &action = problem_.actions[i];
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
@@ -92,14 +93,14 @@ void ForeachEncoder::encode_actions() {
         continue;
       }
       size_t number_arguments =
-          support_.get_constants_of_type(parameter.get_type()).size();
+          problem_.constants_by_type[parameter.get_type()].size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
-      auto action_var = ActionVariable{ActionHandle{i}};
+      auto action_var = Variable{actions_[i]};
       for (size_t constant_index = 0; constant_index < number_arguments;
            ++constant_index) {
         auto parameter_var =
-            ParameterVariable{ActionHandle{i}, parameter_pos, constant_index};
+            Variable{parameters_[i][parameter_pos][constant_index]};
         universal_clauses_ << Literal{parameter_var, false};
         universal_clauses_ << Literal{action_var, true};
         universal_clauses_ << sat::EndClause;
@@ -115,35 +116,33 @@ void ForeachEncoder::encode_actions() {
   }
 }
 
-void ForeachEncoder::parameter_implies_predicate() {
+void ForeachEncoder::parameter_implies_predicate() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     for (bool positive : {true, false}) {
       for (bool is_effect : {true, false}) {
         auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
-        for (const auto &[action_handle, assignment] : support_.get_support(
-                 InstantiationHandle{i}, positive, is_effect)) {
-          if (assignment.empty()) {
-            formula << Literal{ActionVariable{action_handle}, false};
+        for (const auto &[action_index, assignment] : support_.get_support(
+                 Support::PredicateId{i}, positive, is_effect)) {
+          if (assignment.assignments.empty()) {
+            formula << Literal{Variable{actions_[action_index]}, false};
           } else {
-            for (auto [parameter_index, constant_handle] : assignment) {
-              const auto &constants = support_.get_constants_of_type(
-                  support_.get_problem()
-                      .actions[action_handle]
-                      .parameters[parameter_index]
-                      .get_type());
-              auto it = std::find(constants.begin(), constants.end(),
-                                  constant_handle);
+            for (auto [parameter_index, constant_index] :
+                 assignment.assignments) {
+              const auto &constants =
+                  problem_.constants_by_type[problem_.actions[action_index]
+                                                 .parameters[parameter_index]
+                                                 .get_type()];
+              auto it =
+                  std::find(constants.begin(), constants.end(), constant_index);
               assert(it != constants.end());
               formula << Literal{
-                  ParameterVariable{action_handle, parameter_index,
-                                    static_cast<size_t>(
-                                        std::distance(constants.begin(), it))},
+                  Variable{
+                      parameters_[action_index][parameter_index]
+                                 [static_cast<size_t>(it - constants.begin())]},
                   false};
             }
           }
-          formula << Literal{PredicateVariable{InstantiationHandle{i},
-                                               !is_effect},
-                             positive}
+          formula << Literal{Variable{predicates_[i], !is_effect}, positive}
                   << sat::EndClause;
         }
       }
@@ -151,37 +150,37 @@ void ForeachEncoder::parameter_implies_predicate() {
   }
 }
 
-void ForeachEncoder::interference() {
+void ForeachEncoder::interference() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     for (bool positive : {true, false}) {
       const auto &precondition_support =
-          support_.get_support(InstantiationHandle{i}, positive, false);
+          support_.get_support(Support::PredicateId{i}, positive, false);
       const auto &effect_support =
-          support_.get_support(InstantiationHandle{i}, !positive, true);
-      for (const auto &[p_handle, p_assignment] : precondition_support) {
-        for (const auto &[e_handle, e_assignment] : effect_support) {
-          if (p_handle == e_handle) {
+          support_.get_support(Support::PredicateId{i}, !positive, true);
+      for (const auto &[p_action_index, p_assignment] : precondition_support) {
+        for (const auto &[e_action_index, e_assignment] : effect_support) {
+          if (p_action_index == e_action_index) {
             continue;
           }
           for (bool is_effect : {true, false}) {
             const auto &assignment = is_effect ? e_assignment : p_assignment;
-            auto handle = is_effect ? e_handle : p_handle;
-            if (assignment.empty()) {
-              universal_clauses_ << Literal{ActionVariable{handle}, false};
+            auto action_index = is_effect ? e_action_index : p_action_index;
+            if (assignment.assignments.empty()) {
+              universal_clauses_ << Literal{Variable{actions_[action_index]}, false};
             } else {
-              for (auto [parameter_index, constant_handle] : assignment) {
-                const auto &constants = support_.get_constants_of_type(
-                    support_.get_problem()
-                        .actions[handle]
-                        .parameters[parameter_index]
-                        .get_type());
+              for (auto [parameter_index, constant_index] :
+                   assignment.assignments) {
+                const auto &constants =
+                    problem_.constants_by_type[problem_.actions[action_index]
+                                                   .parameters[parameter_index]
+                                                   .get_type()];
                 auto it = std::find(constants.begin(), constants.end(),
-                                    constant_handle);
+                                    constant_index);
                 assert(it != constants.end());
                 universal_clauses_ << Literal{
-                    ParameterVariable{handle, parameter_index,
-                                      static_cast<size_t>(std::distance(
-                                          constants.begin(), it))},
+                    Variable{
+                        parameters_[action_index][parameter_index][static_cast<size_t>(
+                            it - constants.begin())]},
                     false};
               }
             }
@@ -193,63 +192,62 @@ void ForeachEncoder::interference() {
   }
 }
 
-void ForeachEncoder::frame_axioms(size_t dnf_threshold) {
+void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     for (bool positive : {true, false}) {
       size_t num_nontrivial_clauses = 0;
-      for (const auto &[action_handle, assignment] :
-           support_.get_support(InstantiationHandle{i}, positive, true)) {
+      for (const auto &[action_index, assignment] :
+           support_.get_support(Support::PredicateId{i}, positive, true)) {
         // Assignments with multiple arguments lead to combinatorial explosion
-        if (assignment.size() > 1) {
+        if (assignment.assignments.size() > 1) {
           ++num_nontrivial_clauses;
         }
       }
 
       Formula dnf;
-      dnf << Literal{PredicateVariable{InstantiationHandle{i}, true}, positive}
+      dnf << Literal{Variable{predicates_[i]}, positive} << sat::EndClause;
+      dnf << Literal{Variable{predicates_[i], false}, !positive}
           << sat::EndClause;
-      dnf << Literal{PredicateVariable{InstantiationHandle{i}, false},
-                     !positive}
-          << sat::EndClause;
-      for (const auto &[action_handle, assignment] :
-           support_.get_support(InstantiationHandle{i}, positive, true)) {
-        if (assignment.empty()) {
-          dnf << Literal{ActionVariable{action_handle}, true};
-        } else if (assignment.size() == 1 ||
+      for (const auto &[action_index, assignment] :
+           support_.get_support(Support::PredicateId{i}, positive, true)) {
+        if (assignment.assignments.empty()) {
+          dnf << Literal{Variable{actions_[action_index]}, true};
+        } else if (assignment.assignments.size() == 1 ||
                    num_nontrivial_clauses < dnf_threshold) {
-          for (auto [parameter_index, constant_handle] : assignment) {
+          for (auto [parameter_index, constant_index] :
+               assignment.assignments) {
             const auto &constants =
-                support_.get_constants_of_type(support_.get_problem()
-                                                   .actions[action_handle]
-                                                   .parameters[parameter_index]
-                                                   .get_type());
+                problem_.constants_by_type[problem_.actions[action_index]
+                                               .parameters[parameter_index]
+                                               .get_type()];
             auto it =
-                std::find(constants.begin(), constants.end(), constant_handle);
+                std::find(constants.begin(), constants.end(), constant_index);
             assert(it != constants.end());
-            dnf << Literal{ParameterVariable{action_handle, parameter_index,
-                                             static_cast<size_t>(std::distance(
-                                                 constants.begin(), it))},
-                           true};
+            dnf << Literal{
+                Variable{
+                    parameters_[action_index][parameter_index]
+                               [static_cast<size_t>(it - constants.begin())]},
+                true};
           }
         } else {
-          for (auto [parameter_index, constant_handle] : assignment) {
-            universal_clauses_ << Literal{HelperVariable{num_helpers_}, false};
+          for (auto [parameter_index, constant_index] :
+               assignment.assignments) {
+            universal_clauses_ << Literal{Variable{num_vars_}, false};
             const auto &constants =
-                support_.get_constants_of_type(support_.get_problem()
-                                                   .actions[action_handle]
-                                                   .parameters[parameter_index]
-                                                   .get_type());
+                problem_.constants_by_type[problem_.actions[action_index]
+                                               .parameters[parameter_index]
+                                               .get_type()];
             auto it =
-                std::find(constants.begin(), constants.end(), constant_handle);
+                std::find(constants.begin(), constants.end(), constant_index);
             assert(it != constants.end());
             universal_clauses_ << Literal{
-                ParameterVariable{
-                    action_handle, parameter_index,
-                    static_cast<size_t>(std::distance(constants.begin(), it))},
+                Variable{
+                    parameters_[action_index][parameter_index]
+                               [static_cast<size_t>(it - constants.begin())]},
                 true};
             universal_clauses_ << sat::EndClause;
           }
-          dnf << Literal{HelperVariable{num_helpers_}, true};
+          dnf << Literal{Variable{num_vars_}, true};
           ++num_vars_;
         }
         dnf << sat::EndClause;
@@ -259,21 +257,19 @@ void ForeachEncoder::frame_axioms(size_t dnf_threshold) {
   }
 }
 
-void ForeachEncoder::assume_goal() {
-  for (const auto &[goal, positive] : support_.get_problem().goal) {
-    goal_ << Literal{PredicateVariable{support_.get_predicate_handle(goal),
-                                       true},
-                     positive}
+void ForeachEncoder::assume_goal() noexcept {
+  for (const auto &[goal, positive] : problem_.goal) {
+    goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;
   }
 }
 
-void ForeachEncoder::init_sat_vars() {
+void ForeachEncoder::init_sat_vars() noexcept {
   LOG_INFO(logger, "Initializing sat variables...");
-  actions_.reserve(support_.get_problem().actions.size());
-  parameters_.resize(support_.get_problem().actions.size());
-  for (size_t i = 0; i < support_.get_problem().actions.size(); ++i) {
-    const auto &action = support_.get_problem().actions[i];
+  actions_.reserve(problem_.actions.size());
+  parameters_.resize(problem_.actions.size());
+  for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    const auto &action = problem_.actions[i];
     actions_.push_back(num_vars_++);
 
     parameters_[i].resize(action.parameters.size());
@@ -285,10 +281,9 @@ void ForeachEncoder::init_sat_vars() {
         continue;
       }
       parameters_[i][parameter_pos].reserve(
-          support_.get_constants_of_type(parameter.get_type()).size());
+          problem_.constants_by_type[parameter.get_type()].size());
       for (size_t j = 0;
-           j < support_.get_constants_of_type(parameter.get_type()).size();
-           ++j) {
+           j < problem_.constants_by_type[parameter.get_type()].size(); ++j) {
         parameters_[i][parameter_pos].push_back(num_vars_++);
       }
     }
@@ -296,9 +291,9 @@ void ForeachEncoder::init_sat_vars() {
 
   predicates_.resize(support_.get_num_instantiations());
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (support_.is_rigid(InstantiationHandle{i}, true)) {
+    if (support_.is_rigid(Support::PredicateId{i}, true)) {
       predicates_[i] = SAT;
-    } else if (support_.is_rigid(InstantiationHandle{i}, false)) {
+    } else if (support_.is_rigid(Support::PredicateId{i}, false)) {
       predicates_[i] = UNSAT;
     } else {
       predicates_[i] = num_vars_++;

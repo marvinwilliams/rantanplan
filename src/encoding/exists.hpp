@@ -5,7 +5,7 @@
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "encoding/support.hpp"
-#include "model/utils.hpp"
+#include "model/normalized/utils.hpp"
 #include "planning/planner.hpp"
 #include "sat/formula.hpp"
 #include "sat/model.hpp"

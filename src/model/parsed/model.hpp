@@ -280,7 +280,8 @@ private:
 };
 
 template <ConditionContextType C>
-class AtomicCondition : public BaseAtomicCondition, public ConditionContext<C> {
+class AtomicCondition final : public BaseAtomicCondition,
+                              public ConditionContext<C> {
 public:
   template <bool Enable = true, typename = std::enable_if_t<
                                     Enable && C == ConditionContextType::Free>>
@@ -326,7 +327,7 @@ public:
 };
 
 template <ConditionContextType C>
-class Junction : public BaseJunction, public ConditionContext<C> {
+class Junction final : public BaseJunction, public ConditionContext<C> {
 public:
   template <bool Enable = true, typename = std::enable_if_t<
                                     Enable && C == ConditionContextType::Free>>

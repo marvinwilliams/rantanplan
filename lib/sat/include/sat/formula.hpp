@@ -1,20 +1,16 @@
 #ifndef FORMULA_HPP
 #define FORMULA_HPP
 
-#include "util/combinatorics.hpp"
+#include "util/combination_iterator.hpp"
+
 #include <cstdio>
 #include <type_traits>
 #include <vector>
 
 namespace sat {
 
-namespace detail {
-
-struct end_clause_t {};
-
-} // namespace detail
-
-static const detail::end_clause_t EndClause;
+inline constexpr struct end_clause_t {
+} EndClause;
 
 template <typename Variable> struct Formula {
   struct Literal {
@@ -36,7 +32,7 @@ template <typename Variable> struct Formula {
     return *this;
   }
 
-  Formula &operator<<(detail::end_clause_t) {
+  Formula &operator<<(end_clause_t) {
     clauses.push_back(std::move(current_clause));
     current_clause.literals.clear();
     return *this;

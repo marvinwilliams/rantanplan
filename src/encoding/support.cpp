@@ -1,9 +1,9 @@
-#include "model/support.hpp"
+#include "encoding/support.hpp"
 #include "logging/logging.hpp"
-#include "model/normalized_problem.hpp"
+#include "model/normalized/model.hpp"
+#include "model/normalized/utils.hpp"
 #include "model/to_string.hpp"
-#include "model/utils.hpp"
-#include "util/combinatorics.hpp"
+#include "util/combination_iterator.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -33,30 +33,31 @@ Support::Support(const Problem &problem) noexcept : problem_{problem} {
 
 void Support::set_predicate_support() noexcept {
   condition_supports_.resize(num_instantations_);
-  for (const auto &action : problem_.actions) {
+  for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    const auto &action = problem_.actions[i];
     for (auto is_effect : {true, false}) {
       for (const auto &[predicate, positive] :
            (is_effect ? action.eff_instantiated : action.pre_instantiated)) {
         auto [it, success] =
             instantiations_.try_emplace(predicate, instantiations_.size());
         select_support(it->second, positive, is_effect)
-            .emplace_back(&action, ParameterAssignment{});
+            .emplace_back(ActionIndex{i}, ParameterAssignment{});
       }
 
       for (const auto &predicate :
            is_effect ? action.effects : action.preconditions) {
         for_each_action_instantiation(
-            get_mapping(action, predicate).parameter_selection,
+            get_referenced_parameters(action, predicate), action,
             [&](ParameterAssignment assignment) {
               auto parameters = action.parameters;
               for (auto [p, c] : assignment.assignments) {
-                parameters[get_index(p, assignment.action->parameters)].set(*c);
+                parameters[p].set(c);
               }
               auto instantiation = instantiate(predicate);
               auto [it, success] = instantiations_.try_emplace(
                   instantiation, instantiations_.size());
               select_support(it->second, predicate.positive, is_effect)
-                  .emplace_back(action, std::move(assignment));
+                  .emplace_back(ActionIndex{i}, std::move(assignment));
             },
             problem_);
       }

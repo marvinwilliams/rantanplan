@@ -2,41 +2,34 @@
 #define FOREACH_HPP
 
 #include "config.hpp"
+#include "encoding/support.hpp"
 #include "logging/logging.hpp"
-#include "model/normalized_problem.hpp"
-#include "model/support.hpp"
-#include "model/utils.hpp"
+#include "model/normalized/model.hpp"
+#include "model/normalized/utils.hpp"
 #include "planning/planner.hpp"
 #include "sat/formula.hpp"
 #include "sat/model.hpp"
-#include "util/combinatorics.hpp"
+#include "util/combination_iterator.hpp"
 
-#include <algorithm>
-#include <chrono>
-#include <functional>
-#include <iostream>
-#include <numeric>
-#include <unordered_map>
-#include <utility>
-#include <variant>
+#include <cstdint>
 #include <vector>
 
 class ForeachEncoder {
 
 public:
-  static constexpr unsigned int DONTCARE = 0;
-  static constexpr unsigned int SAT = 1;
-  static constexpr unsigned int UNSAT = 2;
-
   static logging::Logger logger;
 
   struct Variable {
-    size_t sat_var;
+    uint_fast64_t sat_var;
     bool this_step = true;
   };
 
   using Formula = sat::Formula<Variable>;
-  using Literal = Formula::Literal;
+  using Literal = typename Formula::Literal;
+
+  static constexpr unsigned int DONTCARE = 0;
+  static constexpr unsigned int SAT = 1;
+  static constexpr unsigned int UNSAT = 2;
 
   explicit ForeachEncoder(const normalized::Problem &problem,
                           const Config &config) noexcept;
@@ -59,24 +52,25 @@ public:
 
 private:
   void encode_init() noexcept;
-  void encode_actions();
-  void parameter_implies_predicate();
-  void interference();
+  void encode_actions() noexcept;
+  void parameter_implies_predicate() noexcept;
+  void interference() noexcept;
+  void frame_axioms(unsigned int dnf_threshold) noexcept;
+  void assume_goal() noexcept;
+  void init_sat_vars() noexcept;
 
-  void frame_axioms(size_t dnf_threshold);
-  void assume_goal();
-  void init_sat_vars();
-
-  Support support_;
-  size_t num_vars_ = 3;
-  std::vector<unsigned int> predicates_;
-  std::vector<unsigned int> actions_;
-  std::vector<std::vector<std::vector<unsigned int>>> parameters_;
-  std::vector<unsigned int> helpers_;
+  uint_fast64_t num_vars_ = 3;
+  std::vector<uint_fast64_t> predicates_;
+  std::vector<uint_fast64_t> actions_;
+  std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;
+  std::vector<uint_fast64_t> helpers_;
   Formula init_;
   Formula universal_clauses_;
   Formula transition_clauses_;
   Formula goal_;
+
+  normalized::Problem problem_;
+  Support support_;
 };
 
 #endif /* end of include guard: FOREACH_HPP */

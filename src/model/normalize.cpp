@@ -103,13 +103,23 @@ normalize_action(const parsed::Action &action,
         new_action.parameters.emplace_back(
             normalized::TypeIndex{problem.get_index(p->type)});
       }
-      for (const auto &cond : to_list(condition)) {
-        new_action.preconditions.push_back(
-            normalize_atomic_condition(*cond, action, problem));
+      for (const auto &c : to_list(condition)) {
+        auto condition = normalize_atomic_condition(*c, action, problem);
+        if (is_grounded(condition)) {
+          new_action.pre_instantiated.emplace_back(
+              normalized::instantiate(condition), condition.positive);
+        } else {
+          new_action.preconditions.push_back(std::move(condition));
+        }
       }
-      for (const auto &e : effects) {
-        new_action.effects.push_back(
-            normalize_atomic_condition(*e, action, problem));
+      for (const auto &c : effects) {
+        auto condition = normalize_atomic_condition(*c, action, problem);
+        if (is_grounded(condition)) {
+          new_action.eff_instantiated.emplace_back(
+              normalized::instantiate(condition), condition.positive);
+        } else {
+          new_action.effects.push_back(std::move(condition));
+        }
       }
     }
   } else {
@@ -119,13 +129,23 @@ normalize_action(const parsed::Action &action,
       new_action.parameters.emplace_back(
           normalized::TypeIndex{problem.get_index(p->type)});
     }
-    for (const auto &cond : to_list(precondition)) {
-      new_action.preconditions.push_back(
-          normalize_atomic_condition(*cond, action, problem));
+    for (const auto &c : to_list(precondition)) {
+      auto condition = normalize_atomic_condition(*c, action, problem);
+      if (is_grounded(condition)) {
+        new_action.pre_instantiated.emplace_back(
+            normalized::instantiate(condition), condition.positive);
+      } else {
+        new_action.preconditions.push_back(std::move(condition));
+      }
     }
-    for (const auto &e : effects) {
-      new_action.effects.push_back(
-          normalize_atomic_condition(*e, action, problem));
+    for (const auto &c : effects) {
+      auto condition = normalize_atomic_condition(*c, action, problem);
+      if (is_grounded(condition)) {
+        new_action.eff_instantiated.emplace_back(
+            normalized::instantiate(condition), condition.positive);
+      } else {
+        new_action.effects.push_back(std::move(condition));
+      }
     }
   }
   return new_actions;
@@ -141,17 +161,18 @@ normalized::Problem normalize(const parsed::Problem &problem) {
   normalized_problem.type_names.reserve(problem.get_types().size());
   for (size_t i = 0; i < problem.get_types().size(); ++i) {
     const auto &type = problem.get_types()[i];
-    normalized_problem.types.emplace_back(
-        normalized::TypeIndex{problem.get_index(type->supertype)});
+    normalized_problem.types.push_back(normalized::Type{
+        normalized::TypeIndex{problem.get_index(type->supertype)}});
     normalized_problem.type_names.push_back(type->name);
   }
 
   for (const auto &constant : problem.get_constants()) {
-    normalized_problem.constants.emplace_back(
-        normalized::TypeIndex{problem.get_index(constant->type)});
+    normalized_problem.constants.push_back(normalized::Constant{
+        normalized::TypeIndex{problem.get_index(constant->type)}});
     normalized_problem.constant_names.push_back(constant->name);
   }
 
+  normalized_problem.constants_by_type.resize(normalized_problem.types.size());
   for (size_t i = 0; i < normalized_problem.constants.size(); ++i) {
     const auto &c = normalized_problem.constants[i];
     auto type = c.type;

@@ -99,9 +99,10 @@ std::string to_string(const PredicateInstantiation &predicate,
   return ss.str();
 }
 
-std::string to_string(const Action &action, const Problem &problem) {
+std::string to_string(const ActionIndex action_index, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.action_names[get_index(&action, problem)] << '(';
+  ss << problem.action_names[action_index] << '(';
+  const auto &action = problem.actions[action_index];
   for (auto it = action.parameters.cbegin(); it != action.parameters.cend();
        ++it) {
     if (it != action.parameters.cbegin()) {
@@ -143,20 +144,20 @@ std::string to_string(const Problem &problem) {
   }
   ss << '\n';
   ss << "Types:" << '\n';
-  for (const auto &type : problem.types) {
-    ss << '\t' << to_string(type, problem) << '\n';
+  for (size_t i = 0; i < problem.types.size(); ++i) {
+    ss << '\t' << to_string(TypeIndex{i}, problem) << '\n';
   }
   ss << "Constants:" << '\n';
-  for (const auto &constant : problem.constants) {
-    ss << '\t' << to_string(constant, problem) << '\n';
+  for (size_t i = 0; i < problem.constants.size(); ++i) {
+    ss << '\t' << to_string(ConstantIndex{i}, problem) << '\n';
   }
   ss << "Predicates:" << '\n';
-  for (const auto &predicate : problem.predicates) {
-    ss << '\t' << to_string(predicate, problem) << '\n';
+  for (size_t i = 0; i < problem.predicates.size(); ++i) {
+    ss << '\t' << to_string(PredicateIndex{i}, problem) << '\n';
   }
   ss << "Actions:" << '\n';
-  for (const auto &action : problem.actions) {
-    ss << '\t' << to_string(action, problem) << '\n';
+  for (size_t i = 0; i < problem.actions.size(); ++i) {
+    ss << '\t' << to_string(ActionIndex{i}, problem) << '\n';
   }
   ss << "Initial state:" << '\n';
   for (auto &predicate : problem.init) {

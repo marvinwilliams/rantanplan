@@ -129,8 +129,7 @@ PredicateHandle Problem::add_predicate(std::string name) {
       predicates_.end()) {
     throw ModelException{"Predicate \'" + name + "\' already exists"};
   }
-  predicates_.push_back(
-      std::make_unique<Predicate>(std::move(name), predicates_.size()));
+  predicates_.push_back(std::make_unique<Predicate>(std::move(name)));
   return {predicates_.back().get(), this};
 }
 

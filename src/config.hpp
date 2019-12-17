@@ -34,13 +34,13 @@ struct Config {
   // Preprocess
   PreprocessMode preprocess_mode = PreprocessMode::Rigid;
   PreprocessPriority preprocess_priority = PreprocessPriority::New;
-  size_t num_iterations = 3;
+  unsigned int num_iterations = 0; // 0: Infinity
 
   // Planning
   Planner planner = Planner::Foreach;
   Solver solver = Solver::Ipasir;
   std::string plan_file = "";
-  double step_factor = 1.4;
+  float step_factor = 1.4f;
   unsigned int max_steps = 0; // 0: Infinity
 
   // Number of dnf clauses with more than 1 literal to be converted to cnf.

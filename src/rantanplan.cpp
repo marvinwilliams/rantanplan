@@ -1,20 +1,18 @@
 #include "build_config.hpp"
 #include "config.hpp"
-#include "encoding/exists.hpp"
+/* #include "encoding/exists.hpp" */
 #include "encoding/foreach.hpp"
-#include "encoding/sequential.hpp"
+/* #include "encoding/sequential.hpp" */
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
-#include "model/normalized_problem.hpp"
-#include "model/preprocess.hpp"
-#include "model/problem.hpp"
-#include "model/support.hpp"
+#include "model/normalized/model.hpp"
+#include "preprocess/preprocess.hpp"
 #include "model/to_string.hpp"
 #include "options/options.hpp"
-#include "pddl/ast.hpp"
+#include "pddl/ast/ast.hpp"
 #include "pddl/parser.hpp"
-#include "pddl/pddl_visitor.hpp"
+#include "pddl/model_builder.hpp"
 #include "planning/planner.hpp"
 #include "planning/sat_planner.hpp"
 
@@ -109,8 +107,8 @@ options::Options set_options(const std::string &name) {
                                 "\'"};
         }
       });
-  options.add_option<double>({"step-factor", 'f'}, "Step factor");
-  options.add_option<size_t>({"num-iterations", 'i'}, "Num iterations");
+  options.add_option<float>({"step-factor", 'f'}, "Step factor");
+  options.add_option<unsigned int>({"num-iterations", 'i'}, "Num iterations");
   options.add_option<std::string>({"plan-file", 'o'},
                                   "File to output the plan to");
   options.add_option<bool>({"logging", 'v'}, "Enable debug logging");
@@ -169,12 +167,12 @@ void set_config(const options::Options &options, Config &config) {
     config.solver = solver.value;
   }
 
-  const auto &factor = options.get<double>("step-factor");
+  const auto &factor = options.get<float>("step-factor");
   if (factor.count > 0) {
     config.step_factor = factor.value;
   }
 
-  const auto &iter = options.get<size_t>("num-iterations");
+  const auto &iter = options.get<unsigned int>("num-iterations");
   if (iter.count > 0) {
     config.num_iterations = iter.value;
   }
@@ -253,15 +251,15 @@ int main(int argc, char *argv[]) {
 
   print_version();
 
-  std::unique_ptr<Problem> abstract_problem;
+  std::unique_ptr<parsed::Problem> parsed_problem;
 
   PRINT_INFO("Reading problem...");
   pddl::Parser parser;
   try {
     auto ast = parser.parse(config.domain_file, config.problem_file);
 
-    pddl::PddlAstParser visitor;
-    abstract_problem = visitor.parse(ast);
+    pddl::ModelBuilder builder;
+    parsed_problem = builder.parse(ast);
   } catch (const pddl::ParserException &e) {
     std::stringstream ss;
     if (e.location()) {
@@ -282,7 +280,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  assert(abstract_problem);
+  assert(parsed_problem);
 
   /* PRINT_DEBUG("Abstract problem:\n%s", */
   /*             model::to_string(*abstract_problem).c_str()); */
@@ -293,7 +291,7 @@ int main(int argc, char *argv[]) {
   }
 
   PRINT_INFO("Normalizing...");
-  auto problem = normalize(*abstract_problem);
+  auto problem = normalize(*parsed_problem);
   if (config.mode == Config::PlanningMode::Normalize) {
     PRINT_INFO("Normalizing successful");
     return 0;

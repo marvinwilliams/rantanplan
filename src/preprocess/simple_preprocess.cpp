@@ -4,6 +4,8 @@
 #include "model/to_string.hpp"
 #include "preprocess/preprocess.hpp"
 
+#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numeric>
 #include <unordered_map>
@@ -17,17 +19,21 @@ using namespace normalized;
 PreprocessSupport::PreprocessSupport(const Problem &problem) noexcept
     : problem{problem} {
 
-  num_actions = std::accumulate(
-      problem.actions.begin(), problem.actions.end(), 0ul,
-      [&problem](const auto &a) { return get_num_instantiated(a, problem); });
+  num_actions =
+      std::accumulate(problem.actions.begin(), problem.actions.end(), 0ul,
+                      [&problem](uint_fast64_t sum, const auto &a) {
+                        return sum + get_num_instantiated(a, problem);
+                      });
 
   predicate_id_offset.reserve(problem.predicates.size());
   predicate_id_offset.push_back(0);
-  std::partial_sum(
-      problem.predicates.begin(), problem.predicates.end() - 1,
-      std::back_inserter(predicate_id_offset),
-      [&problem](const auto &p) { return get_num_instantiated(p, problem); });
-
+  for (auto it = problem.predicates.begin(); it != problem.predicates.end() - 1;
+       ++it) {
+    predicate_id_offset.push_back(
+        predicate_id_offset.back() +
+        static_cast<uint_fast64_t>(
+            std::pow(problem.constants.size(), it->parameter_types.size())));
+  }
   trivially_rigid.reserve(problem.predicates.size());
   trivially_effectless.reserve(problem.predicates.size());
   for (size_t i = 0; i < problem.predicates.size(); ++i) {
@@ -68,7 +74,7 @@ PreprocessSupport::PreprocessSupport(const Problem &problem) noexcept
   std::sort(goal.begin(), goal.end());
 }
 
-PredicateId
+PreprocessSupport::PredicateId
 PreprocessSupport::get_id(const PredicateInstantiation &predicate) const
     noexcept {
   uint_fast64_t result = 0;
@@ -139,12 +145,13 @@ bool PreprocessSupport::has_precondition(
 // No action has this predicate as effect and it is not in init
 bool PreprocessSupport::is_rigid(const PredicateInstantiation &predicate,
                                  bool positive) const noexcept {
-  auto id = get_id(predicate);
-
-  if (auto it = rigid.find(id);
+  if (auto it = rigid.find(predicate);
       it != rigid.end() && it->second == positive) {
     return true;
   }
+
+  auto id = get_id(predicate);
+
   if (auto it = rigid_tested.find(id);
       it != rigid_tested.end() && it->second == positive) {
     return false;
@@ -154,8 +161,8 @@ bool PreprocessSupport::is_rigid(const PredicateInstantiation &predicate,
   if (std::binary_search(init.begin(), init.end(), id) != positive) {
     return false;
   }
-  if (trivially_rigid[get_index(predicate.definition, problem)]) {
-    rigid.insert(id);
+  if (trivially_rigid[predicate.definition]) {
+    rigid.insert({predicate, positive});
     return true;
   }
   for (size_t i = 0; i < problem.actions.size(); ++i) {
@@ -169,30 +176,32 @@ bool PreprocessSupport::is_rigid(const PredicateInstantiation &predicate,
       }
     }
   }
-  rigid.insert(id);
+  rigid.insert({predicate, positive});
   return true;
 }
 
 // No action has this predicate as precondition and it is a not a goal
-bool is_effectless(const PredicateInstantiation &predicate,
-                   bool positive) const {
-  auto handle = get_id(predicate);
-  auto &effectless = (positive ? pos_effectless : neg_effectless);
-  auto &tested = (positive ? pos_effectless_tested : neg_effectless_tested);
-
-  if (effectless.find(handle) != effectless.end()) {
+bool PreprocessSupport::is_effectless(const PredicateInstantiation &predicate,
+                                      bool positive) const noexcept {
+  if (auto it = effectless.find(predicate);
+      it != effectless.end() && it->second == positive) {
     return true;
   }
-  if (tested.find(handle) != tested.end()) {
+
+  auto id = get_id(predicate);
+
+  if (auto it = effectless_tested.find(id);
+      it != effectless_tested.end() && it->second == positive) {
     return false;
   }
 
-  tested.insert(handle);
-  if (auto it = goal.find(handle); it != goal.end() && it->second == positive) {
+  effectless_tested.insert({id, positive});
+  if (std::binary_search(goal.begin(), goal.end(),
+                         std::make_pair(id, positive))) {
     return false;
   }
-  if (trivially_effectless[get_index(predicate.definition, problem)]) {
-    effectless.insert(handle);
+  if (trivially_effectless[predicate.definition]) {
+    effectless.insert({predicate, positive});
     return true;
   }
   for (size_t i = 0; i < problem.actions.size(); ++i) {
@@ -206,30 +215,32 @@ bool is_effectless(const PredicateInstantiation &predicate,
       }
     }
   }
-  effectless.insert(handle);
+  effectless.insert({predicate, positive});
   return true;
 }
 
-void reset_tested() {
-  std::for_each(pos_rigid_tested.begin(), pos_rigid_tested.end(),
-                [](auto &t) { t.clear(); });
-  std::for_each(neg_rigid_tested.begin(), neg_rigid_tested.end(),
-                [](auto &t) { t.clear(); });
-  std::for_each(pos_effectless_tested.begin(), pos_effectless_tested.end(),
-                [](auto &t) { t.clear(); });
-  std::for_each(neg_effectless_tested.begin(), neg_effectless_tested.end(),
-                [](auto &t) { t.clear(); });
+size_t PreprocessSupport::get_num_rigid(const Condition &condition,
+                                        const Action &action,
+                                        const Problem &problem) noexcept {
+  return static_cast<size_t>(std::count_if(
+      rigid.begin(), rigid.end(),
+      [&condition, &action, &problem](const auto &r) {
+        return r.first.definition == condition.definition &&
+               r.second == condition.positive &&
+               is_instantiatable(condition, r.first.arguments, action, problem);
+      }));
 }
 
-enum class SimplifyResult { Unchanged, Changed, Invalid };
-
-SimplifyResult simplify(Action &action) {
+PreprocessSupport::SimplifyResult
+PreprocessSupport::simplify(Action &action) noexcept {
   if (std::any_of(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
           [this](const auto &p) { return is_rigid(p.first, !p.second); })) {
     return SimplifyResult::Invalid;
   }
+
   bool changed = false;
+
   if (auto it = std::remove_if(
           action.eff_instantiated.begin(), action.eff_instantiated.end(),
           [this](const auto &p) { return is_rigid(p.first, p.second); });
@@ -237,12 +248,14 @@ SimplifyResult simplify(Action &action) {
     action.eff_instantiated.erase(it, action.eff_instantiated.end());
     changed = true;
   }
+
   if (action.effects.empty() &&
       std::all_of(
           action.eff_instantiated.begin(), action.eff_instantiated.end(),
           [this](const auto &p) { return is_effectless(p.first, p.second); })) {
     return SimplifyResult::Invalid;
   }
+
   if (auto it = std::remove_if(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
           [this](const auto &p) { return is_rigid(p.first, p.second); });
@@ -250,84 +263,9 @@ SimplifyResult simplify(Action &action) {
     action.pre_instantiated.erase(it, action.pre_instantiated.end());
     changed = true;
   }
+
   return changed ? SimplifyResult::Changed : SimplifyResult::Unchanged;
 }
-
-template <typename Function> void refine(Function &&select_parameters) {
-  LOG_INFO(preprocess_logger, "New grounding iteration with %lu action(s)",
-           std::accumulate(partially_instantiated_actions.begin(),
-                           partially_instantiated_actions.end(), 0ul,
-                           [](size_t sum, const auto &assignments) {
-                             return sum + assignments.size();
-                           }));
-
-  refinement_possible = false;
-  reset_tested();
-  /* size_t num_parameters = 0; */
-  /* size_t num_constant_parameters = 0; */
-  for (size_t i = 0; i < problem.actions.size(); ++i) {
-    std::vector<Action> new_actions;
-    for (auto &action : partially_instantiated_actions[i]) {
-      if (auto result = simplify(action); result != SimplifyResult::Unchanged) {
-        refinement_possible = true;
-        if (result == SimplifyResult::Invalid) {
-          continue;
-        }
-      }
-
-      auto selection = select_parameters(action);
-
-      if (selection.parameters.empty()) {
-        new_actions.push_back(action);
-        continue;
-      }
-
-      refinement_possible = true;
-
-      for_each_action_instantiation(
-          selection,
-          [&action,
-           &new_actions, /* &num_parameters, &num_constant_parameters,*/
-           this](const ParameterAssignment &assignment) {
-            auto new_action = ground(action, assignment);
-            if (auto result = simplify(new_action);
-                result != SimplifyResult::Invalid) {
-              /* num_parameters += new_action.parameters.size(); */
-              /* num_constant_parameters +=
-               * static_cast<size_t>(std::count_if( */
-              /* new_action.parameters.begin(), new_action.parameters.end(),
-               */
-              /* [](const auto &p) { return p.is_constant(); })); */
-              new_actions.push_back(std::move(new_action));
-            }
-          },
-          problem);
-    }
-    partially_instantiated_actions[i] = std::move(new_actions);
-  }
-  /* printf("Ratio: %f\n", */
-  /*        static_cast<float>(num_constant_parameters) / num_parameters); */
-}
-
-bool refinement_possible = true;
-unsigned num_constants_exponent;
-std::vector<uint_fast64_t> handle_offset;
-std::unordered_set<InstantiationHandle> init;
-std::unordered_map<InstantiationHandle, bool> goal;
-std::vector<std::vector<Action>> partially_instantiated_actions;
-std::vector<bool> trivially_rigid;
-std::vector<bool> trivially_effectless;
-mutable std::unordered_set<InstantiationHandle> pos_rigid;
-mutable std::unordered_set<InstantiationHandle> neg_rigid;
-mutable std::unordered_set<InstantiationHandle> pos_rigid_tested;
-mutable std::unordered_set<InstantiationHandle> neg_rigid_tested;
-mutable std::unordered_set<InstantiationHandle> pos_effectless;
-mutable std::unordered_set<InstantiationHandle> neg_effectless;
-mutable std::unordered_set<InstantiationHandle> pos_effectless_tested;
-mutable std::unordered_set<InstantiationHandle> neg_effectless_tested;
-const Problem &problem;
-}
-;
 
 void preprocess(Problem &problem, const Config &config) {
   LOG_INFO(preprocess_logger, "Generating preprocessing support...");
@@ -340,38 +278,44 @@ void preprocess(Problem &problem, const Config &config) {
     if (first_free == action.parameters.end()) {
       return ParameterSelection{};
     }
-    return ParameterSelection{{&*first_free}, &action};
+    return ParameterSelection{{first_free - action.parameters.begin()}};
   };
 
   auto select_min_new = [&problem, &select_free](const Action &action) {
-    auto min = std::min_element(action.preconditions.begin(),
-                                action.preconditions.end(),
-                                [&problem](const auto &c1, const auto &c2) {
-                                  return get_num_instantiated(c1, problem) <
-                                         get_num_instantiated(c2, problem);
-                                });
+    auto min = std::min_element(
+        action.preconditions.begin(), action.preconditions.end(),
+        [&action, &problem](const auto &c1, const auto &c2) {
+          return get_num_instantiated(c1, action, problem) <
+                 get_num_instantiated(c2, action, problem);
+        });
+
     if (min == action.preconditions.end()) {
       return select_free(action);
     }
-    return get_mapping(action, *min).parameter_selection;
+
+    return get_referenced_parameters(action, *min);
   };
 
-  auto select_max_rigid = [&support, &select_free](const Action &action) {
+  auto select_max_rigid = [&select_free, &support,
+                           &problem](const Action &action) {
     auto max = std::max_element(
         action.preconditions.begin(), action.preconditions.end(),
-        [&support](const auto &c1, const auto &c2) {
-          return (c1.positive ? support.neg_rigid : support.pos_rigid).size() >
-                 (c2.positive ? support.neg_rigid : support.pos_rigid).size();
+        [&action, &support, &problem](const auto &c1, const auto &c2) {
+          return support.get_num_rigid(c1, action, problem) <
+                 support.get_num_rigid(c2, action, problem);
         });
+
     if (max == action.preconditions.end()) {
       return select_free(action);
     }
+
     return get_mapping(action, *max).parameter_selection;
   };
 
   size_t num_iteration = 0;
-  while (support.refinement_possible &&
-         num_iteration++ < config.num_iterations) {
+  while (
+      support.refinement_possible &&
+      (config.num_iterations == 0 || num_iteration++ < config.num_iterations)) {
     if (config.preprocess_priority == Config::PreprocessPriority::New) {
       support.refine(select_min_new);
     } else if (config.preprocess_priority ==

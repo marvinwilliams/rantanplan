@@ -3,7 +3,7 @@
 
 #include "config.hpp"
 #include "logging/logging.hpp"
-#include "model/normalized_problem.hpp"
+#include "model/normalized/model.hpp"
 
 #include <cassert>
 #include <utility>
@@ -11,9 +11,8 @@
 
 class Planner {
 public:
-  using Plan =
-      std::vector<std::pair<const normalized::Action *,
-                            std::vector<const normalized::Constant *>>>;
+  using Plan = std::vector<std::pair<normalized::ActionIndex,
+                                     std::vector<normalized::ConstantIndex>>>;
 
   static logging::Logger logger;
 
@@ -23,6 +22,8 @@ public:
 
   std::string to_string(const Plan &plan,
                         const normalized::Problem &problem) const noexcept;
+
+  normalized::Problem problem;
 };
 
 #endif /* end of include guard: PLANNER_HPP */
