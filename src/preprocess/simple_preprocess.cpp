@@ -313,16 +313,17 @@ Problem Preprocessor::preprocess(const Config &config) noexcept {
     return get_mapping(action, *max).parameters;
   };
 
-  size_t num_iteration = 0;
-  while (refinement_possible_ && (config.num_iterations == 0 ||
-                                  num_iteration++ < config.num_iterations)) {
+  float progress = 0.0f;
+  while (refinement_possible_ &&
+         (config.preprocess_progress == 1.0f ||
+          progress < config.preprocess_progress)) {
     if (config.preprocess_priority == Config::PreprocessPriority::New) {
-      refine(select_min_new);
+      progress = refine(select_min_new);
     } else if (config.preprocess_priority ==
                Config::PreprocessPriority::Rigid) {
-      refine(select_max_rigid);
+      progress = refine(select_max_rigid);
     } else if (config.preprocess_priority == Config::PreprocessPriority::Free) {
-      refine(select_free);
+      progress = refine(select_free);
     }
   }
 

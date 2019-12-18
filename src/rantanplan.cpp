@@ -108,7 +108,8 @@ options::Options set_options(const std::string &name) {
         }
       });
   options.add_option<float>({"step-factor", 'f'}, "Step factor");
-  options.add_option<unsigned int>({"num-iterations", 'i'}, "Num iterations");
+  options.add_option<float>({"preprocess-progress", 'i'},
+                            "Preprocessing progress");
   options.add_option<std::string>({"plan-file", 'o'},
                                   "File to output the plan to");
   options.add_option<bool>({"logging", 'v'}, "Enable debug logging");
@@ -172,9 +173,10 @@ void set_config(const options::Options &options, Config &config) {
     config.step_factor = factor.value;
   }
 
-  const auto &iter = options.get<unsigned int>("num-iterations");
+  const auto &iter = options.get<float>("preprocess-progress");
   if (iter.count > 0) {
-    config.num_iterations = iter.value;
+    config.preprocess_progress =
+        iter.value > 1.0f ? 1.0f : iter.value < 0.0f ? 0.0f : iter.value;
   }
 
   const auto &plan_file = options.get<std::string>("plan-file");

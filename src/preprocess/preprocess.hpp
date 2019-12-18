@@ -44,7 +44,7 @@ private:
                      bool positive) const noexcept;
   SimplifyResult simplify(normalized::Action &action) noexcept;
 
-  template <typename Function> void refine(Function &&select_parameters) {
+  template <typename Function> float refine(Function &&select_parameters) {
     LOG_INFO(preprocess_logger, "New grounding iteration with %lu action(s)",
              std::accumulate(partially_instantiated_actions_.begin(),
                              partially_instantiated_actions_.end(), 0ul,
@@ -99,6 +99,8 @@ private:
     LOG_INFO(preprocess_logger, "Progress: %f",
              static_cast<double>(num_current_actions + num_pruned_actions_) /
                  static_cast<double>(num_actions_));
+    return static_cast<float>(num_current_actions + num_pruned_actions_) /
+           static_cast<float>(num_actions_);
   }
 
   bool refinement_possible_ = true;

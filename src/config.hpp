@@ -34,7 +34,7 @@ struct Config {
   // Preprocess
   PreprocessMode preprocess_mode = PreprocessMode::Rigid;
   PreprocessPriority preprocess_priority = PreprocessPriority::New;
-  unsigned int num_iterations = 0; // 0: Infinity
+  float preprocess_progress = 1.0f;
 
   // Planning
   Planner planner = Planner::Foreach;
