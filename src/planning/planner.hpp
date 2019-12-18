@@ -22,8 +22,6 @@ public:
 
   std::string to_string(const Plan &plan,
                         const normalized::Problem &problem) const noexcept;
-
-  normalized::Problem problem;
 };
 
 #endif /* end of include guard: PLANNER_HPP */

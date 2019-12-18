@@ -7,14 +7,14 @@
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
 #include "model/normalized/model.hpp"
-#include "preprocess/preprocess.hpp"
 #include "model/to_string.hpp"
 #include "options/options.hpp"
 #include "pddl/ast/ast.hpp"
-#include "pddl/parser.hpp"
 #include "pddl/model_builder.hpp"
+#include "pddl/parser.hpp"
 #include "planning/planner.hpp"
 #include "planning/sat_planner.hpp"
+#include "preprocess/preprocess.hpp"
 
 #include <climits>
 #include <memory>
@@ -286,25 +286,26 @@ int main(int argc, char *argv[]) {
   /*             model::to_string(*abstract_problem).c_str()); */
 
   if (config.mode == Config::PlanningMode::Parse) {
-    PRINT_INFO("Parsing successful");
+    PRINT_INFO("Done");
     return 0;
   }
 
   PRINT_INFO("Normalizing...");
   auto problem = normalize(*parsed_problem);
   if (config.mode == Config::PlanningMode::Normalize) {
-    PRINT_INFO("Normalizing successful");
+    PRINT_INFO("Done");
     return 0;
   }
   if (config.preprocess_mode != Config::PreprocessMode::None) {
     PRINT_INFO("Preprocessing...");
-    preprocess(problem, config);
-    PRINT_INFO("Preprocessing successful");
+    Preprocessor preprocessor{problem};
+    problem = preprocessor.preprocess(config);
   } else {
     PRINT_INFO("Skipping preprocessing");
   }
   LOG_INFO(main_logger, "Problem has %lu actions", problem.actions.size());
   if (config.mode == Config::PlanningMode::Preprocess) {
+    PRINT_INFO("Done");
     return 0;
   }
 
@@ -323,6 +324,7 @@ int main(int argc, char *argv[]) {
     std::ofstream s{config.plan_file};
     s << planner->to_string(plan, problem);
   }
+  PRINT_INFO("Done");
 
   return 0;
 }

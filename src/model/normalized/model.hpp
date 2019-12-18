@@ -184,8 +184,8 @@ struct Problem {
   std::vector<Type> types;
   std::vector<std::string> type_names;
   std::vector<Constant> constants;
-  std::vector<std::vector<ConstantIndex>> constants_by_type;
   std::vector<std::string> constant_names;
+  std::vector<std::vector<ConstantIndex>> constants_by_type;
   std::vector<Predicate> predicates;
   std::vector<std::string> predicate_names;
   std::vector<Action> actions;

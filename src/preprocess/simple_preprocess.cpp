@@ -16,39 +16,50 @@ logging::Logger preprocess_logger = logging::Logger{"Preprocess"};
 
 using namespace normalized;
 
-PreprocessSupport::PreprocessSupport(const Problem &problem) noexcept
-    : problem{problem} {
+Preprocessor::Preprocessor(const Problem &problem) noexcept
+    : problem_{problem} {
 
-  num_actions =
+  LOG_INFO(preprocess_logger, "Initialize preprocessor");
+  num_actions_ =
       std::accumulate(problem.actions.begin(), problem.actions.end(), 0ul,
                       [&problem](uint_fast64_t sum, const auto &a) {
                         return sum + get_num_instantiated(a, problem);
                       });
 
-  predicate_id_offset.reserve(problem.predicates.size());
-  predicate_id_offset.push_back(0);
+  predicate_id_offset_.reserve(problem.predicates.size());
+  predicate_id_offset_.push_back(0);
   for (auto it = problem.predicates.begin(); it != problem.predicates.end() - 1;
        ++it) {
-    predicate_id_offset.push_back(
-        predicate_id_offset.back() +
+    predicate_id_offset_.push_back(
+        predicate_id_offset_.back() +
         static_cast<uint_fast64_t>(
             std::pow(problem.constants.size(), it->parameter_types.size())));
   }
-  trivially_rigid.reserve(problem.predicates.size());
-  trivially_effectless.reserve(problem.predicates.size());
+  trivially_rigid_.reserve(problem.predicates.size());
+  trivially_effectless_.reserve(problem.predicates.size());
   for (size_t i = 0; i < problem.predicates.size(); ++i) {
-    trivially_rigid.push_back(std::none_of(
+    trivially_rigid_.push_back(std::none_of(
         problem.actions.begin(), problem.actions.end(),
         [index = PredicateIndex{i}](const auto &action) {
-          return std::any_of(action.effects.begin(), action.effects.end(),
+          return std::any_of(action.eff_instantiated.begin(),
+                             action.eff_instantiated.end(),
+                             [index](const auto &effect) {
+                               return effect.first.definition == index;
+                             }) ||
+                 std::any_of(action.effects.begin(), action.effects.end(),
                              [index](const auto &effect) {
                                return effect.definition == index;
                              });
         }));
-    trivially_effectless.push_back(std::none_of(
+    trivially_effectless_.push_back(std::none_of(
         problem.actions.begin(), problem.actions.end(),
         [index = PredicateIndex{i}](const auto &action) {
-          return std::any_of(action.preconditions.begin(),
+          return std::any_of(action.pre_instantiated.begin(),
+                             action.pre_instantiated.end(),
+                             [index](const auto &precondition) {
+                               return precondition.first.definition == index;
+                             }) ||
+                 std::any_of(action.preconditions.begin(),
                              action.preconditions.end(),
                              [index](const auto &precondition) {
                                return precondition.definition == index;
@@ -56,65 +67,64 @@ PreprocessSupport::PreprocessSupport(const Problem &problem) noexcept
         }));
   }
 
-  partially_instantiated_actions.reserve(problem.actions.size());
+  partially_instantiated_actions_.reserve(problem.actions.size());
   for (const auto &action : problem.actions) {
-    partially_instantiated_actions.push_back({action});
+    partially_instantiated_actions_.push_back({action});
   }
 
-  init.reserve(problem.init.size());
+  init_.reserve(problem.init.size());
   for (const auto &predicate : problem.init) {
-    init.push_back(get_id(predicate));
+    init_.push_back(get_id(predicate));
   }
-  std::sort(init.begin(), init.end());
+  std::sort(init_.begin(), init_.end());
 
-  goal.reserve(problem.goal.size());
+  goal_.reserve(problem.goal.size());
   for (const auto &[predicate, positive] : problem.goal) {
-    goal.emplace_back(get_id(predicate), positive);
+    goal_.emplace_back(get_id(predicate), positive);
   }
-  std::sort(goal.begin(), goal.end());
+  std::sort(goal_.begin(), goal_.end());
 }
 
-PreprocessSupport::PredicateId
-PreprocessSupport::get_id(const PredicateInstantiation &predicate) const
-    noexcept {
+Preprocessor::PredicateId
+Preprocessor::get_id(const PredicateInstantiation &predicate) const noexcept {
   uint_fast64_t result = 0;
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    result = (result * problem.constants.size()) + predicate.arguments[i];
+    result = (result * problem_.constants.size()) + predicate.arguments[i];
   }
-  result += predicate_id_offset[predicate.definition];
+  result += predicate_id_offset_[predicate.definition];
   return result;
 }
 
-bool PreprocessSupport::is_trivially_rigid(
-    const PredicateInstantiation &predicate, bool positive) const noexcept {
-  if (std::binary_search(init.begin(), init.end(), get_id(predicate)) !=
+bool Preprocessor::is_trivially_rigid(const PredicateInstantiation &predicate,
+                                      bool positive) const noexcept {
+  if (std::binary_search(init_.begin(), init_.end(), get_id(predicate)) !=
       positive) {
     return false;
   }
-  return trivially_rigid[predicate.definition];
+  return trivially_rigid_[predicate.definition];
 }
 
-bool PreprocessSupport::is_trivially_effectless(
+bool Preprocessor::is_trivially_effectless(
     const PredicateInstantiation &predicate, bool positive) const noexcept {
-  if (std::binary_search(goal.begin(), goal.end(),
+  if (std::binary_search(goal_.begin(), goal_.end(),
                          std::make_pair(get_id(predicate), positive))) {
     return false;
   }
-  return trivially_effectless[predicate.definition];
+  return trivially_effectless_[predicate.definition];
 }
 
-bool PreprocessSupport::has_effect(const Action &action,
-                                   const PredicateInstantiation &predicate,
-                                   bool positive) const noexcept {
+bool Preprocessor::has_effect(const Action &action,
+                              const PredicateInstantiation &predicate,
+                              bool positive) const noexcept {
   for (const auto &[effect, eff_positive] : action.eff_instantiated) {
-    if (eff_positive == positive && effect == predicate) {
+    if (effect == predicate && eff_positive == positive) {
       return true;
     }
   }
   for (const auto &effect : action.effects) {
     if (effect.definition == predicate.definition &&
         effect.positive == positive) {
-      if (is_instantiatable(effect, predicate.arguments, action, problem)) {
+      if (is_instantiatable(effect, predicate.arguments, action, problem_)) {
         return true;
       }
     }
@@ -122,11 +132,11 @@ bool PreprocessSupport::has_effect(const Action &action,
   return false;
 }
 
-bool PreprocessSupport::has_precondition(
-    const Action &action, const PredicateInstantiation &predicate,
-    bool positive) const noexcept {
+bool Preprocessor::has_precondition(const Action &action,
+                                    const PredicateInstantiation &predicate,
+                                    bool positive) const noexcept {
   for (const auto &[precondition, pre_positive] : action.pre_instantiated) {
-    if (pre_positive == positive && precondition == predicate) {
+    if (precondition == predicate && pre_positive == positive) {
       return true;
     }
   }
@@ -134,7 +144,7 @@ bool PreprocessSupport::has_precondition(
     if (precondition.definition == predicate.definition &&
         precondition.positive == positive) {
       if (is_instantiatable(precondition, predicate.arguments, action,
-                            problem)) {
+                            problem_)) {
         return true;
       }
     }
@@ -142,97 +152,83 @@ bool PreprocessSupport::has_precondition(
   return false;
 }
 
-// No action has this predicate as effect and it is not in init
-bool PreprocessSupport::is_rigid(const PredicateInstantiation &predicate,
-                                 bool positive) const noexcept {
-  if (auto it = rigid.find(predicate);
-      it != rigid.end() && it->second == positive) {
-    return true;
-  }
-
+// No action has this predicate as effect and it is not in init_
+bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
+                            bool positive) const noexcept {
   auto id = get_id(predicate);
 
-  if (auto it = rigid_tested.find(id);
-      it != rigid_tested.end() && it->second == positive) {
+  if (auto it = rigid_.find(id); it != rigid_.end() && it->second == positive) {
+    return true;
+  }
+
+  if (auto it = rigid_tested_.find(id);
+      it != rigid_tested_.end() && it->second == positive) {
     return false;
   }
 
-  rigid_tested.insert({id, positive});
-  if (std::binary_search(init.begin(), init.end(), id) != positive) {
+  rigid_tested_.insert({id, positive});
+  if (std::binary_search(init_.begin(), init_.end(), id) != positive) {
     return false;
   }
-  if (trivially_rigid[predicate.definition]) {
-    rigid.insert({predicate, positive});
+  if (trivially_rigid_[predicate.definition]) {
+    rigid_.insert({id, positive});
     return true;
   }
-  for (size_t i = 0; i < problem.actions.size(); ++i) {
-    const auto &base_action = problem.actions[i];
+  for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    const auto &base_action = problem_.actions[i];
     if (!has_effect(base_action, predicate, !positive)) {
       continue;
     }
-    for (const auto &action : partially_instantiated_actions[i]) {
+    for (const auto &action : partially_instantiated_actions_[i]) {
       if (has_effect(action, predicate, !positive)) {
         return false;
       }
     }
   }
-  rigid.insert({predicate, positive});
+  rigid_.insert({id, positive});
   return true;
 }
 
 // No action has this predicate as precondition and it is a not a goal
-bool PreprocessSupport::is_effectless(const PredicateInstantiation &predicate,
-                                      bool positive) const noexcept {
-  if (auto it = effectless.find(predicate);
-      it != effectless.end() && it->second == positive) {
+bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
+                                 bool positive) const noexcept {
+  auto id = get_id(predicate);
+
+  if (auto it = effectless_.find(id);
+      it != effectless_.end() && it->second == positive) {
     return true;
   }
 
-  auto id = get_id(predicate);
-
-  if (auto it = effectless_tested.find(id);
-      it != effectless_tested.end() && it->second == positive) {
+  if (auto it = effectless_tested_.find(id);
+      it != effectless_tested_.end() && it->second == positive) {
     return false;
   }
 
-  effectless_tested.insert({id, positive});
-  if (std::binary_search(goal.begin(), goal.end(),
+  effectless_tested_.insert({id, positive});
+  if (std::binary_search(goal_.begin(), goal_.end(),
                          std::make_pair(id, positive))) {
     return false;
   }
-  if (trivially_effectless[predicate.definition]) {
-    effectless.insert({predicate, positive});
+  if (trivially_effectless_[predicate.definition]) {
+    effectless_.insert({id, positive});
     return true;
   }
-  for (size_t i = 0; i < problem.actions.size(); ++i) {
-    const auto &action = problem.actions[i];
+  for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    const auto &action = problem_.actions[i];
     if (!has_precondition(action, predicate, positive)) {
       continue;
     }
-    for (const auto &action : partially_instantiated_actions[i]) {
+    for (const auto &action : partially_instantiated_actions_[i]) {
       if (has_precondition(action, predicate, positive)) {
         return false;
       }
     }
   }
-  effectless.insert({predicate, positive});
+  effectless_.insert({id, positive});
   return true;
 }
 
-size_t PreprocessSupport::get_num_rigid(const Condition &condition,
-                                        const Action &action,
-                                        const Problem &problem) noexcept {
-  return static_cast<size_t>(std::count_if(
-      rigid.begin(), rigid.end(),
-      [&condition, &action, &problem](const auto &r) {
-        return r.first.definition == condition.definition &&
-               r.second == condition.positive &&
-               is_instantiatable(condition, r.first.arguments, action, problem);
-      }));
-}
-
-PreprocessSupport::SimplifyResult
-PreprocessSupport::simplify(Action &action) noexcept {
+Preprocessor::SimplifyResult Preprocessor::simplify(Action &action) noexcept {
   if (std::any_of(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
           [this](const auto &p) { return is_rigid(p.first, !p.second); })) {
@@ -267,10 +263,7 @@ PreprocessSupport::simplify(Action &action) noexcept {
   return changed ? SimplifyResult::Changed : SimplifyResult::Unchanged;
 }
 
-void preprocess(Problem &problem, const Config &config) {
-  LOG_INFO(preprocess_logger, "Generating preprocessing support...");
-  PreprocessSupport support{problem};
-
+Problem Preprocessor::preprocess(const Config &config) noexcept {
   auto select_free = [](const Action &action) {
     auto first_free =
         std::find_if(action.parameters.begin(), action.parameters.end(),
@@ -281,12 +274,12 @@ void preprocess(Problem &problem, const Config &config) {
     return ParameterSelection{{first_free - action.parameters.begin()}};
   };
 
-  auto select_min_new = [&problem, &select_free](const Action &action) {
+  auto select_min_new = [&select_free, this](const Action &action) {
     auto min = std::min_element(
         action.preconditions.begin(), action.preconditions.end(),
-        [&action, &problem](const auto &c1, const auto &c2) {
-          return get_num_instantiated(c1, action, problem) <
-                 get_num_instantiated(c2, action, problem);
+        [&action, this](const auto &c1, const auto &c2) {
+          return get_num_instantiated(c1, action, problem_) <
+                 get_num_instantiated(c2, action, problem_);
         });
 
     if (min == action.preconditions.end()) {
@@ -296,47 +289,68 @@ void preprocess(Problem &problem, const Config &config) {
     return get_referenced_parameters(action, *min);
   };
 
-  auto select_max_rigid = [&select_free, &support,
-                           &problem](const Action &action) {
+  auto select_max_rigid = [&select_free, this](const Action &action) {
     auto max = std::max_element(
         action.preconditions.begin(), action.preconditions.end(),
-        [&action, &support, &problem](const auto &c1, const auto &c2) {
-          return support.get_num_rigid(c1, action, problem) <
-                 support.get_num_rigid(c2, action, problem);
+        [this](const auto &c1, const auto &c2) {
+          return std::count_if(rigid_.begin(), rigid_.end(),
+                               [&c1](const auto &r) {
+                                 return r.first == c1.definition &&
+                                        r.second != c1.positive;
+                               }) <
+                 std::count_if(
+                     rigid_.begin(), rigid_.end(),
+                     [&c2](const auto &r) {
+                       return r.first == c2.definition &&
+                              r.second != c2.positive;
+                     });
         });
 
     if (max == action.preconditions.end()) {
       return select_free(action);
     }
 
-    return get_mapping(action, *max).parameter_selection;
+    return get_mapping(action, *max).parameters;
   };
 
   size_t num_iteration = 0;
-  while (
-      support.refinement_possible &&
-      (config.num_iterations == 0 || num_iteration++ < config.num_iterations)) {
+  while (refinement_possible_ && (config.num_iterations == 0 ||
+                                  num_iteration++ < config.num_iterations)) {
     if (config.preprocess_priority == Config::PreprocessPriority::New) {
-      support.refine(select_min_new);
+      refine(select_min_new);
     } else if (config.preprocess_priority ==
                Config::PreprocessPriority::Rigid) {
-      support.refine(select_max_rigid);
+      refine(select_max_rigid);
     } else if (config.preprocess_priority == Config::PreprocessPriority::Free) {
-      support.refine(select_free);
+      refine(select_free);
     }
   }
 
-  size_t num_actions = problem.actions.size();
-  problem.actions.clear();
-  auto action_names = std::move(problem.action_names);
-  problem.action_names.clear(); // noop
+  Problem preprocessed_problem{};
+  preprocessed_problem.domain_name = problem_.domain_name;
+  preprocessed_problem.problem_name = problem_.problem_name;
+  preprocessed_problem.requirements = problem_.requirements;
+  preprocessed_problem.types = problem_.types;
+  preprocessed_problem.type_names = problem_.type_names;
+  preprocessed_problem.constants = problem_.constants;
+  preprocessed_problem.constant_names = problem_.constant_names;
+  preprocessed_problem.constants_by_type = problem_.constants_by_type;
+  preprocessed_problem.predicates = problem_.predicates;
+  preprocessed_problem.predicate_names = problem_.predicate_names;
+  preprocessed_problem.init = problem_.init;
+  std::copy_if(problem_.goal.begin(), problem_.goal.end(),
+               std::back_inserter(preprocessed_problem.goal),
+               [this](const auto &g) { return !is_rigid(g.first, g.second); });
 
-  for (size_t i = 0; i < num_actions; ++i) {
-    for (auto &action : support.partially_instantiated_actions[i]) {
-      problem.actions.push_back(std::move(action));
-      problem.action_names.push_back(action_names[i]);
+  for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    for (auto &action : partially_instantiated_actions_[i]) {
+      preprocessed_problem.actions.push_back(std::move(action));
+      preprocessed_problem.action_names.push_back(problem_.action_names[i]);
     }
   }
+
   LOG_DEBUG(preprocess_logger, "Preprocessed problem:\n%s",
-            ::to_string(problem).c_str());
+            ::to_string(preprocessed_problem).c_str());
+
+  return preprocessed_problem;
 }

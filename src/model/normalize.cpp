@@ -21,12 +21,10 @@ normalize_atomic_condition(const parsed::BaseAtomicCondition &condition,
   result.definition =
       normalized::PredicateIndex{problem.get_index(condition.get_predicate())};
   for (const auto &a : condition.get_arguments()) {
-    if (auto c = std::get_if<const parsed::Constant *>(&a)) {
-      result.arguments.emplace_back(
-          normalized::ConstantIndex{problem.get_index(*c)});
-    } else {
-      assert(false);
-    }
+    assert(std::holds_alternative<const parsed::Constant *>(a));
+    auto c = std::get<const parsed::Constant *>(a);
+    result.arguments.emplace_back(
+        normalized::ConstantIndex{problem.get_index(c)});
   }
   result.positive = condition.positive();
 
@@ -104,21 +102,25 @@ normalize_action(const parsed::Action &action,
             normalized::TypeIndex{problem.get_index(p->type)});
       }
       for (const auto &c : to_list(condition)) {
-        auto condition = normalize_atomic_condition(*c, action, problem);
-        if (is_grounded(condition)) {
+        auto normalized_condition =
+            normalize_atomic_condition(*c, action, problem);
+        if (is_grounded(normalized_condition)) {
           new_action.pre_instantiated.emplace_back(
-              normalized::instantiate(condition), condition.positive);
+              normalized::instantiate(normalized_condition),
+              normalized_condition.positive);
         } else {
-          new_action.preconditions.push_back(std::move(condition));
+          new_action.preconditions.push_back(std::move(normalized_condition));
         }
       }
       for (const auto &c : effects) {
-        auto condition = normalize_atomic_condition(*c, action, problem);
-        if (is_grounded(condition)) {
+        auto normalized_condition =
+            normalize_atomic_condition(*c, action, problem);
+        if (is_grounded(normalized_condition)) {
           new_action.eff_instantiated.emplace_back(
-              normalized::instantiate(condition), condition.positive);
+              normalized::instantiate(normalized_condition),
+              normalized_condition.positive);
         } else {
-          new_action.effects.push_back(std::move(condition));
+          new_action.effects.push_back(std::move(normalized_condition));
         }
       }
     }
@@ -130,21 +132,25 @@ normalize_action(const parsed::Action &action,
           normalized::TypeIndex{problem.get_index(p->type)});
     }
     for (const auto &c : to_list(precondition)) {
-      auto condition = normalize_atomic_condition(*c, action, problem);
-      if (is_grounded(condition)) {
+      auto normalized_condition =
+          normalize_atomic_condition(*c, action, problem);
+      if (is_grounded(normalized_condition)) {
         new_action.pre_instantiated.emplace_back(
-            normalized::instantiate(condition), condition.positive);
+            normalized::instantiate(normalized_condition),
+            normalized_condition.positive);
       } else {
-        new_action.preconditions.push_back(std::move(condition));
+        new_action.preconditions.push_back(std::move(normalized_condition));
       }
     }
     for (const auto &c : effects) {
-      auto condition = normalize_atomic_condition(*c, action, problem);
-      if (is_grounded(condition)) {
+      auto normalized_condition =
+          normalize_atomic_condition(*c, action, problem);
+      if (is_grounded(normalized_condition)) {
         new_action.eff_instantiated.emplace_back(
-            normalized::instantiate(condition), condition.positive);
+            normalized::instantiate(normalized_condition),
+            normalized_condition.positive);
       } else {
-        new_action.effects.push_back(std::move(condition));
+        new_action.effects.push_back(std::move(normalized_condition));
       }
     }
   }

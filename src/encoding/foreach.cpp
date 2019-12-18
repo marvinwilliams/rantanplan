@@ -123,11 +123,10 @@ void ForeachEncoder::parameter_implies_predicate() noexcept {
         auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
         for (const auto &[action_index, assignment] : support_.get_support(
                  Support::PredicateId{i}, positive, is_effect)) {
-          if (assignment.assignments.empty()) {
+          if (assignment.empty()) {
             formula << Literal{Variable{actions_[action_index]}, false};
           } else {
-            for (auto [parameter_index, constant_index] :
-                 assignment.assignments) {
+            for (auto [parameter_index, constant_index] : assignment) {
               const auto &constants =
                   problem_.constants_by_type[problem_.actions[action_index]
                                                  .parameters[parameter_index]
@@ -165,11 +164,11 @@ void ForeachEncoder::interference() noexcept {
           for (bool is_effect : {true, false}) {
             const auto &assignment = is_effect ? e_assignment : p_assignment;
             auto action_index = is_effect ? e_action_index : p_action_index;
-            if (assignment.assignments.empty()) {
-              universal_clauses_ << Literal{Variable{actions_[action_index]}, false};
+            if (assignment.empty()) {
+              universal_clauses_
+                  << Literal{Variable{actions_[action_index]}, false};
             } else {
-              for (auto [parameter_index, constant_index] :
-                   assignment.assignments) {
+              for (auto [parameter_index, constant_index] : assignment) {
                 const auto &constants =
                     problem_.constants_by_type[problem_.actions[action_index]
                                                    .parameters[parameter_index]
@@ -178,9 +177,9 @@ void ForeachEncoder::interference() noexcept {
                                     constant_index);
                 assert(it != constants.end());
                 universal_clauses_ << Literal{
-                    Variable{
-                        parameters_[action_index][parameter_index][static_cast<size_t>(
-                            it - constants.begin())]},
+                    Variable{parameters_[action_index][parameter_index]
+                                        [static_cast<size_t>(
+                                            it - constants.begin())]},
                     false};
               }
             }
@@ -199,7 +198,7 @@ void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
       for (const auto &[action_index, assignment] :
            support_.get_support(Support::PredicateId{i}, positive, true)) {
         // Assignments with multiple arguments lead to combinatorial explosion
-        if (assignment.assignments.size() > 1) {
+        if (assignment.size() > 1) {
           ++num_nontrivial_clauses;
         }
       }
@@ -210,12 +209,11 @@ void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
           << sat::EndClause;
       for (const auto &[action_index, assignment] :
            support_.get_support(Support::PredicateId{i}, positive, true)) {
-        if (assignment.assignments.empty()) {
+        if (assignment.empty()) {
           dnf << Literal{Variable{actions_[action_index]}, true};
-        } else if (assignment.assignments.size() == 1 ||
+        } else if (assignment.size() == 1 ||
                    num_nontrivial_clauses < dnf_threshold) {
-          for (auto [parameter_index, constant_index] :
-               assignment.assignments) {
+          for (auto [parameter_index, constant_index] : assignment) {
             const auto &constants =
                 problem_.constants_by_type[problem_.actions[action_index]
                                                .parameters[parameter_index]
@@ -230,8 +228,7 @@ void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
                 true};
           }
         } else {
-          for (auto [parameter_index, constant_index] :
-               assignment.assignments) {
+          for (auto [parameter_index, constant_index] : assignment) {
             universal_clauses_ << Literal{Variable{num_vars_}, false};
             const auto &constants =
                 problem_.constants_by_type[problem_.actions[action_index]

@@ -46,11 +46,11 @@ void Support::set_predicate_support() noexcept {
 
       for (const auto &predicate :
            is_effect ? action.effects : action.preconditions) {
-        for_each_action_instantiation(
+        for_each_instantiation(
             get_referenced_parameters(action, predicate), action,
             [&](ParameterAssignment assignment) {
               auto parameters = action.parameters;
-              for (auto [p, c] : assignment.assignments) {
+              for (auto [p, c] : assignment) {
                 parameters[p].set(c);
               }
               auto instantiation = instantiate(predicate);

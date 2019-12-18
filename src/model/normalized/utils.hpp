@@ -28,18 +28,15 @@ inline bool is_subtype(TypeIndex subtype, TypeIndex type,
   return false;
 }
 
-struct ParameterSelection {
-  std::vector<ParameterIndex> parameters;
-};
+using ParameterSelection = std::vector<ParameterIndex>;
 
 struct ParameterMapping {
-  ParameterSelection parameter_selection;
+  ParameterSelection parameters;
   std::vector<std::vector<ArgumentIndex>> arguments;
 };
 
-struct ParameterAssignment {
-  std::vector<std::pair<ParameterIndex, ConstantIndex>> assignments;
-};
+using ParameterAssignment =
+    std::vector<std::pair<ParameterIndex, ConstantIndex>>;
 
 inline PredicateInstantiation instantiate(const Condition &predicate) noexcept {
   std::vector<ConstantIndex> args;
@@ -90,7 +87,7 @@ inline Action ground(const ParameterAssignment &assignment,
                      const Action &action) noexcept {
   Action new_action;
   new_action.parameters = action.parameters;
-  for (auto [p, c] : assignment.assignments) {
+  for (auto [p, c] : assignment) {
     new_action.parameters[p].set(c);
   }
   new_action.pre_instantiated = action.pre_instantiated;
@@ -128,7 +125,7 @@ inline ParameterMapping get_mapping(const Action &action,
   ParameterMapping mapping;
   for (size_t i = 0; i < action.parameters.size(); ++i) {
     if (!parameter_matches[i].empty()) {
-      mapping.parameter_selection.parameters.emplace_back(i);
+      mapping.parameters.emplace_back(i);
       mapping.arguments.push_back(std::move(parameter_matches[i]));
     }
   }
@@ -148,7 +145,7 @@ get_referenced_parameters(const Action &action,
   ParameterSelection selection;
   for (size_t i = 0; i < action.parameters.size(); ++i) {
     if (parameter_matches[i]) {
-      selection.parameters.emplace_back(i);
+      selection.emplace_back(i);
     }
   }
   return selection;
@@ -157,12 +154,11 @@ get_referenced_parameters(const Action &action,
 inline ParameterAssignment
 get_assignment(const ParameterMapping &mapping,
                const std::vector<ConstantIndex> &arguments) noexcept {
-  assert(mapping.parameter_selection.parameters.size() == arguments.size());
+  assert(mapping.parameters.size() == arguments.size());
   ParameterAssignment assignment;
-  assignment.assignments.reserve(mapping.parameter_selection.parameters.size());
-  for (size_t i = 0; i < mapping.parameter_selection.parameters.size(); ++i) {
-    assignment.assignments.push_back(
-        {mapping.parameter_selection.parameters[i], arguments[i]});
+  assignment.reserve(mapping.parameters.size());
+  for (size_t i = 0; i < mapping.parameters.size(); ++i) {
+    assignment.push_back({mapping.parameters[i], arguments[i]});
   }
   return assignment;
 }
@@ -228,12 +224,44 @@ void for_each_instantiation(const Predicate &predicate, Function &&f,
 }
 
 template <typename Function>
-void for_each_action_instantiation(const ParameterSelection &selection,
-                                   const Action &action, Function &&f,
-                                   const Problem &problem) {
+void for_each_instantiation(const ParameterMapping &mapping,
+                            const Condition &condition, const Action &action,
+                            Function &&f, const Problem &problem) {
   std::vector<size_t> argument_size_list;
-  argument_size_list.reserve(selection.parameters.size());
-  for (auto p : selection.parameters) {
+  argument_size_list.reserve(mapping.parameters.size());
+  for (auto p : mapping.parameters) {
+    assert(!action.get(p).is_constant());
+    argument_size_list.push_back(
+        problem.constants_by_type[action.get(p).get_type()].size());
+  }
+
+  auto combination_iterator = CombinationIterator{argument_size_list};
+
+  while (!combination_iterator.end()) {
+    Condition new_condition = condition;
+    const auto &combination = *combination_iterator;
+    for (size_t i = 0; i < combination.size(); ++i) {
+      assert(!action.get(mapping.parameters[i]).is_constant());
+      auto type = action.get(mapping.parameters[i]).get_type();
+      for (auto a : mapping.arguments[i]) {
+        assert(new_condition.arguments[a].get_parameter() ==
+               mapping.parameters[i]);
+        new_condition.arguments[a].set(
+            problem.constants_by_type[type][combination[i]]);
+      }
+    }
+    f(instantiate(new_condition));
+    ++combination_iterator;
+  }
+}
+
+template <typename Function>
+void for_each_instantiation(const ParameterSelection &selection,
+                            const Action &action, Function &&f,
+                            const Problem &problem) {
+  std::vector<size_t> argument_size_list;
+  argument_size_list.reserve(selection.size());
+  for (auto p : selection) {
     assert(!action.get(p).is_constant());
     argument_size_list.push_back(
         problem.constants_by_type[action.get(p).get_type()].size());
@@ -244,13 +272,12 @@ void for_each_action_instantiation(const ParameterSelection &selection,
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;
     ParameterAssignment assignment;
-    assignment.assignments.reserve(combination.size());
+    assignment.reserve(combination.size());
     for (size_t i = 0; i < combination.size(); ++i) {
-      assert(!action.get(selection.parameters[i]).is_constant());
-      auto type = action.get(selection.parameters[i]).get_type();
-      assignment.assignments.emplace_back(
-          selection.parameters[i],
-          problem.constants_by_type[type][combination[i]]);
+      assert(!action.get(selection[i]).is_constant());
+      auto type = action.get(selection[i]).get_type();
+      assignment.emplace_back(selection[i],
+                              problem.constants_by_type[type][combination[i]]);
     }
     f(std::move(assignment));
     ++combination_iterator;
