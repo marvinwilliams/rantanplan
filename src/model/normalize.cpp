@@ -25,6 +25,12 @@ normalize_atomic_condition(const parsed::BaseAtomicCondition &condition,
     auto c = std::get<const parsed::Constant *>(a);
     result.arguments.emplace_back(
         normalized::ConstantIndex{problem.get_index(c)});
+    /* if (auto c = std::get_if<const parsed::Constant *>(&a)) { */
+    /*   result.arguments.emplace_back( */
+    /*       normalized::ConstantIndex{problem.get_index(*c)}); */
+    /* } else { */
+    /*   assert(false); */
+    /* } */
   }
   result.positive = condition.positive();
 
@@ -110,7 +116,7 @@ normalize_action(const parsed::Action &action,
               normalized_condition.positive);
         } else {
           new_action.preconditions.push_back(std::move(normalized_condition));
-        }
+       }
       }
       for (const auto &c : effects) {
         auto normalized_condition =

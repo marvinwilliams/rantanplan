@@ -20,12 +20,10 @@ Support::Support(const Problem &problem) noexcept : problem_{problem} {
                         return sum + get_num_instantiated(p, problem);
                       });
   instantiations_.reserve(num_instantations_);
-  LOG_INFO(logger, "The problem has %u predicates", num_instantations_);
   init_.reserve(problem_.init.size());
   for (const auto &predicate : problem_.init) {
-    auto [it, success] =
-        instantiations_.try_emplace(predicate, instantiations_.size());
-    init_.insert(it->second);
+    auto id = get_id(predicate);
+    init_.insert(id);
   }
   LOG_INFO(logger, "Computing predicate support...");
   set_predicate_support();
@@ -38,25 +36,28 @@ void Support::set_predicate_support() noexcept {
     for (auto is_effect : {true, false}) {
       for (const auto &[predicate, positive] :
            (is_effect ? action.eff_instantiated : action.pre_instantiated)) {
-        auto [it, success] =
-            instantiations_.try_emplace(predicate, instantiations_.size());
-        select_support(it->second, positive, is_effect)
+        auto id = get_id(predicate);
+        select_support(id, positive, is_effect)
             .emplace_back(ActionIndex{i}, ParameterAssignment{});
       }
 
-      for (const auto &predicate :
+      for (const auto &condition :
            is_effect ? action.effects : action.preconditions) {
+        auto mapping = get_mapping(action, condition);
         for_each_instantiation(
-            get_referenced_parameters(action, predicate), action,
-            [&](ParameterAssignment assignment) {
-              auto parameters = action.parameters;
-              for (auto [p, c] : assignment) {
-                parameters[p].set(c);
+            mapping.parameters, action,
+            [&](auto assignment) {
+              auto new_condition = condition;
+              for (size_t i = 0; i < mapping.parameters.size(); ++i) {
+                assert(assignment[i].first == mapping.parameters[i]);
+                for (auto a : mapping.arguments[i]) {
+                  assert(new_condition.arguments[a].get_parameter() ==
+                         assignment[i].first);
+                  new_condition.arguments[a].set(assignment[i].second);
+                }
               }
-              auto instantiation = instantiate(predicate);
-              auto [it, success] = instantiations_.try_emplace(
-                  instantiation, instantiations_.size());
-              select_support(it->second, predicate.positive, is_effect)
+              auto id = get_id(instantiate(new_condition));
+              select_support(id, new_condition.positive, is_effect)
                   .emplace_back(ActionIndex{i}, std::move(assignment));
             },
             problem_);

@@ -38,14 +38,14 @@ struct ParameterMapping {
 using ParameterAssignment =
     std::vector<std::pair<ParameterIndex, ConstantIndex>>;
 
-inline PredicateInstantiation instantiate(const Condition &predicate) noexcept {
+inline PredicateInstantiation instantiate(const Condition &condition) noexcept {
   std::vector<ConstantIndex> args;
-  args.reserve(predicate.arguments.size());
-  for (const auto &arg : predicate.arguments) {
+  args.reserve(condition.arguments.size());
+  for (const auto &arg : condition.arguments) {
     assert(arg.is_constant());
     args.push_back(arg.get_constant());
   }
-  return PredicateInstantiation{predicate.definition, std::move(args)};
+  return PredicateInstantiation{condition.definition, std::move(args)};
 }
 
 inline PredicateInstantiation instantiate(const Condition &predicate,

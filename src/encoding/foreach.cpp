@@ -16,8 +16,8 @@ logging::Logger ForeachEncoder::logger{"Foreach"};
 ForeachEncoder::ForeachEncoder(const Problem &problem,
                                const Config &config) noexcept
     : problem_{problem}, support_{problem_} {
-  init_sat_vars();
   LOG_INFO(logger, "Encoding...");
+  init_sat_vars();
   encode_init();
   encode_actions();
   parameter_implies_predicate();
@@ -25,7 +25,7 @@ ForeachEncoder::ForeachEncoder(const Problem &problem,
   frame_axioms(config.dnf_threshold);
   assume_goal();
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
-  LOG_INFO(logger, "Representation uses %u variables", num_vars_);
+  LOG_INFO(logger, "Representation uses %u variables per step", num_vars_);
 }
 
 int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {

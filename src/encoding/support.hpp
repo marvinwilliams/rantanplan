@@ -48,6 +48,7 @@ public:
   get_id(const normalized::PredicateInstantiation &predicate) const noexcept {
     auto [it, success] =
         instantiations_.try_emplace(predicate, instantiations_.size());
+    assert(it->second < num_instantations_);
     return it->second;
   }
 

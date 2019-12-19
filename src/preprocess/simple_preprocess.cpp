@@ -314,9 +314,7 @@ Problem Preprocessor::preprocess(const Config &config) noexcept {
   };
 
   float progress = 0.0f;
-  while (refinement_possible_ &&
-         (config.preprocess_progress == 1.0f ||
-          progress < config.preprocess_progress)) {
+  while (refinement_possible_ && progress <= config.preprocess_progress) {
     if (config.preprocess_priority == Config::PreprocessPriority::New) {
       progress = refine(select_min_new);
     } else if (config.preprocess_priority ==
