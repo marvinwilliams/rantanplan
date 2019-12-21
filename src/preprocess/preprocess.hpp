@@ -5,9 +5,21 @@
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
+#include "planning/planner.hpp"
 #include "util/index.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <execution>
+#include <pstl/glue_execution_defs.h>
 #include <unordered_map>
+#include <utility>
+#ifdef PARALLEL
+#include <mutex>
+#include <pthread.h>
+#include <thread>
+#endif
 
 extern logging::Logger preprocess_logger;
 
@@ -20,7 +32,20 @@ public:
 
   explicit Preprocessor(const normalized::Problem &problem) noexcept;
 
+#ifdef PARALLEL
+  std::pair<normalized::Problem, Planner::Plan>
+  preprocess(const Planner &planner, const Config &config) noexcept;
+
+  void kill() {
+    std::for_each(threads_.begin(), threads_.end(), [](auto &t) {
+      auto id = t.native_handle();
+      t.detach();
+      pthread_cancel(id);
+    });
+  }
+#else
   normalized::Problem preprocess(const Config &config) noexcept;
+#endif
 
 private:
   PredicateId get_id(const normalized::PredicateInstantiation &predicate) const
@@ -44,6 +69,55 @@ private:
                      bool positive) const noexcept;
   SimplifyResult simplify(normalized::Action &action) noexcept;
 
+  template <typename Function>
+  std::vector<normalized::Action>
+  refine_action(normalized::ActionIndex action_index,
+                Function &&select_parameters, std::atomic_size_t &inst_index,
+                std::atomic_flag &changed) {
+    std::vector<normalized::Action> new_actions;
+    std::unordered_map<PredicateId, bool> not_rigid;
+    std::unordered_map<PredicateId, bool> not_effectless;
+    uint_fast64_t pruned_actions = 0;
+    uint_fast64_t current_actions = 0;
+    size_t i;
+    while ((i = inst_index++ <
+                partially_instantiated_actions_[action_index].size())) {
+      auto &action = partially_instantiated_actions_[action_index][i];
+      if (auto result = simplify(action); result != SimplifyResult::Unchanged) {
+        changed.test_and_set();
+        if (result == SimplifyResult::Invalid) {
+          pruned_actions += normalized::get_num_instantiated(action, problem_);
+          continue;
+        }
+      }
+
+      auto selection = select_parameters(action);
+
+      if (selection.empty()) {
+        new_actions.push_back(action);
+        current_actions += 1;
+        continue;
+      }
+
+      changed.test_and_set();
+
+      for_each_instantiation(
+          selection, action,
+          [&](const normalized::ParameterAssignment &assignment) {
+            auto new_action = ground(assignment, action);
+            if (auto result = simplify(new_action);
+                result != SimplifyResult::Invalid) {
+              new_actions.push_back(std::move(new_action));
+              current_actions += 1;
+            } else {
+              pruned_actions +=
+                  normalized::get_num_instantiated(new_action, problem_);
+            }
+          },
+          problem_);
+    }
+  }
+
   template <typename Function> float refine(Function &&select_parameters) {
     LOG_INFO(preprocess_logger, "New grounding iteration with %lu action(s)",
              std::accumulate(partially_instantiated_actions_.begin(),
@@ -59,40 +133,6 @@ private:
     for (size_t i = 0; i < problem_.actions.size(); ++i) {
       std::vector<normalized::Action> new_actions;
       for (auto &action : partially_instantiated_actions_[i]) {
-        if (auto result = simplify(action);
-            result != SimplifyResult::Unchanged) {
-          refinement_possible_ = true;
-          if (result == SimplifyResult::Invalid) {
-            num_pruned_actions_ +=
-                normalized::get_num_instantiated(action, problem_);
-            continue;
-          }
-        }
-
-        auto selection = select_parameters(action);
-
-        if (selection.empty()) {
-          new_actions.push_back(action);
-          num_current_actions += 1;
-          continue;
-        }
-
-        refinement_possible_ = true;
-
-        for_each_instantiation(
-            selection, action,
-            [&](const normalized::ParameterAssignment &assignment) {
-              auto new_action = ground(assignment, action);
-              if (auto result = simplify(new_action);
-                  result != SimplifyResult::Invalid) {
-                new_actions.push_back(std::move(new_action));
-                num_current_actions += 1;
-              } else {
-                num_pruned_actions_ +=
-                    normalized::get_num_instantiated(new_action, problem_);
-              }
-            },
-            problem_);
       }
       partially_instantiated_actions_[i] = std::move(new_actions);
     }
@@ -102,6 +142,8 @@ private:
     return static_cast<float>(num_current_actions + num_pruned_actions_) /
            static_cast<float>(num_actions_);
   }
+
+  normalized::Problem to_problem() const noexcept;
 
   bool refinement_possible_ = true;
   uint_fast64_t num_actions_;
@@ -113,9 +155,13 @@ private:
   std::vector<PredicateId> init_;
   std::vector<std::pair<PredicateId, bool>> goal_;
   mutable std::unordered_map<PredicateId, bool> rigid_;
-  mutable std::unordered_map<PredicateId, bool> rigid_tested_;
   mutable std::unordered_map<PredicateId, bool> effectless_;
-  mutable std::unordered_map<PredicateId, bool> effectless_tested_;
+#ifdef PARALLEL
+  std::vector<std::thread> threads_;
+  unsigned int num_free_threads_;
+  mutable std::mutex rigid_mutex_;
+  mutable std::mutex effectless_mutex_;
+#endif
   const normalized::Problem &problem_;
 };
 

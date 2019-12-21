@@ -8,6 +8,9 @@
 #include <cassert>
 #include <utility>
 #include <vector>
+#ifdef PARALLEL
+#include <atomic>
+#endif
 
 class Planner {
 public:
@@ -17,11 +20,16 @@ public:
   static logging::Logger logger;
 
   virtual ~Planner() = default;
+#ifdef PARALLEL
+  virtual Plan plan(const normalized::Problem &problem, const Config &config,
+                    std::atomic_bool &plan_found) const = 0;
+#else
   virtual Plan plan(const normalized::Problem &problem,
-                    const Config &config) = 0;
+                    const Config &config) const = 0;
+#endif
 
-  std::string to_string(const Plan &plan,
-                        const normalized::Problem &problem) const noexcept;
+  static std::string to_string(const Plan &plan,
+                               const normalized::Problem &problem) noexcept;
 };
 
 #endif /* end of include guard: PLANNER_HPP */

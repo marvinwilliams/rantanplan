@@ -31,7 +31,7 @@ public:
   static constexpr unsigned int SAT = 1;
   static constexpr unsigned int UNSAT = 2;
 
-  explicit ForeachEncoder(const normalized::Problem &problem,
+  explicit ForeachEncoder(const normalized::Problem & problem,
                           const Config &config) noexcept;
 
   int get_sat_var(Literal literal, unsigned int step) const;
@@ -69,7 +69,7 @@ private:
   Formula transition_clauses_;
   Formula goal_;
 
-  normalized::Problem problem_;
+  const normalized::Problem& problem_;
   Support support_;
 };
 

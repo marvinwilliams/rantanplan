@@ -16,5 +16,10 @@ inline constexpr bool DEBUG_LOG_ACTIVE = true;
 inline constexpr bool DEBUG_LOG_ACTIVE = false;
 #endif
 
+#ifdef PARALLEL
+inline constexpr bool PARALLEL_MODE = true;
+#else
+inline constexpr bool PARALLEL_MODE = false;
+#endif
 
 #endif /* end of include guard: BUILD_CONFIG_HPP */

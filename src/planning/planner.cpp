@@ -7,8 +7,7 @@
 logging::Logger Planner::logger{"Planner"};
 
 std::string Planner::to_string(const Plan &plan,
-                               const normalized::Problem &problem) const
-    noexcept {
+                               const normalized::Problem &problem) noexcept {
   std::stringstream ss;
   unsigned int step = 0;
   for (auto [action, arguments] : plan) {

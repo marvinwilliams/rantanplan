@@ -10,6 +10,9 @@
 #include "sat/solver.hpp"
 
 #include <memory>
+#ifdef PARALLEL
+#include <atomic>
+#endif
 
 template <typename Encoding> class SatPlanner final : public Planner {
 public:
@@ -22,18 +25,31 @@ public:
     return std::make_unique<sat::IpasirSolver>();
   }
 
+#ifdef PARALLEL
+  Planner::Plan plan(const normalized::Problem &problem, const Config &config,
+                     std::atomic_bool &plan_found) const noexcept override {
+    Encoding encoding{problem, config};
+    return solve(encoding, config, plan_found);
+  }
+#else
   Planner::Plan plan(const normalized::Problem &problem,
-                     const Config &config) noexcept override {
+                     const Config &config) const noexcept override {
     Encoding encoding{problem, config};
     return solve(encoding, config);
   }
+#endif
 
 protected:
   SatPlanner &operator=(const SatPlanner &planner) = default;
   SatPlanner &operator=(SatPlanner &&planner) = default;
 
 private:
+#ifdef PARALLEL
+  static Plan solve(const Encoding &encoding, const Config &config,
+                    std::atomic_bool &plan_found) noexcept {
+#else
   static Plan solve(const Encoding &encoding, const Config &config) noexcept {
+#endif
     auto solver = get_solver(config);
     assert(solver);
     *solver << static_cast<int>(Encoding::SAT) << 0;
@@ -43,7 +59,11 @@ private:
 
     unsigned int step = 0;
     float current_step = 1.0f;
+#ifdef PARALLEL
+    while (!plan_found && (config.max_steps == 0 || step < config.max_steps)) {
+#else
     while (config.max_steps == 0 || step < config.max_steps) {
+#endif
       do {
         add_formula(solver.get(), encoding, encoding.get_transition_clauses(),
                     step);
@@ -59,8 +79,13 @@ private:
       assume_goal(solver.get(), encoding, step);
       auto model = solver->solve();
       if (model) {
-        PRINT_INFO("Plan found");
-        return encoding.extract_plan(*model, step);
+        bool found = false;
+        if (plan_found.compare_exchange_strong(found, true)) {
+          PRINT_INFO("Plan found");
+          return encoding.extract_plan(*model, step);
+        } else {
+          return {};
+        }
       }
       current_step *= config.step_factor;
     }

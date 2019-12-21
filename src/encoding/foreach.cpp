@@ -15,7 +15,7 @@ logging::Logger ForeachEncoder::logger{"Foreach"};
 
 ForeachEncoder::ForeachEncoder(const Problem &problem,
                                const Config &config) noexcept
-    : problem_{problem}, support_{problem_} {
+    : problem_{problem}, support_{problem} {
   LOG_INFO(logger, "Encoding...");
   init_sat_vars();
   encode_init();

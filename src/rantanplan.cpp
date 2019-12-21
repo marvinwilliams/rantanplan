@@ -65,22 +65,6 @@ options::Options set_options(const std::string &name) {
                                 "\'"};
         }
       });
-  options.add_option<Config::PreprocessMode>(
-      {"preprocess-mode", 'm'}, "Select preprocess mode",
-      [](auto input, auto &mode) {
-        if (input == "none") {
-          mode = Config::PreprocessMode::None;
-        } else if (input == "rigid") {
-          mode = Config::PreprocessMode::Rigid;
-        } else if (input == "precond") {
-          mode = Config::PreprocessMode::Preconditions;
-        } else if (input == "full") {
-          mode = Config::PreprocessMode::Full;
-        } else {
-          throw ConfigException{"Unknown preprocessing mode \'" +
-                                std::string{input} + "\'"};
-        }
-      });
 
   options.add_option<Config::PreprocessPriority>(
       {"preprocess-priority", 'p'}, "Select preprocessing priority",
@@ -108,8 +92,12 @@ options::Options set_options(const std::string &name) {
         }
       });
   options.add_option<float>({"step-factor", 'f'}, "Step factor");
-  options.add_option<float>({"preprocess-progress", 'i'},
-                            "Preprocessing progress");
+  if (PARALLEL_MODE) {
+    options.add_option<unsigned int>({"num-threads", 't'}, "Number of threads");
+  } else {
+    options.add_option<float>({"preprocess-progress", 'i'},
+                              "Preprocessing progress");
+  }
   options.add_option<std::string>({"plan-file", 'o'},
                                   "File to output the plan to");
   options.add_option<bool>({"logging", 'v'}, "Enable debug logging");
@@ -128,59 +116,62 @@ options::Options set_options(const std::string &name) {
 }
 
 void set_config(const options::Options &options, Config &config) {
-  const auto &domain = options.get<std::string>("domain");
-  if (domain.count > 0) {
+
+  if (const auto &domain = options.get<std::string>("domain");
+      domain.count > 0) {
     config.domain_file = domain.value;
   } else {
     throw ConfigException{"Domain file required"};
   }
 
-  const auto &problem = options.get<std::string>("problem");
-  if (problem.count > 0) {
+  if (const auto &problem = options.get<std::string>("problem");
+      problem.count > 0) {
     config.problem_file = problem.value;
   } else {
     throw ConfigException{"Problem file required"};
   }
-  const auto &mode = options.get<Config::PlanningMode>("mode");
-  if (mode.count > 0) {
+
+  if (const auto &mode = options.get<Config::PlanningMode>("mode");
+      mode.count > 0) {
     config.mode = mode.value;
   }
 
-  const auto &planner = options.get<Config::Planner>("planner");
-  if (planner.count > 0) {
+  if (const auto &planner = options.get<Config::Planner>("planner");
+      planner.count > 0) {
     config.planner = planner.value;
   }
 
-  const auto &preprocess_mode =
-      options.get<Config::PreprocessMode>("preprocess-mode");
-  if (preprocess_mode.count > 0) {
-    config.preprocess_mode = preprocess_mode.value;
-  }
-
-  const auto &preprocess_priority =
-      options.get<Config::PreprocessPriority>("preprocess-priority");
-  if (preprocess_priority.count > 0) {
+  if (const auto &preprocess_priority =
+          options.get<Config::PreprocessPriority>("preprocess-priority");
+      preprocess_priority.count > 0) {
     config.preprocess_priority = preprocess_priority.value;
   }
 
-  const auto &solver = options.get<Config::Solver>("solver");
-  if (solver.count > 0) {
+  if (const auto &solver = options.get<Config::Solver>("solver");
+      solver.count > 0) {
     config.solver = solver.value;
   }
 
-  const auto &factor = options.get<float>("step-factor");
-  if (factor.count > 0) {
+  if (const auto &factor = options.get<float>("step-factor");
+      factor.count > 0) {
     config.step_factor = factor.value;
   }
 
-  const auto &iter = options.get<float>("preprocess-progress");
-  if (iter.count > 0) {
+#ifdef PARALLEL
+  if (const auto &threads = options.get<unsigned int>("num-threads");
+      threads.count > 0) {
+    config.num_threads = threads.value;
+  }
+#else
+  if (const auto &iter = options.get<float>("preprocess-progress");
+      iter.count > 0) {
     config.preprocess_progress =
         iter.value > 1.0f ? 1.0f : iter.value < 0.0f ? 0.0f : iter.value;
   }
+#endif
 
-  const auto &plan_file = options.get<std::string>("plan-file");
-  if (plan_file.count > 0) {
+  if (const auto &plan_file = options.get<std::string>("plan-file");
+      plan_file.count > 0) {
     config.plan_file = plan_file.value;
   }
 
@@ -298,13 +289,25 @@ int main(int argc, char *argv[]) {
     PRINT_INFO("Done");
     return 0;
   }
-  if (config.preprocess_mode != Config::PreprocessMode::None) {
+#ifdef PARALLEL
+  PRINT_INFO("Preprocessing...");
+  Preprocessor preprocessor{problem};
+  auto result = preprocessor.preprocess(*get_planner(config), config);
+  problem = std::move(result.first);
+  auto plan = std::move(result.second);
+#else
+  if (config.preprocess_progress > 0.0f) {
     PRINT_INFO("Preprocessing...");
     Preprocessor preprocessor{problem};
     problem = preprocessor.preprocess(config);
   } else {
     PRINT_INFO("Skipping preprocessing");
   }
+
+  if (PARALLEL_MODE) {
+    return 0;
+  }
+
   LOG_INFO(main_logger, "Problem has %lu actions", problem.actions.size());
   if (config.mode == Config::PlanningMode::Preprocess) {
     PRINT_INFO("Done");
@@ -315,18 +318,23 @@ int main(int argc, char *argv[]) {
 
   PRINT_INFO("Planning...");
   auto plan = planner->plan(problem, config);
+#endif
 
   if (plan.empty()) {
     return 1;
   }
 
   if (config.plan_file == "") {
-    std::cout << planner->to_string(plan, problem) << std::endl;
+    std::cout << Planner::to_string(plan, problem) << std::endl;
   } else {
     std::ofstream s{config.plan_file};
-    s << planner->to_string(plan, problem);
+    s << Planner::to_string(plan, problem);
   }
+
   PRINT_INFO("Done");
 
+#ifdef PARALLEL
+  preprocessor.kill();
+#endif
   return 0;
 }

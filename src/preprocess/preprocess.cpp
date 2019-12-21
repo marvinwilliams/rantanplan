@@ -1,8 +1,10 @@
+#include "preprocess/preprocess.hpp"
+#include "build_config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
 #include "model/to_string.hpp"
-#include "preprocess/preprocess.hpp"
+#include "planning/planner.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -10,7 +12,11 @@
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
+#ifdef PARALLEL
+#include <future>
+#endif
 
 logging::Logger preprocess_logger = logging::Logger{"Preprocess"};
 
@@ -161,19 +167,14 @@ bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
     return true;
   }
 
-  if (auto it = rigid_tested_.find(id);
-      it != rigid_tested_.end() && it->second == positive) {
-    return false;
-  }
-
-  rigid_tested_.insert({id, positive});
   if (std::binary_search(init_.begin(), init_.end(), id) != positive) {
     return false;
   }
+
   if (trivially_rigid_[predicate.definition]) {
-    rigid_.insert({id, positive});
     return true;
   }
+
   for (size_t i = 0; i < problem_.actions.size(); ++i) {
     const auto &base_action = problem_.actions[i];
     if (!has_effect(base_action, predicate, !positive)) {
@@ -185,7 +186,6 @@ bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
       }
     }
   }
-  rigid_.insert({id, positive});
   return true;
 }
 
@@ -199,18 +199,11 @@ bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
     return true;
   }
 
-  if (auto it = effectless_tested_.find(id);
-      it != effectless_tested_.end() && it->second == positive) {
-    return false;
-  }
-
-  effectless_tested_.insert({id, positive});
   if (std::binary_search(goal_.begin(), goal_.end(),
                          std::make_pair(id, positive))) {
     return false;
   }
   if (trivially_effectless_[predicate.definition]) {
-    effectless_.insert({id, positive});
     return true;
   }
   for (size_t i = 0; i < problem_.actions.size(); ++i) {
@@ -224,7 +217,6 @@ bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
       }
     }
   }
-  effectless_.insert({id, positive});
   return true;
 }
 
@@ -263,7 +255,14 @@ Preprocessor::SimplifyResult Preprocessor::simplify(Action &action) noexcept {
   return changed ? SimplifyResult::Changed : SimplifyResult::Unchanged;
 }
 
+#ifdef PARALLEL
+std::pair<Problem, Planner::Plan>
+Preprocessor::preprocess(const Planner &planner,
+                         const Config &config) noexcept {
+#else
 Problem Preprocessor::preprocess(const Config &config) noexcept {
+#endif
+
   auto select_free = [](const Action &action) {
     auto first_free =
         std::find_if(action.parameters.begin(), action.parameters.end(),
@@ -312,19 +311,79 @@ Problem Preprocessor::preprocess(const Config &config) noexcept {
 
     return get_mapping(action, *max).parameters;
   };
+  auto call_refine = [&]() {
+    switch (config.preprocess_priority) {
+    case Config::PreprocessPriority::New:
+      return refine(select_min_new);
+    case Config::PreprocessPriority::Rigid:
+      return refine(select_max_rigid);
+    case Config::PreprocessPriority::Free:
+      return refine(select_free);
+    }
+    return refine(select_free);
+  };
 
+#ifdef PARALLEL
+  std::atomic_bool plan_found = false;
+  threads_.clear();
+  if (config.num_threads <= 1) {
+    if (config.num_threads == 1) {
+      while (refinement_possible_) {
+        call_refine();
+      }
+    }
+    auto problem = to_problem();
+    auto plan = planner.plan(problem, config, plan_found);
+    return {std::move(problem), std::move(plan)};
+  } else {
+    std::promise<std::pair<Problem, Planner::Plan>> plan_promise;
+    auto plan_future = plan_promise.get_future();
+    float progress_steps = 1.0f / (static_cast<float>(config.num_threads) - 1);
+    float progress = 0.0f;
+    num_free_threads_ = config.num_threads;
+    PRINT_INFO("Start planner with progress %f", progress);
+    threads_.emplace_back([&, problem = to_problem()]() {
+      auto plan = planner.plan(problem, config, plan_found);
+      if (!plan.empty()) {
+        plan_promise.set_value(
+            std::make_pair(std::move(problem), std::move(plan)));
+      }
+    });
+    --num_free_threads_;
+    float next_progress = progress_steps;
+    while (refinement_possible_ && !plan_found) {
+      while (refinement_possible_ && !plan_found &&
+             (progress < next_progress || progress == 1.0f)) {
+        progress = call_refine();
+      }
+      if (plan_found) {
+        break;
+      }
+      PRINT_INFO("Start planner with progress %f", progress);
+      threads_.emplace_back([&, problem = to_problem()]() {
+        auto plan = planner.plan(problem, config, plan_found);
+        if (!plan.empty()) {
+          plan_promise.set_value(
+              std::make_pair(std::move(problem), std::move(plan)));
+        }
+      });
+      --num_free_threads_;
+      do {
+        next_progress += progress_steps;
+      } while (next_progress <= progress);
+    }
+    return plan_future.get();
+  }
+#else
   float progress = 0.0f;
   while (refinement_possible_ && progress <= config.preprocess_progress) {
-    if (config.preprocess_priority == Config::PreprocessPriority::New) {
-      progress = refine(select_min_new);
-    } else if (config.preprocess_priority ==
-               Config::PreprocessPriority::Rigid) {
-      progress = refine(select_max_rigid);
-    } else if (config.preprocess_priority == Config::PreprocessPriority::Free) {
-      progress = refine(select_free);
-    }
+    progress = call_refine();
   }
+  return to_problem();
+#endif
+}
 
+Problem Preprocessor::to_problem() const noexcept {
   Problem preprocessed_problem{};
   preprocessed_problem.domain_name = problem_.domain_name;
   preprocessed_problem.problem_name = problem_.problem_name;

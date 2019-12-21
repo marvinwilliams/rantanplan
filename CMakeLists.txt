@@ -81,6 +81,7 @@ target_link_libraries(rantanplan_glucose PRIVATE "ipasirglucose4")
 option(STATIC_GLIBC "Link statically against glibc" OFF)
 option(DEBUG_BUILD "Compile in debug mode" OFF)
 option(DEBUG_LOG "Compile with debug logging capability" OFF)
+option(PARALLEL_MODE "Compile with parallel capability" OFF)
 
 if (STATIC_GLIBC)
   target_link_libraries(rantanplan_glucose PRIVATE -static-libgcc -static-libstdc++)
@@ -106,6 +107,11 @@ endif()
 
 if(DEBUG_LOG)
   add_definitions(-DDEBUG_LOG)
+endif()
+
+if(PARALLEL_MODE)
+  add_definitions(-DPARALLEL)
+  target_link_libraries(rantanplan_glucose PRIVATE -lpthread)
 endif()
 
 install(TARGETS rantanplan_glucose DESTINATION "${PROJECT_SOURCE_DIR}/bin")
