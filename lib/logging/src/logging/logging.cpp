@@ -1,7 +1,7 @@
-#include "build_config.hpp"
 #include "logging/logging.hpp"
+#include "util/timer.hpp"
+#include "build_config.hpp"
 
-#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -18,8 +18,6 @@ Logger default_logger = []() {
   logger.add_appender(default_appender);
   return logger;
 }();
-
-static const auto start_time = std::chrono::steady_clock::now();
 
 inline static bool is_tty(std::FILE *stream) noexcept {
   return isatty(fileno(stream)) != 0;
@@ -71,9 +69,6 @@ void Logger::log(Level level, const char *file, unsigned int line,
   if (appenders_.empty()) {
     return;
   }
-  const auto uptime = std::chrono::duration<double>(
-                          std::chrono::steady_clock::now() - start_time)
-                          .count();
   va_list args;
   va_start(args, format);
   va_list args_copy;
@@ -88,6 +83,7 @@ void Logger::log(Level level, const char *file, unsigned int line,
   std::time_t time = std::time(nullptr);
   std::strftime(time_buffer.data(), time_buffer.size(), "%F %T",
                 std::localtime(&time));
+  auto uptime = util::global_timer.get_elapsed_time();
   auto format_message = [&](char *buffer, size_t length) {
     if (line == 0) {
       return snprintf(buffer, length, "%s (%.3f) %s [%s]: %s",
@@ -95,9 +91,8 @@ void Logger::log(Level level, const char *file, unsigned int line,
                       level_name(level), msg_buffer.data());
     } else {
       return snprintf(buffer, length, "%s (%.3f) %s:%u %s [%s]: %s",
-                      time_buffer.data(), uptime,
-                      std::filesystem::relative(file).c_str(), line,
-                      name_.data(), level_name(level), msg_buffer.data());
+                      time_buffer.data(), uptime, file, line, name_.data(),
+                      level_name(level), msg_buffer.data());
     }
   };
   auto result_length = static_cast<unsigned int>(format_message(nullptr, 0));

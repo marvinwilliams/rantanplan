@@ -25,7 +25,7 @@ struct Type {
       : name{std::move(name)}, supertype{supertype} {}
 };
 
-using TypeHandle = Handle<Type, Problem>;
+using TypeHandle = util::Handle<Type, Problem>;
 
 inline bool is_subtype(const Type *subtype, const Type *supertype) {
   if (subtype == supertype) {
@@ -47,7 +47,7 @@ struct Predicate {
   Predicate(std::string name) : name{std::move(name)} {}
 };
 
-using PredicateHandle = Handle<Predicate, Problem>;
+using PredicateHandle = util::Handle<Predicate, Problem>;
 
 struct Constant {
   std::string name;
@@ -57,7 +57,7 @@ struct Constant {
       : name{std::move(name)}, type{type} {}
 };
 
-using ConstantHandle = Handle<Constant, Problem>;
+using ConstantHandle = util::Handle<Constant, Problem>;
 
 struct Parameter {
   std::string name;
@@ -69,31 +69,8 @@ struct Parameter {
 
 struct Action;
 
-using ActionHandle = Handle<Action, Problem>;
-using ParameterHandle = Handle<Parameter, Action>;
-
-/* template <> class ParameterHandle { */
-/* public: */
-/*   friend Action; */
-
-/*   const Parameter *get() { return p_; } */
-/*   const Action *get_action() { return action_; } */
-/*   const Problem *get_problem() { return problem_; } */
-/*   const Parameter &operator*() { return *p_; } */
-/*   const Parameter *operator->() { return p_; } */
-/*   bool operator==(const ParameterHandle &other) { */
-/*     return p_ == other.p_ && action_ == other.action_ && */
-/*            problem_ == other.problem_; */
-/*   } */
-
-/* private: */
-/*   Handle(const Parameter *p, const Action *action, const Problem *problem) */
-/*       : p_{p}, action_{action}, problem_{problem} {} */
-
-/*   const Parameter *p_; */
-/*   const Action *action_; */
-/*   const Problem *problem_; */
-/* }; */
+using ActionHandle = util::Handle<Action, Problem>;
+using ParameterHandle = util::Handle<Parameter, Action>;
 
 class Condition : public std::enable_shared_from_this<Condition> {
 public:

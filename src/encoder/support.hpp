@@ -16,7 +16,7 @@
 class Support {
 public:
   struct predicate_id_t {};
-  using PredicateId = Index<predicate_id_t>;
+  using PredicateId = util::Index<predicate_id_t>;
   struct ConditionSupport {
     std::vector<
         std::pair<normalized::ActionIndex, normalized::ParameterAssignment>>
@@ -32,13 +32,11 @@ public:
         neg_effect;
   };
 
-  static logging::Logger logger;
-
   explicit Support(const normalized::Problem &problem_) noexcept;
-  Support(const Support &support) = delete;
-  Support &operator=(const Support &support) = delete;
-  Support(Support &&support) = default;
-  Support &operator=(Support &&support) = delete;
+
+  inline const normalized::Problem &get_problem() const noexcept {
+    return problem_;
+  }
 
   inline size_t get_num_instantiations() const noexcept {
     return num_instantations_;

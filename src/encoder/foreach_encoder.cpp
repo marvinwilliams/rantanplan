@@ -1,9 +1,9 @@
-#include "encoding/foreach.hpp"
+#include "encoder/foreach_encoder.hpp"
 #include "config.hpp"
-#include "encoding/support.hpp"
+#include "encoder/support.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
-#include "planning/planner.hpp"
+#include "planner/planner.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -13,42 +13,46 @@ using namespace normalized;
 
 logging::Logger ForeachEncoder::logger{"Foreach"};
 
-ForeachEncoder::ForeachEncoder(const Problem &problem,
+ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem,
                                const Config &config) noexcept
-    : problem_{problem}, support_{problem} {
+    : Encoder{problem}, config_{config}, support_{*problem} {
   LOG_INFO(logger, "Encoding...");
   init_sat_vars();
   encode_init();
   encode_actions();
   parameter_implies_predicate();
   interference();
-  frame_axioms(config.dnf_threshold);
+  frame_axioms();
   assume_goal();
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
-  LOG_INFO(logger, "Representation uses %u variables per step", num_vars_);
+  LOG_INFO(logger, "Variables per step: %u", num_vars_);
+  LOG_INFO(logger, "Init clauses: %u", init_.clauses.size());
+  LOG_INFO(logger, "Universal clauses: %u", universal_clauses_.clauses.size());
+  LOG_INFO(logger, "Transition clauses: %u",
+           transition_clauses_.clauses.size());
+  LOG_INFO(logger, "Goal clauses: %u", goal_.clauses.size());
 }
 
-int ForeachEncoder::get_sat_var(Literal literal, unsigned int step) const {
+int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
   uint_fast64_t variable = 0;
-  variable = literal.variable.sat_var;
+  variable = l.variable.sat_var;
   if (variable == DONTCARE) {
     return static_cast<int>(SAT);
   }
   if (variable == SAT || variable == UNSAT) {
-    return (literal.positive ? 1 : -1) * static_cast<int>(variable);
+    return (l.positive ? 1 : -1) * static_cast<int>(variable);
   }
-  step += literal.variable.this_step ? 0 : 1;
-  return (literal.positive ? 1 : -1) *
-         static_cast<int>(variable + step * num_vars_);
+  step += l.variable.this_step ? 0 : 1;
+  return (l.positive ? 1 : -1) * static_cast<int>(variable + step * num_vars_);
 }
 
-Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
-                                           unsigned int step) const noexcept {
-  Planner::Plan plan;
+Plan ForeachEncoder::extract_plan(const sat::Model &model,
+                                  unsigned int step) const noexcept {
+  Plan plan;
   for (unsigned int s = 0; s < step; ++s) {
-    for (size_t i = 0; i < problem_.actions.size(); ++i) {
+    for (size_t i = 0; i < problem_->actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
-        const Action &action = problem_.actions[i];
+        const Action &action = problem_->actions[i];
         std::vector<ConstantIndex> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
@@ -57,11 +61,11 @@ Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
             constants.push_back(parameter.get_constant());
           } else {
             for (size_t j = 0;
-                 j < problem_.constants_by_type[parameter.get_type()].size();
+                 j < problem_->constants_by_type[parameter.get_type()].size();
                  ++j) {
               if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
                 constants.push_back(
-                    problem_.constants_by_type[parameter.get_type()][j]);
+                    problem_->constants_by_type[parameter.get_type()][j]);
                 break;
               }
             }
@@ -75,6 +79,44 @@ Planner::Plan ForeachEncoder::extract_plan(const sat::Model &model,
   return plan;
 }
 
+void ForeachEncoder::init_sat_vars() noexcept {
+  LOG_INFO(logger, "Initializing sat variables...");
+  actions_.reserve(problem_->actions.size());
+  parameters_.resize(problem_->actions.size());
+  for (size_t i = 0; i < problem_->actions.size(); ++i) {
+    const auto &action = problem_->actions[i];
+    actions_.push_back(num_vars_++);
+
+    parameters_[i].resize(action.parameters.size());
+
+    for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
+         ++parameter_pos) {
+      const auto &parameter = action.parameters[parameter_pos];
+      if (parameter.is_constant()) {
+        continue;
+      }
+      parameters_[i][parameter_pos].reserve(
+          problem_->constants_by_type[parameter.get_type()].size());
+      for (size_t j = 0;
+           j < problem_->constants_by_type[parameter.get_type()].size(); ++j) {
+        parameters_[i][parameter_pos].push_back(num_vars_++);
+      }
+    }
+  }
+
+  predicates_.resize(support_.get_num_instantiations());
+  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+    if (support_.is_rigid(Support::PredicateId{i}, true)) {
+      predicates_[i] = SAT;
+    } else if (support_.is_rigid(Support::PredicateId{i}, false)) {
+      predicates_[i] = UNSAT;
+    } else {
+      predicates_[i] = num_vars_++;
+    }
+  }
+  LOG_INFO(logger, "Done");
+}
+
 void ForeachEncoder::encode_init() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     auto literal = Literal{Variable{predicates_[i]},
@@ -84,8 +126,8 @@ void ForeachEncoder::encode_init() noexcept {
 }
 
 void ForeachEncoder::encode_actions() noexcept {
-  for (size_t i = 0; i < problem_.actions.size(); ++i) {
-    const auto &action = problem_.actions[i];
+  for (size_t i = 0; i < problem_->actions.size(); ++i) {
+    const auto &action = problem_->actions[i];
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
@@ -93,7 +135,7 @@ void ForeachEncoder::encode_actions() noexcept {
         continue;
       }
       size_t number_arguments =
-          problem_.constants_by_type[parameter.get_type()].size();
+          problem_->constants_by_type[parameter.get_type()].size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
       auto action_var = Variable{actions_[i]};
@@ -128,9 +170,9 @@ void ForeachEncoder::parameter_implies_predicate() noexcept {
           } else {
             for (auto [parameter_index, constant_index] : assignment) {
               const auto &constants =
-                  problem_.constants_by_type[problem_.actions[action_index]
-                                                 .parameters[parameter_index]
-                                                 .get_type()];
+                  problem_->constants_by_type[problem_->actions[action_index]
+                                                  .parameters[parameter_index]
+                                                  .get_type()];
               auto it =
                   std::find(constants.begin(), constants.end(), constant_index);
               assert(it != constants.end());
@@ -170,9 +212,9 @@ void ForeachEncoder::interference() noexcept {
             } else {
               for (auto [parameter_index, constant_index] : assignment) {
                 const auto &constants =
-                    problem_.constants_by_type[problem_.actions[action_index]
-                                                   .parameters[parameter_index]
-                                                   .get_type()];
+                    problem_->constants_by_type[problem_->actions[action_index]
+                                                    .parameters[parameter_index]
+                                                    .get_type()];
                 auto it = std::find(constants.begin(), constants.end(),
                                     constant_index);
                 assert(it != constants.end());
@@ -191,7 +233,8 @@ void ForeachEncoder::interference() noexcept {
   }
 }
 
-void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
+void ForeachEncoder::frame_axioms() noexcept {
+  unsigned int num_helpers = 0;
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     for (bool positive : {true, false}) {
       size_t num_nontrivial_clauses = 0;
@@ -212,12 +255,12 @@ void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
         if (assignment.empty()) {
           dnf << Literal{Variable{actions_[action_index]}, true};
         } else if (assignment.size() == 1 ||
-                   num_nontrivial_clauses < dnf_threshold) {
+                   num_nontrivial_clauses < config_.dnf_threshold) {
           for (auto [parameter_index, constant_index] : assignment) {
             const auto &constants =
-                problem_.constants_by_type[problem_.actions[action_index]
-                                               .parameters[parameter_index]
-                                               .get_type()];
+                problem_->constants_by_type[problem_->actions[action_index]
+                                                .parameters[parameter_index]
+                                                .get_type()];
             auto it =
                 std::find(constants.begin(), constants.end(), constant_index);
             assert(it != constants.end());
@@ -231,9 +274,9 @@ void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
           for (auto [parameter_index, constant_index] : assignment) {
             universal_clauses_ << Literal{Variable{num_vars_}, false};
             const auto &constants =
-                problem_.constants_by_type[problem_.actions[action_index]
-                                               .parameters[parameter_index]
-                                               .get_type()];
+                problem_->constants_by_type[problem_->actions[action_index]
+                                                .parameters[parameter_index]
+                                                .get_type()];
             auto it =
                 std::find(constants.begin(), constants.end(), constant_index);
             assert(it != constants.end());
@@ -246,54 +289,20 @@ void ForeachEncoder::frame_axioms(unsigned int dnf_threshold) noexcept {
           }
           dnf << Literal{Variable{num_vars_}, true};
           ++num_vars_;
+          ++num_helpers;
         }
         dnf << sat::EndClause;
       }
       transition_clauses_.add_dnf(dnf);
     }
   }
+  LOG_INFO(logger, "Helper variables to mitigate dnf explosion: %u",
+           num_helpers);
 }
 
 void ForeachEncoder::assume_goal() noexcept {
-  for (const auto &[goal, positive] : problem_.goal) {
+  for (const auto &[goal, positive] : problem_->goal) {
     goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;
-  }
-}
-
-void ForeachEncoder::init_sat_vars() noexcept {
-  LOG_INFO(logger, "Initializing sat variables...");
-  actions_.reserve(problem_.actions.size());
-  parameters_.resize(problem_.actions.size());
-  for (size_t i = 0; i < problem_.actions.size(); ++i) {
-    const auto &action = problem_.actions[i];
-    actions_.push_back(num_vars_++);
-
-    parameters_[i].resize(action.parameters.size());
-
-    for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
-         ++parameter_pos) {
-      const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.is_constant()) {
-        continue;
-      }
-      parameters_[i][parameter_pos].reserve(
-          problem_.constants_by_type[parameter.get_type()].size());
-      for (size_t j = 0;
-           j < problem_.constants_by_type[parameter.get_type()].size(); ++j) {
-        parameters_[i][parameter_pos].push_back(num_vars_++);
-      }
-    }
-  }
-
-  predicates_.resize(support_.get_num_instantiations());
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (support_.is_rigid(Support::PredicateId{i}, true)) {
-      predicates_[i] = SAT;
-    } else if (support_.is_rigid(Support::PredicateId{i}, false)) {
-      predicates_[i] = UNSAT;
-    } else {
-      predicates_[i] = num_vars_++;
-    }
   }
 }

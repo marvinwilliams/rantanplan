@@ -5,6 +5,8 @@
 #include <functional>
 #include <type_traits>
 
+namespace util {
+
 template <typename T> struct Index {
   using value_type = uint_fast64_t;
   template <typename Integral,
@@ -48,10 +50,12 @@ inline bool operator<(const Index<T> &first, const Index<T> &second) {
   return first.i < second.i;
 }
 
+} // namespace util
+
 namespace std {
 
-template <typename T> struct hash<Index<T>> {
-  size_t operator()(Index<T> index) const noexcept {
+template <typename T> struct hash<util::Index<T>> {
+  size_t operator()(util::Index<T> index) const noexcept {
     return std::hash<size_t>{}(index.i);
   }
 };

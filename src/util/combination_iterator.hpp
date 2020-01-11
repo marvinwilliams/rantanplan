@@ -5,6 +5,8 @@
 #include <numeric>
 #include <vector>
 
+namespace util {
+
 class CombinationIterator {
 public:
   using iterator_category = std::forward_iterator_tag;
@@ -71,5 +73,7 @@ private:
   const std::vector<size_t> list_sizes_;
   std::vector<size_t> current_combination_;
 };
+
+} // namespace util
 
 #endif /* end of include guard: COMBINATION_ITERATOR_HPP */

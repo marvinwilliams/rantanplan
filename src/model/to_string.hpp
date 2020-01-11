@@ -21,5 +21,7 @@ std::string to_string(const normalized::PredicateInstantiation &predicate,
 std::string to_string(const normalized::Action &,
                       const normalized::Problem &problem);
 std::string to_string(const normalized::Problem &problem);
+std::string to_string(const Plan &plan,
+                      const normalized::Problem &problem) noexcept;
 
 #endif /* end of include guard: TO_STRING_HPP */

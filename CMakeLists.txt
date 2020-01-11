@@ -72,7 +72,7 @@ add_executable(rantanplan_glucose
   "src/encoding/foreach.cpp"
   "src/pddl/model_builder.cpp"
   "src/preprocess/preprocess.cpp"
-  "src/planning/planner.cpp"
+  "src/planner/planner.cpp"
   "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a"
   )
 

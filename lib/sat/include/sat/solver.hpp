@@ -11,18 +11,25 @@ namespace sat {
 
 class Solver {
 public:
-  virtual Solver &operator<<(int) noexcept = 0;
+  enum class Status { Constructing, Solved, Unsolvable, Timeout };
 
-  virtual void assume(int) noexcept = 0;
-  virtual std::optional<Model>
-  solve(std::chrono::milliseconds timeout = std::chrono::seconds{0}) = 0;
+  Solver &add(int l);
+  Solver &operator<<(int l);
+  void assume(int l);
+  void solve(std::chrono::seconds timeout);
+  Status get_status() const;
+  const Model &get_model() const;
 
-  virtual ~Solver() noexcept = default;
+  virtual ~Solver() = default;
 
 protected:
-  Solver() = default;
-  Solver(const Solver &solver) = delete;
-  Solver &operator=(const Solver &solver) = delete;
+  Status status_ = Status::Constructing;
+  Model model_;
+
+private:
+  virtual void add_impl(int l) = 0;
+  virtual void assume_impl(int l) = 0;
+  virtual Status solve_impl(std::chrono::seconds timeout) = 0;
 };
 
 } // namespace sat

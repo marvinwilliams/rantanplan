@@ -14,7 +14,7 @@
 namespace normalized {
 
 struct Type;
-using TypeIndex = Index<Type>;
+using TypeIndex = util::Index<Type>;
 
 struct Type {
   TypeIndex supertype;
@@ -24,13 +24,13 @@ struct Constant {
   TypeIndex type;
 };
 
-using ConstantIndex = Index<Constant>;
+using ConstantIndex = util::Index<Constant>;
 
 struct Predicate {
   std::vector<TypeIndex> parameter_types;
 };
 
-using PredicateIndex = Index<Predicate>;
+using PredicateIndex = util::Index<Predicate>;
 
 class Parameter {
 public:
@@ -85,7 +85,7 @@ private:
   };
 };
 
-using ParameterIndex = Index<Parameter>;
+using ParameterIndex = util::Index<Parameter>;
 
 class Argument {
 public:
@@ -140,7 +140,7 @@ private:
   };
 };
 
-using ArgumentIndex = Index<Argument>;
+using ArgumentIndex = util::Index<Argument>;
 
 struct Condition {
   PredicateIndex definition;
@@ -175,7 +175,7 @@ struct Action {
   }
 };
 
-using ActionIndex = Index<Action>;
+using ActionIndex = util::Index<Action>;
 
 struct Problem {
   std::string domain_name;
@@ -236,15 +236,22 @@ struct Problem {
 
 } // namespace normalized
 
-template <> struct std::hash<normalized::PredicateInstantiation> {
+using Plan = std::vector<
+    std::pair<normalized::ActionIndex, std::vector<normalized::ConstantIndex>>>;
+
+namespace std {
+
+template <> struct hash<normalized::PredicateInstantiation> {
   size_t operator()(const normalized::PredicateInstantiation &predicate) const
       noexcept {
-    size_t hash = std::hash<normalized::PredicateIndex>{}(predicate.definition);
+    size_t h = hash<normalized::PredicateIndex>{}(predicate.definition);
     for (auto c : predicate.arguments) {
-      hash ^= std::hash<normalized::ConstantIndex>{}(c);
+      h ^= hash<normalized::ConstantIndex>{}(c);
     }
-    return hash;
+    return h;
   }
 };
+
+} // namespace std
 
 #endif /* end of include guard: NORMALIZE_MODEL_HPP */

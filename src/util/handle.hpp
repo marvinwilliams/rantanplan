@@ -1,6 +1,8 @@
 #ifndef HANDLE_HPP
 #define HANDLE_HPP
 
+namespace util {
+
 /* This class is intended to only be instantiatable by the base and represents a
  * pointer */
 
@@ -24,5 +26,7 @@ private:
   T *p_ = nullptr;
   const Base *base_ = nullptr;
 };
+
+}
 
 #endif /* end of include guard: HANDLE_HPP */

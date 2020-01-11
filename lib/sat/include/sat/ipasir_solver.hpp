@@ -1,8 +1,8 @@
 #ifndef IPASIR_SOLVER_HPP
 #define IPASIR_SOLVER_HPP
 
-#include "sat/solver.hpp"
 #include "sat/model.hpp"
+#include "sat/solver.hpp"
 
 extern "C" {
 #include "ipasir.h"
@@ -15,53 +15,24 @@ extern "C" {
 
 namespace sat {
 
-class IpasirSolver : public Solver {
+class IpasirSolver final : public Solver {
 public:
-  IpasirSolver() noexcept : handle_{ipasir_init()}, num_vars{0} {
-    ipasir_set_learn(handle_, NULL, 0, NULL);
-  }
+  explicit IpasirSolver() noexcept;
 
-  ~IpasirSolver() noexcept { ipasir_release(handle_); }
+  IpasirSolver(const IpasirSolver &) = delete;
+  IpasirSolver &operator=(const IpasirSolver &) = delete;
+  IpasirSolver(IpasirSolver &&) noexcept;
+  IpasirSolver &operator=(IpasirSolver &&) noexcept;
 
-  IpasirSolver &operator<<(int i) noexcept {
-    ipasir_add(handle_, i);
-    if (static_cast<unsigned int>(std::abs(i)) > num_vars) {
-      num_vars = static_cast<unsigned int>(std::abs(i));
-    }
-    return *this;
-  }
-
-  void assume(int i) noexcept { ipasir_assume(handle_, i); }
-
-  std::optional<Model> solve(std::chrono::milliseconds timeout) noexcept {
-    using clock = std::chrono::steady_clock;
-    auto end_time = clock::now() + timeout;
-    if (timeout != timeout.zero()) {
-      ipasir_set_terminate(handle_, &end_time, [](void *end_time) {
-        return static_cast<int>(std::max(
-            (clock::now() - *static_cast<clock::time_point *>(end_time))
-                .count(),
-            clock::rep(0)));
-      });
-    } else {
-      ipasir_set_terminate(handle_, nullptr, [](void *) { return 0; });
-    }
-    if (ipasir_solve(handle_) == 10) {
-      Model model;
-      model.assignment.reserve(num_vars + 1);
-      model.assignment.push_back(false); // Skip index 0
-      for (unsigned int i = 1; i <= num_vars; ++i) {
-        int index = static_cast<int>(i);
-        model.assignment.push_back(ipasir_val(handle_, index) == index);
-      }
-      return model;
-    }
-    return std::nullopt;
-  }
+  ~IpasirSolver() noexcept;
 
 private:
-  void *handle_;
-  unsigned int num_vars;
+  void add_impl(int l) noexcept override;
+  void assume_impl(int l) noexcept override;
+  Status solve_impl(std::chrono::seconds timeout) noexcept override;
+
+  void *handle_ = nullptr;
+  unsigned int num_vars_ = 0;
 };
 
 } // namespace sat
