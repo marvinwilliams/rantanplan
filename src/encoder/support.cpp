@@ -11,8 +11,6 @@
 
 using namespace normalized;
 
-logging::Logger Support::logger{"Support"};
-
 Support::Support(const Problem &problem) noexcept : problem_{problem} {
   num_instantations_ =
       std::accumulate(problem.predicates.begin(), problem.predicates.end(), 0ul,
@@ -25,7 +23,6 @@ Support::Support(const Problem &problem) noexcept : problem_{problem} {
     auto id = get_id(predicate);
     init_.insert(id);
   }
-  LOG_INFO(logger, "Computing predicate support...");
   set_predicate_support();
 }
 

@@ -28,7 +28,7 @@ void ModelBuilder::reset() {
 }
 
 std::unique_ptr<parsed::Problem> ModelBuilder::parse(const ast::AST &ast) {
-  LOG_INFO(logger, "Traverse AST");
+  LOG_INFO(parser_logger, "Traverse AST");
 
   reset();
 
@@ -45,30 +45,30 @@ std::unique_ptr<parsed::Problem> ModelBuilder::parse(const ast::AST &ast) {
                                                   std::string{e.what()}};
   }
 
-  LOG_INFO(logger,
-           "Problem has\n%lu requirements\n%lu types\n%lu constants\n%lu "
-           "predicates\n%lu actions",
-           num_requirements_, num_types_, num_constants_, num_predicates_,
-           num_actions_);
+  LOG_INFO(parser_logger, "Requirements: %lu", num_requirements_);
+  LOG_INFO(parser_logger, "Types: %lu", num_types_);
+  LOG_INFO(parser_logger, "Constants: %lu", num_constants_);
+  LOG_INFO(parser_logger, "Predicates: %lu", num_predicates_);
+  LOG_INFO(parser_logger, "Actions: %lu", num_actions_);
 
   return std::move(problem_);
 }
 
 bool ModelBuilder::visit_begin(const ast::Domain &domain) {
-  LOG_DEBUG(logger, "Visiting domain '%s'", domain.name->name.c_str());
+  LOG_DEBUG(parser_logger, "Visiting domain '%s'", domain.name->name.c_str());
   problem_->set_domain_name(domain.name->name);
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::Problem &problem) {
-  LOG_DEBUG(logger, "Visiting problem '%s' with domain reference '%s'",
+  LOG_DEBUG(parser_logger, "Visiting problem '%s' with domain reference '%s'",
             problem.name->name.c_str(), problem.domain_ref->name.c_str());
   problem_->set_problem_name(problem.name->name, problem.domain_ref->name);
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::SingleTypeIdentifierList &list) {
-  LOG_DEBUG(logger, "Visiting identifier list of type '%s'",
+  LOG_DEBUG(parser_logger, "Visiting identifier list of type '%s'",
             list.type ? list.type->name.c_str() : "_root");
   if (list.type) {
     current_type_ = problem_->get_type(list.type->name);
@@ -84,7 +84,7 @@ bool ModelBuilder::visit_end(const ast::SingleTypeIdentifierList &) {
 }
 
 bool ModelBuilder::visit_begin(const ast::SingleTypeVariableList &list) {
-  LOG_DEBUG(logger, "Visiting variable list of type '%s'",
+  LOG_DEBUG(parser_logger, "Visiting variable list of type '%s'",
             list.type ? list.type->name.c_str() : "_root");
   if (list.type) {
     current_type_ = problem_->get_type(list.type->name);
@@ -102,13 +102,13 @@ bool ModelBuilder::visit_end(const ast::SingleTypeVariableList &) {
 bool ModelBuilder::visit_begin(const ast::IdentifierList &list) {
   switch (state_) {
   case State::Types:
-    LOG_DEBUG(logger, "Visiting identifier list as types");
+    LOG_DEBUG(parser_logger, "Visiting identifier list as types");
     for (const auto &name : *list.elements) {
       problem_->add_type(name->name, current_type_);
     }
     break;
   case State::Constants:
-    LOG_DEBUG(logger, "Visiting identifier list as constants");
+    LOG_DEBUG(parser_logger, "Visiting identifier list as constants");
     for (const auto &name : *list.elements) {
       problem_->add_constant(name->name, current_type_);
     }
@@ -123,7 +123,7 @@ bool ModelBuilder::visit_begin(const ast::VariableList &list) {
   if (state_ != State::Predicates && state_ != State::Action) {
     throw ParserException("Internal error occurred while parsing");
   }
-  LOG_DEBUG(logger, "Visiting variable list as %s parameters",
+  LOG_DEBUG(parser_logger, "Visiting variable list as %s parameters",
             state_ == State::Predicates ? "predicate" : "action");
   for (const auto &variable : *list.elements) {
     if (state_ == State::Predicates) {
@@ -136,7 +136,7 @@ bool ModelBuilder::visit_begin(const ast::VariableList &list) {
 }
 
 bool ModelBuilder::visit_begin(const ast::ArgumentList &list) {
-  LOG_DEBUG(logger, "Visiting argument list");
+  LOG_DEBUG(parser_logger, "Visiting argument list");
 
   auto predicate = dynamic_cast<parsed::BaseAtomicCondition *>(
       condition_stack_.back().get());
@@ -167,31 +167,31 @@ bool ModelBuilder::visit_begin(const ast::ArgumentList &list) {
 }
 
 bool ModelBuilder::visit_begin(const ast::RequirementsDef &) {
-  LOG_DEBUG(logger, "Visiting requirements definition");
+  LOG_DEBUG(parser_logger, "Visiting requirements definition");
   state_ = State::Requirements;
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::TypesDef &) {
-  LOG_DEBUG(logger, "Visiting types definition");
+  LOG_DEBUG(parser_logger, "Visiting types definition");
   state_ = State::Types;
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::ConstantsDef &) {
-  LOG_DEBUG(logger, "Visiting constants definition");
+  LOG_DEBUG(parser_logger, "Visiting constants definition");
   state_ = State::Constants;
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::PredicatesDef &) {
-  LOG_DEBUG(logger, "Visiting predicates definition");
+  LOG_DEBUG(parser_logger, "Visiting predicates definition");
   state_ = State::Predicates;
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::ActionDef &action_def) {
-  LOG_DEBUG(logger, "Visiting action definition");
+  LOG_DEBUG(parser_logger, "Visiting action definition");
   state_ = State::Action;
   current_action_ = problem_->add_action(action_def.name->name);
   return true;
@@ -203,19 +203,19 @@ bool ModelBuilder::visit_end(const ast::ActionDef &) {
 }
 
 bool ModelBuilder::visit_begin(const ast::ObjectsDef &) {
-  LOG_DEBUG(logger, "Visiting objects definition");
+  LOG_DEBUG(parser_logger, "Visiting objects definition");
   state_ = State::Constants;
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::InitDef &) {
-  LOG_DEBUG(logger, "Visiting init definition");
+  LOG_DEBUG(parser_logger, "Visiting init definition");
   state_ = State::Init;
   return true;
 }
 
 bool ModelBuilder::visit_begin(const ast::GoalDef &) {
-  LOG_DEBUG(logger, "Visiting goal definition");
+  LOG_DEBUG(parser_logger, "Visiting goal definition");
   state_ = State::Goal;
   return true;
 }
@@ -386,7 +386,8 @@ bool ModelBuilder::visit_end(const ast::Condition &condition) {
 }
 
 bool ModelBuilder::visit_begin(const ast::Requirement &requirement) {
-  LOG_DEBUG(logger, "Visiting requirement '%s'", requirement.name);
+  LOG_DEBUG(parser_logger, "Visiting requirement '%s'",
+            requirement.name.c_str());
   problem_->add_requirement(requirement.name);
   return true;
 }

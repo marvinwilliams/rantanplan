@@ -1,6 +1,7 @@
 #include "build_config.hpp"
 #include "config.hpp"
 #include "engine/engine.hpp"
+#include "engine/oneshot_engine.hpp"
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
 #include "model/normalize.hpp"
@@ -12,7 +13,10 @@
 #include "planner/planner.hpp"
 
 #include <climits>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 
@@ -21,7 +25,22 @@ logging::Logger parser_logger{"Parser"};
 logging::Logger normalize_logger{"Normalize"};
 logging::Logger engine_logger{"Engine"};
 logging::Logger planner_logger{"Planner"};
+logging::Logger preprocess_logger{"Planner"};
 logging::Logger encoding_logger{"Encoding"};
+
+void print_memory_usage() {
+  if (auto f = std::ifstream{"/proc/self/status"}; f.good()) {
+    for (std::string line; std::getline(f, line);) {
+      std::string key, value;
+      std::stringstream{line} >> key >> value;
+      if (key == "VmPeak:") {
+        std::cout << "Memory used: " << value << " kB" << std::endl;
+        return;
+      }
+    }
+  }
+  std::cout << "Could not read memory usage" << std::endl;
+}
 
 void print_version() noexcept {
   char hostname[HOST_NAME_MAX];
@@ -122,7 +141,7 @@ void set_config(Config &config, const options::Options &options) {
   }
 
   if (const auto &o = options.get<unsigned int>("max-steps"); o.count > 0) {
-    config.step_factor = o.value;
+    config.max_steps = o.value;
   }
 
   if (const auto &o = options.get<unsigned int>("num-threads"); o.count > 0) {
@@ -138,9 +157,10 @@ void set_config(Config &config, const options::Options &options) {
   }
 }
 
-std::unique_ptr<Engine> get_engine(const Config &config) {}
-
 int main(int argc, char *argv[]) {
+
+  std::atexit(print_memory_usage);
+
   auto options = set_options(argv[0]);
   try {
     options.parse(argc, argv);
@@ -175,6 +195,7 @@ int main(int argc, char *argv[]) {
   normalize_logger.add_appender(logging::default_appender);
   engine_logger.add_appender(logging::default_appender);
   planner_logger.add_appender(logging::default_appender);
+  preprocess_logger.add_appender(logging::default_appender);
   encoding_logger.add_appender(logging::default_appender);
 
   print_version();
@@ -209,48 +230,70 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  LOG_INFO(main_logger, "Done");
+
   if (config.planning_mode == Config::PlanningMode::Parse) {
-    PRINT_INFO("Done");
+    LOG_INFO(main_logger, "Finished");
     return 0;
   }
 
   LOG_INFO(main_logger, "Normalizing...");
+
   auto problem = normalize(*parsed_problem);
+
+  LOG_DEBUG(main_logger, "Normalized problem:\n%s",
+            to_string(*problem).c_str());
+  LOG_INFO(main_logger, "Done");
+
   if (config.planning_mode == Config::PlanningMode::Normalize) {
-    PRINT_INFO("Done");
+    LOG_INFO(main_logger, "Finished");
     return 0;
   }
 
   std::unique_ptr<Engine> engine;
 
   switch (config.planning_mode) {
-  case Config::PlanningMode::OneShot:
+  case Config::PlanningMode::Oneshot:
     LOG_INFO(main_logger, "Using oneshot planning");
-    return std::make_unique<OneShotEngine>(problem, config);
+    engine = std::make_unique<OneshotEngine>(problem, config);
+    break;
   case Config::PlanningMode::Interrupt:
     LOG_INFO(main_logger, "Using interrupt planning");
-    return std::make_unique<InterruptEngine>(problem, config);
+    /* engine = std::make_unique<InterruptEngine>(problem, config); */
+    break;
   case Config::PlanningMode::Parallel:
     LOG_INFO(main_logger, "Using parallel planning");
-    return std::make_unique<ParallelEngine>(problem, config);
+    /* engine = std::make_unique<ParallelEngine>(problem, config); */
+    break;
   default:
     assert(false);
-    return std::make_unique<OneShotEngine>(problem, config);
+    engine = std::make_unique<OneshotEngine>(problem, config);
   }
 
   LOG_INFO(main_logger, "Starting search engine");
 
   engine->start();
 
-  if (engine->get_status() == Engine::Status::Success) {
-    std::cout << to_string(engine->get_plan(), problem) << std::endl;
+  switch (engine->get_status()) {
+  case Engine::Status::Success: {
+    std::cout << to_string(engine->get_plan()) << std::endl;
     if (config.plan_file) {
-      std::ofstream s{*config.plan_file};
-      s << to_string(engine->get_plan(), problem);
+      std::ofstream{*config.plan_file}
+          << to_string(engine->get_plan());
     }
+    break;
+  }
+  case Engine::Status::Timeout: {
+    LOG_INFO(main_logger, "Search timed out");
+    break;
+  }
+  default: {
+    LOG_ERROR(main_logger, "An error in the search occurred");
+    break;
+  }
   }
 
-  PRINT_INFO("Done");
+  PRINT_INFO("Finished");
 
   return 0;
 }

@@ -11,14 +11,13 @@
 #include <string>
 #include <vector>
 
+extern logging::Logger parser_logger;
+
 namespace pddl {
 
 class Parser {
-
 public:
   using Lexer = lexer::Lexer<pddl::TokenSet, pddl::TokenAction>;
-
-  static logging::Logger logger;
 
   ast::AST parse(const std::string &domain, const std::string &problem);
 

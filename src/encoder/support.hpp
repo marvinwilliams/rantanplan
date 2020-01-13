@@ -13,6 +13,8 @@
 #include <variant>
 #include <vector>
 
+extern logging::Logger encoding_logger;
+
 class Support {
 public:
   struct predicate_id_t {};

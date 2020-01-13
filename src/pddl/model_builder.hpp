@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+extern logging::Logger parser_logger;
+
 namespace pddl {
 
 class ModelBuilder : public ast::Visitor<ModelBuilder> {
@@ -29,8 +31,6 @@ public:
     Init,
     Goal
   };
-
-  static inline logging::Logger logger{"Ast"};
 
   std::unique_ptr<parsed::Problem> parse(const ast::AST &ast);
 

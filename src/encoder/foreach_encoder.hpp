@@ -12,8 +12,6 @@
 class ForeachEncoder final : public Encoder {
 
 public:
-  static logging::Logger logger;
-
   explicit ForeachEncoder(const std::shared_ptr<normalized::Problem> &problem,
                           const Config &config) noexcept;
 

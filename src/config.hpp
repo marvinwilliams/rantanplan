@@ -24,7 +24,7 @@ struct Config {
     Parse,
     Normalize,
     Preprocess,
-    OneShot,
+    Oneshot,
     Interrupt,
     Parallel
   };
@@ -35,7 +35,7 @@ struct Config {
   // General
   std::string domain_file = "";
   std::string problem_file = "";
-  PlanningMode planning_mode = PlanningMode::OneShot;
+  PlanningMode planning_mode = PlanningMode::Oneshot;
   std::chrono::seconds timeout = std::chrono::seconds::zero();
   std::optional<std::string> plan_file;
 
@@ -69,7 +69,7 @@ struct Config {
     } else if (input == "preprocess") {
       planning_mode = PlanningMode::Preprocess;
     } else if (input == "oneshot") {
-      planning_mode = PlanningMode::OneShot;
+      planning_mode = PlanningMode::Oneshot;
     } else if (input == "interrupt") {
       planning_mode = PlanningMode::Interrupt;
     } else if (input == "parallel") {

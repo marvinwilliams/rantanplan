@@ -1,5 +1,6 @@
 #include "sat/ipasir_solver.hpp"
 #include "ipasir.h"
+#include <cassert>
 
 namespace sat {
 
@@ -23,6 +24,11 @@ IpasirSolver &IpasirSolver::operator=(IpasirSolver &&other) noexcept {
 
 IpasirSolver::~IpasirSolver() noexcept { ipasir_release(handle_); }
 
+void IpasirSolver::next_step() noexcept {
+  model_.assignment.clear();
+  status_ = Status::Constructing;
+}
+
 void IpasirSolver::add_impl(int l) noexcept {
   ipasir_add(handle_, l);
   num_vars_ = std::max(num_vars_, static_cast<unsigned int>(std::abs(l)));
@@ -43,16 +49,19 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
   } else {
     ipasir_set_terminate(handle_, nullptr, [](void *) { return 0; });
   }
-  if (ipasir_solve(handle_) == 10) {
-    Model model;
-    model.assignment.reserve(num_vars_ + 1);
-    model.assignment.push_back(false); // Skip index 0
+  if (int result = ipasir_solve(handle_); result == 10) {
+    model_.assignment.clear();
+    model_.assignment.reserve(num_vars_ + 1);
+    model_.assignment.push_back(false); // Skip index 0
     for (unsigned int i = 1; i <= num_vars_; ++i) {
       int index = static_cast<int>(i);
-      model.assignment.push_back(ipasir_val(handle_, index) == index);
+      model_.assignment.push_back(ipasir_val(handle_, index) == index);
     }
-    return model;
+    return Status::Solved;
+  } else if (result == 20) {
+    return Status::Unsolvable;
   }
-  return std::nullopt;
+  return Status::Timeout;
 }
+
 } // namespace sat

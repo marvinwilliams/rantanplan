@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -236,8 +237,12 @@ struct Problem {
 
 } // namespace normalized
 
-using Plan = std::vector<
-    std::pair<normalized::ActionIndex, std::vector<normalized::ConstantIndex>>>;
+struct Plan {
+  std::vector<std::pair<normalized::ActionIndex,
+                        std::vector<normalized::ConstantIndex>>>
+      sequence;
+  std::shared_ptr<normalized::Problem> problem;
+};
 
 namespace std {
 

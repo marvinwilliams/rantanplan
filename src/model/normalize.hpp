@@ -26,6 +26,6 @@ std::vector<normalized::Action>
 normalize_action(const parsed::Action &action,
                  const parsed::Problem &problem) noexcept;
 
-normalized::Problem normalize(const parsed::Problem &problem);
+std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem);
 
 #endif /* end of include guard: NORMALIZE_HPP */

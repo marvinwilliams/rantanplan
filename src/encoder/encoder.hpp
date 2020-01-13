@@ -8,6 +8,8 @@
 
 #include <memory>
 
+extern logging::Logger encoding_logger;
+
 class Encoder {
 public:
   struct Variable {

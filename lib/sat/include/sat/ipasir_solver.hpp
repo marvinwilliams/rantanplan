@@ -9,9 +9,6 @@ extern "C" {
 }
 
 #include <chrono>
-#include <cmath>
-#include <iostream>
-#include <vector>
 
 namespace sat {
 
@@ -25,6 +22,8 @@ public:
   IpasirSolver &operator=(IpasirSolver &&) noexcept;
 
   ~IpasirSolver() noexcept;
+
+  void next_step() noexcept;
 
 private:
   void add_impl(int l) noexcept override;

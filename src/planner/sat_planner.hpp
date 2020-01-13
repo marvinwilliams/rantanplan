@@ -9,7 +9,9 @@
 
 #include <memory>
 
-std::unique_ptr<Encoder> get_encoder(const Config &config) noexcept;
+std::unique_ptr<Encoder>
+get_encoder(const std::shared_ptr<normalized::Problem> &problem,
+            const Config &config) noexcept;
 std::unique_ptr<sat::Solver> get_solver(const Config &config) noexcept;
 
 class SatPlanner final : public Planner {
@@ -17,7 +19,7 @@ public:
   explicit SatPlanner(const Config &config);
 
 private:
-  Status find_plan_impl(const normalized::Problem &problem,
+  Status find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                         unsigned int max_steps,
                         std::chrono::seconds timeout) noexcept override;
 

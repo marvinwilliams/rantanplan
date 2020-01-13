@@ -1,5 +1,6 @@
 #include "encoder/foreach_encoder.hpp"
 #include "config.hpp"
+#include "encoder/encoder.hpp"
 #include "encoder/support.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
@@ -11,12 +12,10 @@
 
 using namespace normalized;
 
-logging::Logger ForeachEncoder::logger{"Foreach"};
-
 ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem,
                                const Config &config) noexcept
     : Encoder{problem}, config_{config}, support_{*problem} {
-  LOG_INFO(logger, "Encoding...");
+  LOG_INFO(encoding_logger, "Encoding...");
   init_sat_vars();
   encode_init();
   encode_actions();
@@ -25,12 +24,13 @@ ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem,
   frame_axioms();
   assume_goal();
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
-  LOG_INFO(logger, "Variables per step: %u", num_vars_);
-  LOG_INFO(logger, "Init clauses: %u", init_.clauses.size());
-  LOG_INFO(logger, "Universal clauses: %u", universal_clauses_.clauses.size());
-  LOG_INFO(logger, "Transition clauses: %u",
+  LOG_INFO(encoding_logger, "Variables per step: %u", num_vars_);
+  LOG_INFO(encoding_logger, "Init clauses: %u", init_.clauses.size());
+  LOG_INFO(encoding_logger, "Universal clauses: %u",
+           universal_clauses_.clauses.size());
+  LOG_INFO(encoding_logger, "Transition clauses: %u",
            transition_clauses_.clauses.size());
-  LOG_INFO(logger, "Goal clauses: %u", goal_.clauses.size());
+  LOG_INFO(encoding_logger, "Goal clauses: %u", goal_.clauses.size());
 }
 
 int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
@@ -49,6 +49,7 @@ int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
 Plan ForeachEncoder::extract_plan(const sat::Model &model,
                                   unsigned int step) const noexcept {
   Plan plan;
+  plan.problem = problem_;
   for (unsigned int s = 0; s < step; ++s) {
     for (size_t i = 0; i < problem_->actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
@@ -72,7 +73,7 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
           }
           assert(constants.size() == parameter_pos + 1);
         }
-        plan.emplace_back(ActionIndex{i}, std::move(constants));
+        plan.sequence.emplace_back(ActionIndex{i}, std::move(constants));
       }
     }
   }
@@ -80,7 +81,7 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
 }
 
 void ForeachEncoder::init_sat_vars() noexcept {
-  LOG_INFO(logger, "Initializing sat variables...");
+  LOG_INFO(encoding_logger, "Initializing sat variables...");
   actions_.reserve(problem_->actions.size());
   parameters_.resize(problem_->actions.size());
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
@@ -114,7 +115,7 @@ void ForeachEncoder::init_sat_vars() noexcept {
       predicates_[i] = num_vars_++;
     }
   }
-  LOG_INFO(logger, "Done");
+  LOG_INFO(encoding_logger, "Done");
 }
 
 void ForeachEncoder::encode_init() noexcept {
@@ -296,7 +297,7 @@ void ForeachEncoder::frame_axioms() noexcept {
       transition_clauses_.add_dnf(dnf);
     }
   }
-  LOG_INFO(logger, "Helper variables to mitigate dnf explosion: %u",
+  LOG_INFO(encoding_logger, "Helper variables to mitigate dnf explosion: %u",
            num_helpers);
 }
 

@@ -209,7 +209,7 @@ void for_each_instantiation(const Predicate &predicate, Function &&f,
     number_arguments.push_back(problem.constants_by_type[type].size());
   }
 
-  auto combination_iterator = CombinationIterator{std::move(number_arguments)};
+  auto combination_iterator = util::CombinationIterator{std::move(number_arguments)};
 
   std::vector<ConstantIndex> arguments(predicate.parameter_types.size());
   while (!combination_iterator.end()) {
@@ -235,7 +235,7 @@ void for_each_instantiation(const ParameterMapping &mapping,
         problem.constants_by_type[action.get(p).get_type()].size());
   }
 
-  auto combination_iterator = CombinationIterator{argument_size_list};
+  auto combination_iterator = util::CombinationIterator{argument_size_list};
 
   while (!combination_iterator.end()) {
     Condition new_condition = condition;
@@ -267,7 +267,7 @@ void for_each_instantiation(const ParameterSelection &selection,
         problem.constants_by_type[action.get(p).get_type()].size());
   }
 
-  auto combination_iterator = CombinationIterator{argument_size_list};
+  auto combination_iterator = util::CombinationIterator{argument_size_list};
 
   while (!combination_iterator.end()) {
     const auto &combination = *combination_iterator;

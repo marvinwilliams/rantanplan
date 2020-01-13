@@ -12,10 +12,6 @@ namespace logging {
 
 enum class Level { ERROR, WARN, INFO, DEBUG };
 
-inline constexpr bool has_debug_log() noexcept {
-  return DEBUG_LOG_ACTIVE;
-}
-
 inline constexpr const char *level_name(Level level) noexcept {
   switch (level) {
   case Level::ERROR:

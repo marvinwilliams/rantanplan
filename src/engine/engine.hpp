@@ -2,10 +2,13 @@
 #define ENGINE_HPP
 
 #include "config.hpp"
+#include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "planner/sat_planner.hpp"
 
 #include <memory>
+
+extern logging::Logger engine_logger;
 
 class Engine {
 public:
@@ -24,10 +27,10 @@ protected:
   const Config& config_;
   std::shared_ptr<normalized::Problem> problem_;
   Plan plan_;
-  Status status_ = Status::Ready;
 
 private:
   virtual Status start_impl() = 0;
+  Status status_ = Status::Ready;
 };
 
 #endif /* end of include guard: ENGINE_HPP */

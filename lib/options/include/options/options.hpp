@@ -89,7 +89,7 @@ public:
 
   void parse(std::string_view input) override {
     ++state_.count;
-    state_.value = parser_(input);
+    parser_(input, state_.value);
   }
 
   const OptionState<T> &get() const override { return state_; }
