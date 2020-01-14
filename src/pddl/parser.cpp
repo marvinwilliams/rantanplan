@@ -28,11 +28,11 @@ ast::AST Parser::parse(const std::string &domain, const std::string &problem) {
   }
   lexer_.set_source(domain, domain_bytes.data(),
                     domain_bytes.data() + domain_bytes.size());
-  LOG_INFO(parser_logger, "Parsing domain file");
+  LOG_INFO(parser_logger, "Parsing domain file...");
   parse_domain(ast);
   lexer_.set_source(problem, problem_bytes.data(),
                     problem_bytes.data() + problem_bytes.size());
-  LOG_INFO(parser_logger, "Parsing problem file");
+  LOG_INFO(parser_logger, "Parsing problem file...");
   parse_problem(ast);
   return ast;
 }

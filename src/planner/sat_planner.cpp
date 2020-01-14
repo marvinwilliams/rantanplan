@@ -7,6 +7,7 @@
 #include "model/normalized/model.hpp"
 #include "sat/ipasir_solver.hpp"
 #include "sat/solver.hpp"
+#include "util/timer.hpp"
 
 #include <chrono>
 #include <memory>
@@ -35,8 +36,7 @@ Planner::Status
 SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                            unsigned int max_steps,
                            std::chrono::seconds timeout) noexcept {
-  using clock = std::chrono::steady_clock;
-  auto start_time = clock::now();
+  util::Timer timer;
   auto encoder = get_encoder(problem, config_);
   sat::IpasirSolver solver{};
   solver << static_cast<int>(Encoder::SAT) << 0;
@@ -51,7 +51,8 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
     if (max_steps > 0 && step >= max_steps) {
       return Status::MaxStepsExceeded;
     }
-    if (timeout > 0s && (clock::now() - start_time) >= timeout) {
+    if (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                            timer.get_elapsed_time()) >= timeout) {
       return Status::Timeout;
     }
     do {
@@ -66,8 +67,8 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
 
     auto searchtime = 0s;
     if (timeout > 0s) {
-      searchtime = std::max(std::chrono::duration_cast<std::chrono::seconds>(
-                                timeout - (clock::now() - start_time)),
+      searchtime = std::max(std::chrono::ceil<std::chrono::seconds>(
+                                timeout - timer.get_elapsed_time()),
                             1s);
     }
 

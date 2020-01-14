@@ -75,13 +75,6 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
 }
 
 bool Preprocessor::refine() noexcept {
-  LOG_INFO(preprocess_logger, "Refine %lu action(s)",
-           std::accumulate(partially_instantiated_actions_.begin(),
-                           partially_instantiated_actions_.end(), 0ul,
-                           [](size_t sum, const auto &actions) {
-                             return sum + actions.size();
-                           }));
-
   auto parameter_selector = std::invoke([mode = config_.preprocess_mode]() {
     switch (mode) {
     case Config::PreprocessMode::New:
@@ -97,6 +90,7 @@ bool Preprocessor::refine() noexcept {
   bool refinement_possible = false;
   std::unordered_map<PredicateId, bool> not_rigid;
   std::unordered_map<PredicateId, bool> not_effectless;
+
   for (size_t action_index = 0; action_index < problem_->actions.size();
        ++action_index) {
     std::vector<normalized::Action> new_actions;
@@ -393,9 +387,6 @@ std::shared_ptr<Problem> Preprocessor::extract_problem() const noexcept {
       preprocessed_problem->action_names.push_back(problem_->action_names[i]);
     }
   }
-
-  LOG_DEBUG(preprocess_logger, "Preprocessed problem:\n%s",
-            ::to_string(*preprocessed_problem).c_str());
 
   return preprocessed_problem;
 }

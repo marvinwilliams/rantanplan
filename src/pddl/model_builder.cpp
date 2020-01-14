@@ -19,16 +19,11 @@ void ModelBuilder::reset() {
   current_predicate_ = parsed::PredicateHandle{};
   current_action_ = parsed::ActionHandle{};
   condition_stack_.clear();
-  num_requirements_ = 0;
-  num_types_ = 0;
-  num_constants_ = 0;
-  num_predicates_ = 0;
-  num_actions_ = 0;
   problem_.reset();
 }
 
 std::unique_ptr<parsed::Problem> ModelBuilder::parse(const ast::AST &ast) {
-  LOG_INFO(parser_logger, "Traverse AST");
+  LOG_INFO(parser_logger, "Building model...");
 
   reset();
 
@@ -44,12 +39,6 @@ std::unique_ptr<parsed::Problem> ModelBuilder::parse(const ast::AST &ast) {
     throw ParserException{*current_location_, "Error constructing the model: " +
                                                   std::string{e.what()}};
   }
-
-  LOG_INFO(parser_logger, "Requirements: %lu", num_requirements_);
-  LOG_INFO(parser_logger, "Types: %lu", num_types_);
-  LOG_INFO(parser_logger, "Constants: %lu", num_constants_);
-  LOG_INFO(parser_logger, "Predicates: %lu", num_predicates_);
-  LOG_INFO(parser_logger, "Actions: %lu", num_actions_);
 
   return std::move(problem_);
 }

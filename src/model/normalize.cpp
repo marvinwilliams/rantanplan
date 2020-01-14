@@ -157,12 +157,13 @@ normalize_action(const parsed::Action &action,
 
 std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
   auto normalized_problem = std::make_shared<normalized::Problem>();
+
   normalized_problem->domain_name = problem.get_domain_name();
   normalized_problem->problem_name = problem.get_problem_name();
   normalized_problem->requirements = problem.get_requirements();
-
   normalized_problem->types.reserve(problem.get_types().size());
   normalized_problem->type_names.reserve(problem.get_types().size());
+
   for (size_t i = 0; i < problem.get_types().size(); ++i) {
     const auto &type = problem.get_types()[i];
     normalized_problem->types.push_back(normalized::Type{
@@ -197,6 +198,8 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
     normalized_problem->predicate_names.push_back(predicate->name);
   }
 
+  LOG_INFO(normalize_logger, "Normalizing init...");
+
   std::vector<normalized::PredicateInstantiation> negative_init;
   for (const auto &predicate : problem.get_init()) {
     auto condition = normalize_atomic_condition(*predicate, problem);
@@ -226,9 +229,9 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
     if (std::find(normalized_problem->init.begin(),
                   normalized_problem->init.end(),
                   predicate) != normalized_problem->init.end()) {
-      throw parsed::ModelException{"Found contradicting init predicate \'" +
-                                   to_string(predicate, *normalized_problem) +
-                                   "\'"};
+      LOG_ERROR(normalize_logger, "Found conflicting init predicate '%s'",
+                to_string(predicate, *normalized_problem).c_str());
+      return std::shared_ptr<normalized::Problem>();
     }
   }
 
@@ -242,17 +245,7 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
                                                normalized::ConstantIndex{i}});
   }
 
-  for (const auto &action : problem.get_actions()) {
-    LOG_INFO(normalize_logger, "Normalizing action \'%s\'...",
-             action->name.c_str());
-    auto new_actions = normalize_action(*action, problem);
-    LOG_INFO(normalize_logger, "resulted in %u STRIPS actions",
-             new_actions.size());
-    normalized_problem->actions.insert(normalized_problem->actions.cend(),
-                                       new_actions.begin(), new_actions.end());
-    normalized_problem->action_names.insert(
-        normalized_problem->action_names.end(), action->name);
-  }
+  LOG_INFO(normalize_logger, "Normalizing goal...");
 
   auto goal = std::dynamic_pointer_cast<parsed::Condition>(problem.get_goal())
                   ->to_dnf();
@@ -269,14 +262,25 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
         LOG_WARN(normalize_logger, "Found duplicate goal predicate '%s'",
                  to_string(instantiation, *normalized_problem).c_str());
       } else {
-        throw parsed::ModelException{
-            "Found conflicting goal predicates, problem unsolvable"};
+        LOG_ERROR(normalize_logger, "Found conflicting goal predicates '%s'",
+                  to_string(instantiation, *normalized_problem).c_str());
+        return std::shared_ptr<normalized::Problem>();
       }
     }
+
     normalized_problem->goal.push_back(
         {std::move(instantiation), predicate->positive()});
   }
-  LOG_DEBUG(normalize_logger, "Normalized problem:\n%s",
-            to_string(*normalized_problem).c_str());
+
+  LOG_INFO(normalize_logger, "Normalizing actions...");
+
+  for (const auto &action : problem.get_actions()) {
+    auto new_actions = normalize_action(*action, problem);
+    normalized_problem->actions.insert(normalized_problem->actions.cend(),
+                                       new_actions.begin(), new_actions.end());
+    normalized_problem->action_names.insert(
+        normalized_problem->action_names.end(), action->name);
+  }
+
   return normalized_problem;
 }

@@ -16,17 +16,23 @@ OneshotEngine::OneshotEngine(
     : Engine(problem, config) {}
 
 Engine::Status OneshotEngine::start_impl() noexcept {
+  LOG_INFO(engine_logger, "Using oneshot engine");
+
+  LOG_INFO(engine_logger, "Preprocessing to %.1f%%...",
+           config_.preprocess_progress * 100);
   Preprocessor preprocessor{problem_, config_};
   while (preprocessor.get_progress() <= config_.preprocess_progress &&
          preprocessor.refine()) {
     if (config_.timeout > 0s &&
-        util::global_timer.get_elapsed_time() >= config_.timeout) {
+        std::chrono::ceil<std::chrono::seconds>(
+            util::global_timer.get_elapsed_time()) >= config_.timeout) {
       return Status::Timeout;
     }
   }
-  LOG_INFO(engine_logger, "Actions: %lu", preprocessor.get_num_actions());
-  LOG_INFO(engine_logger, "Preprocess progress: %.3f",
-           preprocessor.get_progress());
+
+  LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
+           preprocessor.get_progress() * 100, preprocessor.get_num_actions());
+
   auto problem = preprocessor.extract_problem();
 
   SatPlanner planner{config_};
@@ -34,9 +40,16 @@ Engine::Status OneshotEngine::start_impl() noexcept {
   auto searchtime = 0s;
   if (config_.timeout > 0s) {
     searchtime =
-        std::max(std::chrono::duration_cast<std::chrono::seconds>(
+        std::max(std::chrono::ceil<std::chrono::seconds>(
                      config_.timeout - util::global_timer.get_elapsed_time()),
                  1s);
+  }
+
+  if (searchtime > 0s) {
+    LOG_INFO(engine_logger, "Planner started with %lu seconds timeout",
+             searchtime.count());
+  } else {
+    LOG_INFO(engine_logger, "Planner started with no timeout");
   }
 
   planner.find_plan(problem, config_.max_steps, searchtime);
