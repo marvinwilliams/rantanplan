@@ -21,6 +21,7 @@ public:
 
   Status get_status() const noexcept;
   const Plan &get_plan() const noexcept;
+  virtual void reset();
 
   virtual ~Planner() = default;
 

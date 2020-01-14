@@ -66,6 +66,7 @@ add_executable(rantanplan_glucose
 "lib/sat/include/sat/solver.cpp"
 "lib/logging/src/logging/logging.cpp"
 "src/engine/oneshot_engine.cpp"
+"src/engine/interrupt_engine.cpp"
 "src/engine/engine.cpp"
 "src/model/normalize.cpp"
 "src/model/parsed/model.cpp"

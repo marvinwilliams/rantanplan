@@ -49,6 +49,9 @@ struct Config {
   Solver solver = Solver::Ipasir;
   float step_factor = 1.4f;
   unsigned int max_steps = 0; // 0: Infinity
+  // For interrupt planning
+  unsigned int num_solvers = 2;
+  std::chrono::seconds solver_timeout = std::chrono::seconds{60};
 
   // Parallel
   unsigned int num_threads = 1;

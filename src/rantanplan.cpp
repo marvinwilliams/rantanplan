@@ -1,6 +1,7 @@
 #include "build_config.hpp"
 #include "config.hpp"
 #include "engine/engine.hpp"
+#include "engine/interrupt_engine.hpp"
 #include "engine/oneshot_engine.hpp"
 #include "lexer/lexer.hpp"
 #include "logging/logging.hpp"
@@ -15,6 +16,7 @@
 #include <climits>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -71,6 +73,11 @@ options::Options set_options(const std::string &name) {
   options.add_option<float>({"step-factor", 'f'}, "Step factor");
   options.add_option<unsigned int>({"max-steps", 'l'},
                                    "Maximum number of steps");
+  options.add_option<unsigned int>({"num-solvers", 'i'},
+                                   "Maximum number solvers");
+  options.add_option<unsigned int>(
+      {"solver-timeout", 'u'},
+      "Time for individual solvers before getting interrupted");
   options.add_option<unsigned int>({"num-threads", 'j'}, "Number of threads");
   options.add_option<unsigned int>({"dnf-threshold", 'd'}, "DNF threshold");
   options.add_option<bool>({"debug-log", 'v'}, "Enable debug logging");
@@ -144,6 +151,15 @@ void set_config(Config &config, const options::Options &options) {
     config.max_steps = o.value;
   }
 
+  if (const auto &o = options.get<unsigned int>("num-solvers"); o.count > 0) {
+    config.num_solvers = o.value;
+  }
+
+  if (const auto &o = options.get<unsigned int>("solver-timeout");
+      o.count > 0) {
+    config.solver_timeout = std::chrono::seconds{o.value};
+  }
+
   if (const auto &o = options.get<unsigned int>("num-threads"); o.count > 0) {
     config.num_threads = std::max(o.value, 1u);
   }
@@ -158,8 +174,13 @@ void set_config(Config &config, const options::Options &options) {
 }
 
 int main(int argc, char *argv[]) {
-
   std::atexit(print_memory_usage);
+
+  std::cout << "Command line:";
+  for (int i = 0; i < argc; ++i) {
+    std::cout << " " << argv[i];
+  }
+  std::cout << std::endl;
 
   auto options = set_options(argv[0]);
   try {
@@ -259,7 +280,7 @@ int main(int argc, char *argv[]) {
     break;
   case Config::PlanningMode::Interrupt:
     LOG_INFO(main_logger, "Using interrupt planning");
-    /* engine = std::make_unique<InterruptEngine>(problem, config); */
+    engine = std::make_unique<InterruptEngine>(problem, config);
     break;
   case Config::PlanningMode::Parallel:
     LOG_INFO(main_logger, "Using parallel planning");
@@ -276,10 +297,10 @@ int main(int argc, char *argv[]) {
 
   switch (engine->get_status()) {
   case Engine::Status::Success: {
+    LOG_INFO(main_logger, "Found plan");
     std::cout << to_string(engine->get_plan()) << std::endl;
     if (config.plan_file) {
-      std::ofstream{*config.plan_file}
-          << to_string(engine->get_plan());
+      std::ofstream{*config.plan_file} << to_string(engine->get_plan());
     }
     break;
   }

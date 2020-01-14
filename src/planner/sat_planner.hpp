@@ -12,7 +12,6 @@
 std::unique_ptr<Encoder>
 get_encoder(const std::shared_ptr<normalized::Problem> &problem,
             const Config &config) noexcept;
-std::unique_ptr<sat::Solver> get_solver(const Config &config) noexcept;
 
 class SatPlanner final : public Planner {
 public:

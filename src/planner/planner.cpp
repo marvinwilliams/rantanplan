@@ -16,3 +16,8 @@ const Plan &Planner::get_plan() const noexcept {
   assert(status_ == Status::Success);
   return plan_;
 }
+
+void Planner::reset() {
+  plan_ = Plan{};
+  status_ = Status::Ready;
+}

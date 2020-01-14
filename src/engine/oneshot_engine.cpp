@@ -8,6 +8,8 @@
 
 #include <chrono>
 
+using namespace std::chrono_literals;
+
 OneshotEngine::OneshotEngine(
     const std::shared_ptr<normalized::Problem> &problem,
     const Config &config) noexcept
@@ -17,21 +19,28 @@ Engine::Status OneshotEngine::start_impl() noexcept {
   Preprocessor preprocessor{problem_, config_};
   while (preprocessor.get_progress() <= config_.preprocess_progress &&
          preprocessor.refine()) {
+    if (config_.timeout > 0s &&
+        util::global_timer.get_elapsed_time() >= config_.timeout) {
+      return Status::Timeout;
+    }
   }
   LOG_INFO(engine_logger, "Actions: %lu", preprocessor.get_num_actions());
   LOG_INFO(engine_logger, "Preprocess progress: %.3f",
            preprocessor.get_progress());
   auto problem = preprocessor.extract_problem();
+
   SatPlanner planner{config_};
-  if (config_.timeout == std::chrono::seconds::zero()) {
-    planner.find_plan(problem, config_.max_steps, std::chrono::seconds::zero());
-  } else {
-    auto searchtime =
+
+  auto searchtime = 0s;
+  if (config_.timeout > 0s) {
+    searchtime =
         std::max(std::chrono::duration_cast<std::chrono::seconds>(
                      config_.timeout - util::global_timer.get_elapsed_time()),
-                 std::chrono::seconds{1});
-    planner.find_plan(problem, config_.max_steps, searchtime);
+                 1s);
   }
+
+  planner.find_plan(problem, config_.max_steps, searchtime);
+
   switch (planner.get_status()) {
   case Planner::Status::Success:
     plan_ = planner.get_plan();

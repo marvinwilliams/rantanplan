@@ -1,6 +1,10 @@
 #include "sat/ipasir_solver.hpp"
 #include "ipasir.h"
 #include <cassert>
+#include <chrono>
+#include <iostream>
+
+using namespace std::chrono_literals;
 
 namespace sat {
 
@@ -38,17 +42,15 @@ void IpasirSolver::assume_impl(int l) noexcept { ipasir_assume(handle_, l); }
 
 Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
   using clock = std::chrono::steady_clock;
-  auto end_time = clock::time_point{};
-  if (timeout != clock::duration::zero()) {
-    end_time = clock::now() + timeout;
+
+  auto end_time = clock::now() + timeout;
+  if (timeout > 0s) {
     ipasir_set_terminate(handle_, &end_time, [](void *end_time) {
-      auto remaining =
-          clock::now() - *static_cast<clock::time_point *>(end_time);
-      return remaining > clock::duration::zero() ? 0 : 1;
+      return clock::now() < *static_cast<clock::time_point *>(end_time) ? 0 : 1;
     });
   } else {
     ipasir_set_terminate(handle_, nullptr, [](void *) { return 0; });
-  }
+  };
   if (int result = ipasir_solve(handle_); result == 10) {
     model_.assignment.clear();
     model_.assignment.reserve(num_vars_ + 1);
@@ -60,8 +62,10 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
     return Status::Solved;
   } else if (result == 20) {
     return Status::Unsolvable;
+  } else if (result == 0) {
+    return Status::Timeout;
   }
-  return Status::Timeout;
+  return Status::Error;
 }
 
 } // namespace sat
