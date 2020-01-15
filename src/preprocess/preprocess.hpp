@@ -75,9 +75,6 @@ private:
     std::unordered_set<PredicateId> neg_effectless;
   };
 
-  mutable Cache success_cache_;
-  mutable Cache failure_cache_;
-
   const Config &config_;
   decltype(&Preprocessor::select_free) parameter_selector_;
   std::shared_ptr<normalized::Problem> problem_;

@@ -87,7 +87,6 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
 
 bool Preprocessor::refine() noexcept {
   bool refinement_possible = false;
-  failure_cache_ = Cache{};
 
   for (size_t action_index = 0; action_index < problem_->actions.size();
        ++action_index) {
@@ -216,25 +215,11 @@ bool Preprocessor::has_precondition(const Action &action,
 bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
                             bool positive) const noexcept {
   auto id = get_id(predicate);
-  auto &rigid = positive ? success_cache_.pos_rigid : success_cache_.neg_rigid;
-  auto &not_rigid =
-      positive ? failure_cache_.pos_rigid : failure_cache_.neg_rigid;
-
-  if (not_rigid.find(id) != not_rigid.end()) {
-    return false;
-  }
-
-  if (rigid.find(id) != rigid.end()) {
-    return true;
-  }
-
   if (std::binary_search(init_.begin(), init_.end(), id) != positive) {
-    not_rigid.insert(id);
     return false;
   }
 
   if (trivially_rigid_[predicate.definition]) {
-    rigid.insert(id);
     return true;
   }
 
@@ -245,12 +230,10 @@ bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
     }
     for (const auto &action : partially_instantiated_actions_[i]) {
       if (has_effect(action, predicate, !positive)) {
-        not_rigid.insert(id);
         return false;
       }
     }
   }
-  rigid.insert(id);
   return true;
 }
 
@@ -258,27 +241,13 @@ bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
 bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
                                  bool positive) const noexcept {
   auto id = get_id(predicate);
-  auto &effectless =
-      positive ? success_cache_.pos_effectless : success_cache_.neg_effectless;
-  auto &not_effectless =
-      positive ? failure_cache_.pos_effectless : failure_cache_.neg_effectless;
-
-  if (not_effectless.find(id) != not_effectless.end()) {
-    return false;
-  }
-
-  if (effectless.find(id) != effectless.end()) {
-    return true;
-  }
 
   if (std::binary_search(goal_.begin(), goal_.end(),
                          std::make_pair(id, positive))) {
-    not_effectless.insert(id);
     return false;
   }
 
   if (trivially_effectless_[predicate.definition]) {
-    effectless.insert(id);
     return true;
   }
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
@@ -288,12 +257,10 @@ bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
     }
     for (const auto &action : partially_instantiated_actions_[i]) {
       if (has_precondition(action, predicate, positive)) {
-        not_effectless.insert(id);
         return false;
       }
     }
   }
-  effectless.insert(id);
   return true;
 }
 
