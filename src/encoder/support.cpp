@@ -40,20 +40,10 @@ void Support::set_predicate_support() noexcept {
 
       for (const auto &condition :
            is_effect ? action.effects : action.preconditions) {
-        auto mapping = get_mapping(action, condition);
         for_each_instantiation(
-            mapping.parameters, action,
-            [&](auto assignment) {
-              auto new_condition = condition;
-              for (size_t i = 0; i < mapping.parameters.size(); ++i) {
-                assert(assignment[i].first == mapping.parameters[i]);
-                for (auto a : mapping.arguments[i]) {
-                  assert(new_condition.arguments[a].get_parameter() ==
-                         assignment[i].first);
-                  new_condition.arguments[a].set(assignment[i].second);
-                }
-              }
-              auto id = get_id(instantiate(new_condition));
+            condition, action,
+            [&](auto new_condition, auto assignment) {
+              auto id = get_id(new_condition);
               select_support(id, new_condition.positive, is_effect)
                   .emplace_back(ActionIndex{i}, std::move(assignment));
             },

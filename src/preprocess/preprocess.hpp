@@ -10,19 +10,15 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 extern logging::Logger preprocess_logger;
-
-class Preprocessor;
 
 class Preprocessor {
 public:
   struct predicate_id_t {};
   using PredicateId = util::Index<predicate_id_t>;
-
-  enum class SimplifyResult { Unchanged, Changed, Invalid };
 
   explicit Preprocessor(const std::shared_ptr<normalized::Problem> &problem,
                         const Config &config) noexcept;
@@ -59,6 +55,7 @@ private:
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
 
+  enum class SimplifyResult { Unchanged, Changed, Invalid };
   SimplifyResult simplify(normalized::Action &action) const noexcept;
 
   float preprocess_progress_;
@@ -70,10 +67,19 @@ private:
   std::vector<bool> trivially_effectless_;
   std::vector<PredicateId> init_;
   std::vector<std::pair<PredicateId, bool>> goal_;
-  mutable std::unordered_map<PredicateId, bool> rigid_;
-  mutable std::unordered_map<PredicateId, bool> effectless_;
+
+  struct Cache {
+    std::unordered_set<PredicateId> pos_rigid;
+    std::unordered_set<PredicateId> neg_rigid;
+    std::unordered_set<PredicateId> pos_effectless;
+    std::unordered_set<PredicateId> neg_effectless;
+  };
+
+  mutable Cache success_cache_;
+  mutable Cache failure_cache_;
 
   const Config &config_;
+  decltype(&Preprocessor::select_free) parameter_selector_;
   std::shared_ptr<normalized::Problem> problem_;
 };
 

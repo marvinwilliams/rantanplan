@@ -178,9 +178,10 @@ inline size_t get_num_instantiated(const Action &action,
   return std::accumulate(
       action.parameters.begin(), action.parameters.end(), 1ul,
       [&problem](size_t product, const Parameter &p) {
-        return p.is_constant()
-                   ? product
-                   : product * problem.constants_by_type[p.get_type()].size();
+        if (p.is_constant()) {
+          return product;
+        }
+        return product * problem.constants_by_type[p.get_type()].size();
       });
 }
 
@@ -190,13 +191,11 @@ inline size_t get_num_instantiated(const Condition &condition,
   return std::accumulate(
       condition.arguments.begin(), condition.arguments.end(), 1ul,
       [&action, &problem](size_t product, const Argument &a) {
-        return a.is_constant()
-                   ? product
-                   : product *
-                         problem
-                             .constants_by_type[action.get(a.get_parameter())
-                                                    .get_type()]
-                             .size();
+        if (a.is_constant()) {
+          return product;
+        }
+        auto type = action.get(a.get_parameter()).get_type();
+        return product * problem.constants_by_type[type].size();
       });
 }
 
@@ -209,7 +208,8 @@ void for_each_instantiation(const Predicate &predicate, Function &&f,
     number_arguments.push_back(problem.constants_by_type[type].size());
   }
 
-  auto combination_iterator = util::CombinationIterator{std::move(number_arguments)};
+  auto combination_iterator =
+      util::CombinationIterator{std::move(number_arguments)};
 
   std::vector<ConstantIndex> arguments(predicate.parameter_types.size());
   while (!combination_iterator.end()) {
@@ -219,38 +219,6 @@ void for_each_instantiation(const Predicate &predicate, Function &&f,
       arguments[i] = problem.constants_by_type[type][combination[i]];
     }
     f(arguments);
-    ++combination_iterator;
-  }
-}
-
-template <typename Function>
-void for_each_instantiation(const ParameterMapping &mapping,
-                            const Condition &condition, const Action &action,
-                            Function &&f, const Problem &problem) {
-  std::vector<size_t> argument_size_list;
-  argument_size_list.reserve(mapping.parameters.size());
-  for (auto p : mapping.parameters) {
-    assert(!action.get(p).is_constant());
-    argument_size_list.push_back(
-        problem.constants_by_type[action.get(p).get_type()].size());
-  }
-
-  auto combination_iterator = util::CombinationIterator{argument_size_list};
-
-  while (!combination_iterator.end()) {
-    Condition new_condition = condition;
-    const auto &combination = *combination_iterator;
-    for (size_t i = 0; i < combination.size(); ++i) {
-      assert(!action.get(mapping.parameters[i]).is_constant());
-      auto type = action.get(mapping.parameters[i]).get_type();
-      for (auto a : mapping.arguments[i]) {
-        assert(new_condition.arguments[a].get_parameter() ==
-               mapping.parameters[i]);
-        new_condition.arguments[a].set(
-            problem.constants_by_type[type][combination[i]]);
-      }
-    }
-    f(instantiate(new_condition));
     ++combination_iterator;
   }
 }
@@ -282,6 +250,27 @@ void for_each_instantiation(const ParameterSelection &selection,
     f(std::move(assignment));
     ++combination_iterator;
   }
+}
+
+template <typename Function>
+void for_each_instantiation(const Condition &condition, const Action &action,
+                            Function &&f, const Problem &problem) {
+  auto mapping = get_mapping(action, condition);
+  for_each_instantiation(
+      mapping.parameters, action,
+      [&](auto assignment) {
+        auto new_condition = condition;
+        for (size_t i = 0; i < mapping.parameters.size(); ++i) {
+          assert(assignment[i].first == mapping.parameters[i]);
+          for (auto a : mapping.arguments[i]) {
+            assert(new_condition.arguments[a].get_parameter() ==
+                   assignment[i].first);
+            new_condition.arguments[a].set(assignment[i].second);
+          }
+        }
+        f(std::move(new_condition), std::move(assignment));
+      },
+      problem);
 }
 
 inline bool is_instantiatable(const Condition &condition,

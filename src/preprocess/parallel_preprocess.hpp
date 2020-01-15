@@ -1,5 +1,5 @@
-#ifndef PREPROCESS_HPP
-#define PREPROCESS_HPP
+#ifndef PARALLEL_PREPROCESS_HPP
+#define PARALLEL_PREPROCESS_HPP
 
 #include "config.hpp"
 #include "logging/logging.hpp"
@@ -11,41 +11,26 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
-#include <execution>
-#include <pstl/glue_execution_defs.h>
-#include <unordered_map>
+#include <unordered_set>
 #include <utility>
-#ifdef PARALLEL
-#include <mutex>
-#include <pthread.h>
-#include <thread>
-#endif
 
 extern logging::Logger preprocess_logger;
 
-class Preprocessor {
+class ParallelPreprocessor {
 public:
   struct predicate_id_t {};
-  enum class SimplifyResult { Unchanged, Changed, Invalid };
+  using PredicateId = util::Index<predicate_id_t>;
 
-  using PredicateId = Index<predicate_id_t>;
 
-  explicit Preprocessor(const normalized::Problem &problem) noexcept;
+  explicit ParallelPreprocessor(
+      const std::shared_ptr<normalized::Problem> &problem,
+      const Config &config) noexcept;
 
-#ifdef PARALLEL
-  std::pair<normalized::Problem, Planner::Plan>
-  preprocess(const Planner &planner, const Config &config) noexcept;
-
-  void kill() {
-    std::for_each(threads_.begin(), threads_.end(), [](auto &t) {
-      auto id = t.native_handle();
-      t.detach();
-      pthread_cancel(id);
-    });
-  }
-#else
-  normalized::Problem preprocess(const Config &config) noexcept;
-#endif
+  bool refine(unsigned int num_threads,
+              const std::atomic_bool &plan_found) noexcept;
+  size_t get_num_actions() const noexcept;
+  float get_progress() const noexcept;
+  std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
 
 private:
   PredicateId get_id(const normalized::PredicateInstantiation &predicate) const
@@ -67,102 +52,51 @@ private:
   // No action has this predicate as precondition and it is a not a goal
   bool is_effectless(const normalized::PredicateInstantiation &predicate,
                      bool positive) const noexcept;
-  SimplifyResult simplify(normalized::Action &action) noexcept;
+  normalized::ParameterSelection
+  select_free(const normalized::Action &action) const noexcept;
+  normalized::ParameterSelection
+  select_min_new(const normalized::Action &action) const noexcept;
+  normalized::ParameterSelection
+  select_max_rigid(const normalized::Action &action) const noexcept;
 
-  template <typename Function>
-  std::vector<normalized::Action>
-  refine_action(normalized::ActionIndex action_index,
-                Function &&select_parameters, std::atomic_size_t &inst_index,
-                std::atomic_flag &changed) {
-    std::vector<normalized::Action> new_actions;
-    std::unordered_map<PredicateId, bool> not_rigid;
-    std::unordered_map<PredicateId, bool> not_effectless;
-    uint_fast64_t pruned_actions = 0;
-    uint_fast64_t current_actions = 0;
-    size_t i;
-    while ((i = inst_index++ <
-                partially_instantiated_actions_[action_index].size())) {
-      auto &action = partially_instantiated_actions_[action_index][i];
-      if (auto result = simplify(action); result != SimplifyResult::Unchanged) {
-        changed.test_and_set();
-        if (result == SimplifyResult::Invalid) {
-          pruned_actions += normalized::get_num_instantiated(action, problem_);
-          continue;
-        }
-      }
+  enum class SimplifyResult { Unchanged, Changed, Invalid };
+  SimplifyResult simplify(normalized::Action &action) const noexcept;
 
-      auto selection = select_parameters(action);
-
-      if (selection.empty()) {
-        new_actions.push_back(action);
-        current_actions += 1;
-        continue;
-      }
-
-      changed.test_and_set();
-
-      for_each_instantiation(
-          selection, action,
-          [&](const normalized::ParameterAssignment &assignment) {
-            auto new_action = ground(assignment, action);
-            if (auto result = simplify(new_action);
-                result != SimplifyResult::Invalid) {
-              new_actions.push_back(std::move(new_action));
-              current_actions += 1;
-            } else {
-              pruned_actions +=
-                  normalized::get_num_instantiated(new_action, problem_);
-            }
-          },
-          problem_);
-    }
-  }
-
-  template <typename Function> float refine(Function &&select_parameters) {
-    LOG_INFO(preprocess_logger, "New grounding iteration with %lu action(s)",
-             std::accumulate(partially_instantiated_actions_.begin(),
-                             partially_instantiated_actions_.end(), 0ul,
-                             [](size_t sum, const auto &actions) {
-                               return sum + actions.size();
-                             }));
-
-    refinement_possible_ = false;
-    rigid_tested_.clear();
-    effectless_tested_.clear();
-    uint_fast64_t num_current_actions = 0;
-    for (size_t i = 0; i < problem_.actions.size(); ++i) {
-      std::vector<normalized::Action> new_actions;
-      for (auto &action : partially_instantiated_actions_[i]) {
-      }
-      partially_instantiated_actions_[i] = std::move(new_actions);
-    }
-    LOG_INFO(preprocess_logger, "Progress: %f",
-             static_cast<double>(num_current_actions + num_pruned_actions_) /
-                 static_cast<double>(num_actions_));
-    return static_cast<float>(num_current_actions + num_pruned_actions_) /
-           static_cast<float>(num_actions_);
-  }
-
-  normalized::Problem to_problem() const noexcept;
-
-  bool refinement_possible_ = true;
+  float preprocess_progress_;
   uint_fast64_t num_actions_;
   uint_fast64_t num_pruned_actions_ = 0;
+  std::vector<std::vector<normalized::Action>> partially_instantiated_actions_;
   std::vector<uint_fast64_t> predicate_id_offset_;
   std::vector<bool> trivially_rigid_;
   std::vector<bool> trivially_effectless_;
-  std::vector<std::vector<normalized::Action>> partially_instantiated_actions_;
   std::vector<PredicateId> init_;
   std::vector<std::pair<PredicateId, bool>> goal_;
-  mutable std::unordered_map<PredicateId, bool> rigid_;
-  mutable std::unordered_map<PredicateId, bool> effectless_;
-#ifdef PARALLEL
-  std::vector<std::thread> threads_;
-  unsigned int num_free_threads_;
-  mutable std::mutex rigid_mutex_;
-  mutable std::mutex effectless_mutex_;
-#endif
-  const normalized::Problem &problem_;
+
+  struct Cache {
+    std::unordered_set<PredicateId> pos_rigid;
+    std::unordered_set<PredicateId> neg_rigid;
+    std::unordered_set<PredicateId> pos_effectless;
+    std::unordered_set<PredicateId> neg_effectless;
+  };
+
+  mutable Cache success_cache_;
+
+  struct ParallelRefine {
+    explicit ParallelRefine(const ParallelPreprocessor &preprocessor) noexcept;
+
+    void refine_action(normalized::Action &action) noexcept;
+
+    bool refinement_possible = false;
+    uint_fast64_t num_pruned_actions = 0;
+    std::vector<normalized::Action> new_actions;
+    Cache failure_cache;
+    Cache new_cache;
+    const ParallelPreprocessor &preprocessor;
+  };
+
+  const Config &config_;
+  decltype(&ParallelPreprocessor::select_free) parameter_selector_;
+  std::shared_ptr<normalized::Problem> problem_;
 };
 
-#endif /* end of include guard: PREPROCESS_HPP */
+#endif /* end of include guard: PARALLEL_PREPROCESS_HPP */
