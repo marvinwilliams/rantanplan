@@ -58,9 +58,12 @@ private:
   enum class SimplifyResult { Unchanged, Changed, Invalid };
   SimplifyResult simplify(normalized::Action &action) const noexcept;
 
-  float preprocess_progress_;
   uint_fast64_t num_actions_;
   uint_fast64_t num_pruned_actions_ = 0;
+  mutable std::vector<uint_fast64_t> pos_precondition_support_;
+  mutable std::vector<uint_fast64_t> neg_precondition_support_;
+  mutable std::vector<uint_fast64_t> pos_effect_support_;
+  mutable std::vector<uint_fast64_t> neg_effect_support_;
   std::vector<std::vector<normalized::Action>> partially_instantiated_actions_;
   std::vector<uint_fast64_t> predicate_id_offset_;
   std::vector<bool> trivially_rigid_;
