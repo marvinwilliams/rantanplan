@@ -77,7 +77,6 @@ private:
   };
 
   mutable Cache successful_cache_;
-  mutable Cache unsuccessful_cache_;
 
   const Config &config_;
   decltype(&Preprocessor::select_free) parameter_selector_;
