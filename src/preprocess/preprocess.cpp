@@ -5,7 +5,9 @@
 #include "model/normalized/utils.hpp"
 #include "model/to_string.hpp"
 #include "planner/planner.hpp"
+#include "util/timer.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -15,6 +17,7 @@
 #include <vector>
 
 using namespace normalized;
+using namespace std::chrono_literals;
 
 Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
                            const Config &config) noexcept
@@ -90,10 +93,15 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
   });
 }
 
-void Preprocessor::refine(float progress) noexcept {
+bool Preprocessor::refine(float progress) noexcept {
   while (progress_ < progress) {
     for (auto action_list = actions_.begin(); action_list != actions_.end();
          ++action_list) {
+      if (config_.timeout > 0s &&
+          std::chrono::ceil<std::chrono::seconds>(
+              util::global_timer.get_elapsed_time()) >= config_.timeout) {
+        return false;
+      }
       std::vector<normalized::Action> new_actions;
       for (auto a = action_list->begin(); a != action_list->end(); ++a) {
         auto selection = std::invoke(parameter_selector_, *this, *a);
@@ -123,6 +131,7 @@ void Preprocessor::refine(float progress) noexcept {
     progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
                 static_cast<float>(num_actions_);
   }
+  return true;
 }
 
 size_t Preprocessor::get_num_actions() const noexcept {
@@ -355,14 +364,18 @@ void Preprocessor::simplify_actions() noexcept {
   do {
     changed = false;
     for (size_t i = 0; i < actions_.size(); ++i) {
-      auto it = std::remove_if(actions_[i].begin(), actions_[i].end(),
-                               [this](const auto &a) { return is_valid(a); });
-      if (it != actions_[i].end()) {
+      if (auto it =
+              std::partition(actions_[i].begin(), actions_[i].end(),
+                             [this](const auto &a) { return is_valid(a); });
+          it != actions_[i].end()) {
+        std::for_each(actions_[i].begin(), actions_[i].end(), [&](auto &a) {
+          num_pruned_actions_ += normalized::get_num_instantiated(a, *problem_);
+        });
         actions_[i].erase(it, actions_[i].end());
         unsuccessful_cache_ = Cache{};
         changed = true;
       }
-      std::for_each(actions_[i].begin(), it, [&](auto &a) {
+      std::for_each(actions_[i].begin(), actions_[i].end(), [&](auto &a) {
         if (simplify(a)) {
           changed = true;
         }
@@ -397,7 +410,7 @@ bool Preprocessor::simplify(Action &action) const noexcept {
       it != action.eff_instantiated.end()) {
     std::for_each(it, action.eff_instantiated.end(), [this](const auto &e) {
       (e.second ? unsuccessful_cache_.neg_rigid : unsuccessful_cache_.pos_rigid)
-          .erase(get_id(e));
+          .erase(get_id(e.first));
     });
     action.eff_instantiated.erase(it, action.eff_instantiated.end());
     changed = true;
@@ -410,7 +423,7 @@ bool Preprocessor::simplify(Action &action) const noexcept {
     std::for_each(it, action.pre_instantiated.end(), [this](const auto &e) {
       (e.second ? unsuccessful_cache_.pos_effectless
                 : unsuccessful_cache_.neg_effectless)
-          .erase(get_id(e));
+          .erase(get_id(e.first));
     });
     action.pre_instantiated.erase(it, action.pre_instantiated.end());
     changed = true;

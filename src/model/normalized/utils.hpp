@@ -268,7 +268,7 @@ void for_each_instantiation(const Condition &condition, const Action &action,
             new_condition.arguments[a].set(assignment[i].second);
           }
         }
-        f(std::move(new_condition), std::move(assignment));
+        f(instantiate(new_condition), std::move(assignment));
       },
       problem);
 }

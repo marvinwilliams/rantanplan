@@ -12,8 +12,11 @@
 #include "pddl/model_builder.hpp"
 #include "pddl/parser.hpp"
 #include "planner/planner.hpp"
+#include "preprocess/preprocess.hpp"
 #include "rantanplan_options.hpp"
+#include "util/timer.hpp"
 
+#include <chrono>
 #include <climits>
 #include <fstream>
 #include <iostream>
@@ -22,6 +25,8 @@
 #include <sstream>
 #include <string>
 #include <unistd.h>
+
+using namespace std::chrono_literals;
 
 logging::Logger main_logger{"Main"};
 logging::Logger parser_logger{"Parser"};
@@ -166,6 +171,21 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  if (config.planning_mode == Config::PlanningMode::Preprocess) {
+    LOG_INFO(main_logger, "Preprocessing to %.1f%%...",
+             config.preprocess_progress * 100);
+    Preprocessor preprocessor{problem, config};
+    if (!preprocessor.refine(config.preprocess_progress)) {
+      LOG_ERROR(main_logger, "Preprocessing timed out");
+      return 1;
+    }
+
+    LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
+             preprocessor.get_progress() * 100, preprocessor.get_num_actions());
+    LOG_INFO(main_logger, "Finished");
+    return 0;
+  }
+
   std::unique_ptr<Engine> engine;
 
   switch (config.planning_mode) {
@@ -194,16 +214,16 @@ int main(int argc, char *argv[]) {
     if (config.plan_file) {
       std::ofstream{*config.plan_file} << to_string(engine->get_plan());
     }
-    break;
+    PRINT_INFO("Finished");
+    return 0;
   case Engine::Status::Timeout:
     LOG_INFO(main_logger, "Search timed out");
-    break;
+    PRINT_INFO("Finished");
+    return 1;
   default:
     LOG_ERROR(main_logger, "An error occurred during the search");
-    break;
   }
 
   PRINT_INFO("Finished");
-
-  return 0;
+  return 2;
 }

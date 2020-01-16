@@ -44,7 +44,7 @@ void Support::set_predicate_support() noexcept {
             condition, action,
             [&](auto new_condition, auto assignment) {
               auto id = get_id(new_condition);
-              select_support(id, new_condition.positive, is_effect)
+              select_support(id, condition.positive, is_effect)
                   .emplace_back(ActionIndex{i}, std::move(assignment));
             },
             problem_);

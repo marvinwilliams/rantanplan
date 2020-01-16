@@ -23,7 +23,7 @@ public:
   explicit Preprocessor(const std::shared_ptr<normalized::Problem> &problem,
                         const Config &config) noexcept;
 
-  void refine(float progress) noexcept;
+  bool refine(float progress) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
   std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
