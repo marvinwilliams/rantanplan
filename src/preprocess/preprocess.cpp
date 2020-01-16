@@ -414,9 +414,7 @@ Preprocessor::SimplifyResult Preprocessor::simplify(Action &action) const
   if (auto it = std::partition(action.eff_instantiated.begin(),
                                action.eff_instantiated.end(),
                                [&](const auto &p) {
-                                 return !(is_rigid(p.first, p.second) ||
-                                          (is_effectless(p.first, p.second) &&
-                                           is_effectless(p.first, !p.second)));
+                                 return !(is_rigid(p.first, p.second));
                                });
       it != action.eff_instantiated.end()) {
     std::for_each(it, action.eff_instantiated.end(), [&](const auto &effect) {
