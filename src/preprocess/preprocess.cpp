@@ -60,6 +60,9 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
     actions_.push_back({action});
   }
 
+  successful_cache_.resize(problem_->predicates.size());
+  unsuccessful_cache_.resize(problem_->predicates.size());
+
   simplify_actions();
 
   num_actions_ =
@@ -70,9 +73,6 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
 
   progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
               static_cast<float>(num_actions_);
-
-  successful_cache_.resize(problem_->predicates.size());
-  unsuccessful_cache_.resize(problem_->predicates.size());
 
   parameter_selector_ = std::invoke([mode = config_.preprocess_mode]() {
     switch (mode) {
