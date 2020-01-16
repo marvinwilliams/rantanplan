@@ -23,7 +23,7 @@ public:
   explicit Preprocessor(const std::shared_ptr<normalized::Problem> &problem,
                         const Config &config) noexcept;
 
-  bool refine() noexcept;
+  void refine(float progress) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
   std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
@@ -55,13 +55,14 @@ private:
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
 
-  enum class SimplifyResult { Unchanged, Changed, Invalid };
-  SimplifyResult simplify(normalized::Action &action) const noexcept;
+  void simplify_actions() noexcept;
+  bool is_valid(const normalized::Action &action) const noexcept;
+  bool simplify(normalized::Action &action) const noexcept;
 
-  float preprocess_progress_;
+  float progress_;
   uint_fast64_t num_actions_;
   uint_fast64_t num_pruned_actions_ = 0;
-  std::vector<std::vector<normalized::Action>> partially_instantiated_actions_;
+  std::vector<std::vector<normalized::Action>> actions_;
   std::vector<uint_fast64_t> predicate_id_offset_;
   std::vector<bool> trivially_rigid_;
   std::vector<bool> trivially_effectless_;
@@ -75,8 +76,8 @@ private:
     std::unordered_set<PredicateId> neg_effectless;
   };
 
-  mutable Cache success_cache_;
-  mutable Cache failure_cache_;
+  mutable Cache successful_cache_;
+  mutable Cache unsuccessful_cache_;
 
   const Config &config_;
   decltype(&Preprocessor::select_free) parameter_selector_;
