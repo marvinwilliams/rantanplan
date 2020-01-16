@@ -63,11 +63,10 @@ private:
   uint_fast64_t num_actions_;
   uint_fast64_t num_pruned_actions_ = 0;
   std::vector<std::vector<normalized::Action>> actions_;
-  std::vector<uint_fast64_t> predicate_id_offset_;
   std::vector<bool> trivially_rigid_;
   std::vector<bool> trivially_effectless_;
-  std::vector<PredicateId> init_;
-  std::vector<std::pair<PredicateId, bool>> goal_;
+  std::vector<std::vector<PredicateId>> init_;
+  std::vector<std::vector<std::pair<PredicateId, bool>>> goal_;
 
   struct Cache {
     std::unordered_set<PredicateId> pos_rigid;
@@ -76,8 +75,8 @@ private:
     std::unordered_set<PredicateId> neg_effectless;
   };
 
-  mutable Cache successful_cache_;
-  mutable Cache unsuccessful_cache_;
+  mutable std::vector<Cache> successful_cache_;
+  mutable std::vector<Cache> unsuccessful_cache_;
 
   const Config &config_;
   decltype(&Preprocessor::select_free) parameter_selector_;
