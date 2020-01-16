@@ -55,6 +55,7 @@ private:
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
 
+  void remove_action(const normalized::Action &action) const noexcept;
   enum class SimplifyResult { Unchanged, Changed, Invalid };
   SimplifyResult simplify(normalized::Action &action) const noexcept;
 

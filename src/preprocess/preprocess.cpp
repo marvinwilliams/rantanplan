@@ -51,16 +51,18 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
   neg_effect_support_.resize(predicate_id_offset_.back(), 0ul);
 
   for (const auto &action : problem_->actions) {
+    uint_fast64_t num_action_instantiations =
+        get_num_instantiated(action, *problem_);
     for (const auto &[precondition, positive] : action.pre_instantiated) {
       trivially_effectless_[precondition.definition] = false;
       (positive ? pos_precondition_support_
                 : neg_precondition_support_)[get_id(precondition)] +=
-          get_num_instantiated(action, *problem_);
+          num_action_instantiations;
     }
     for (const auto &precondition : action.preconditions) {
       trivially_effectless_[precondition.definition] = false;
       uint_fast64_t num_instantiations =
-          get_num_instantiated(action, *problem_) /
+          num_action_instantiations /
           get_num_instantiated(precondition, action, *problem_);
       for_each_instantiation(
           precondition, action,
@@ -75,12 +77,12 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
     for (const auto &[effect, positive] : action.eff_instantiated) {
       trivially_rigid_[effect.definition] = false;
       (positive ? pos_effect_support_ : neg_effect_support_)[get_id(effect)] +=
-          get_num_instantiated(action, *problem_);
+          num_action_instantiations;
     }
     for (const auto &effect : action.effects) {
       trivially_rigid_[effect.definition] = false;
       uint_fast64_t num_instantiations =
-          get_num_instantiated(action, *problem_) /
+          num_action_instantiations /
           get_num_instantiated(effect, action, *problem_);
       for_each_instantiation(
           effect, action,
@@ -246,7 +248,7 @@ bool Preprocessor::has_precondition(const Action &action,
   return false;
 }
 
-// No action has this predicate as effect and it is not in init
+// No action has this predicate negated as effect and it is not in init
 bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
                             bool positive) const noexcept {
   auto id = get_id(predicate);
@@ -260,10 +262,8 @@ bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
 // No action has this predicate as precondition and it is a not a goal
 bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
                                  bool positive) const noexcept {
-  auto id = get_id(predicate);
-
-  return (positive ? neg_precondition_support_
-                   : pos_precondition_support_)[id] == 0;
+  return (positive ? pos_precondition_support_
+                   : neg_precondition_support_)[get_id(predicate)] == 0;
 }
 
 ParameterSelection Preprocessor::select_free(const Action &action) const
@@ -328,59 +328,101 @@ ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
   return get_referenced_parameters(action, *max);
 }
 
+void Preprocessor::remove_action(const Action &action) const noexcept {
+  uint_fast64_t num_action_instantiations =
+      get_num_instantiated(action, *problem_);
+
+  for (const auto &[precondition, positive] : action.pre_instantiated) {
+    assert((positive ? pos_precondition_support_
+                     : neg_precondition_support_)[get_id(precondition)] >=
+           num_action_instantiations);
+    (positive ? pos_precondition_support_
+              : neg_precondition_support_)[get_id(precondition)] -=
+        num_action_instantiations;
+  }
+
+  for (const auto &precondition : action.preconditions) {
+    uint_fast64_t num_instantiations =
+        num_action_instantiations /
+        get_num_instantiated(precondition, action, *problem_);
+    for_each_instantiation(
+        precondition, action,
+        [&](const auto &new_condition, const auto &) {
+          assert((precondition.positive
+                      ? pos_precondition_support_
+                      : neg_precondition_support_)[get_id(new_condition)] >=
+                 num_instantiations);
+          (precondition.positive
+               ? pos_precondition_support_
+               : neg_precondition_support_)[get_id(new_condition)] -=
+              num_instantiations;
+        },
+        *problem_);
+  }
+
+  for (const auto &[effect, positive] : action.eff_instantiated) {
+    assert((positive ? pos_effect_support_
+                     : neg_effect_support_)[get_id(effect)] >=
+           num_action_instantiations);
+    (positive ? pos_effect_support_ : neg_effect_support_)[get_id(effect)] -=
+        num_action_instantiations;
+  }
+
+  for (const auto &effect : action.effects) {
+    uint_fast64_t num_instantiations =
+        num_action_instantiations /
+        get_num_instantiated(effect, action, *problem_);
+    for_each_instantiation(
+        effect, action,
+        [&](const auto &new_condition, const auto &) {
+          assert((effect.positive
+                      ? pos_effect_support_
+                      : neg_effect_support_)[get_id(new_condition)] >=
+                 num_instantiations);
+          (effect.positive ? pos_effect_support_
+                           : neg_effect_support_)[get_id(new_condition)] -=
+              num_instantiations;
+        },
+        *problem_);
+  }
+}
+
 Preprocessor::SimplifyResult Preprocessor::simplify(Action &action) const
     noexcept {
   uint_fast64_t num_action_instantiations =
       get_num_instantiated(action, *problem_);
+
   if (std::any_of(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
           [this](const auto &p) { return is_rigid(p.first, !p.second); })) {
-    for (const auto &[precondition, positive] : action.pre_instantiated) {
-      (positive ? pos_precondition_support_
-                : neg_precondition_support_)[get_id(precondition)] -=
-          num_action_instantiations;
-    }
-    for (const auto &precondition : action.preconditions) {
-      uint_fast64_t num_instantiations =
-          num_action_instantiations /
-          get_num_instantiated(precondition, action, *problem_);
-      for_each_instantiation(
-          precondition, action,
-          [&](const auto &new_condition, const auto &) {
-            (precondition.positive
-                 ? pos_precondition_support_
-                 : neg_precondition_support_)[get_id(new_condition)] -=
-                num_instantiations;
-          },
-          *problem_);
-    }
-    for (const auto &[effect, positive] : action.eff_instantiated) {
-      (positive ? pos_effect_support_ : neg_effect_support_)[get_id(effect)] -=
-          num_action_instantiations;
-    }
-    for (const auto &effect : action.effects) {
-      uint_fast64_t num_instantiations =
-          num_action_instantiations /
-          get_num_instantiated(effect, action, *problem_);
-      for_each_instantiation(
-          effect, action,
-          [&](const auto &new_condition, const auto &) {
-            (effect.positive ? pos_effect_support_
-                             : neg_effect_support_)[get_id(new_condition)] -=
-                num_instantiations;
-          },
-          *problem_);
-    }
+    remove_action(action);
+    return SimplifyResult::Invalid;
+  }
+
+  if (action.effects.empty() &&
+      std::all_of(action.eff_instantiated.begin(),
+                  action.eff_instantiated.end(), [this](const auto &p) {
+                    return is_rigid(p.first, p.second) ||
+                           is_effectless(p.first, p.second);
+                  })) {
+    remove_action(action);
     return SimplifyResult::Invalid;
   }
 
   SimplifyResult result = SimplifyResult::Unchanged;
 
-  if (auto it = std::remove_if(
-          action.eff_instantiated.begin(), action.eff_instantiated.end(),
-          [this](const auto &p) { return is_rigid(p.first, p.second); });
+  if (auto it = std::partition(action.eff_instantiated.begin(),
+                               action.eff_instantiated.end(),
+                               [&](const auto &p) {
+                                 return !(is_rigid(p.first, p.second) ||
+                                          (is_effectless(p.first, p.second) &&
+                                           is_effectless(p.first, !p.second)));
+                               });
       it != action.eff_instantiated.end()) {
     std::for_each(it, action.eff_instantiated.end(), [&](const auto &effect) {
+      assert((effect.second ? pos_effect_support_
+                            : neg_effect_support_)[get_id(effect.first)] >=
+             num_action_instantiations);
       (effect.second ? pos_effect_support_
                      : neg_effect_support_)[get_id(effect.first)] -=
           num_action_instantiations;
@@ -389,55 +431,17 @@ Preprocessor::SimplifyResult Preprocessor::simplify(Action &action) const
     result = SimplifyResult::Changed;
   }
 
-  if (action.effects.empty() &&
-      std::all_of(
-          action.eff_instantiated.begin(), action.eff_instantiated.end(),
-          [this](const auto &p) { return is_effectless(p.first, p.second); })) {
-    for (const auto &[precondition, positive] : action.pre_instantiated) {
-      (positive ? pos_precondition_support_
-                : neg_precondition_support_)[get_id(precondition)] -=
-          get_num_instantiated(action, *problem_);
-    }
-    for (const auto &precondition : action.preconditions) {
-      uint_fast64_t num_instantiations =
-          get_num_instantiated(action, *problem_) /
-          get_num_instantiated(precondition, action, *problem_);
-      for_each_instantiation(
-          precondition, action,
-          [&](const auto &new_condition, const auto &) {
-            (precondition.positive
-                 ? pos_precondition_support_
-                 : neg_precondition_support_)[get_id(new_condition)] -=
-                num_instantiations;
-          },
-          *problem_);
-    }
-    for (const auto &[effect, positive] : action.eff_instantiated) {
-      (positive ? pos_effect_support_ : neg_effect_support_)[get_id(effect)] -=
-          get_num_instantiated(action, *problem_);
-    }
-    for (const auto &effect : action.effects) {
-      uint_fast64_t num_instantiations =
-          get_num_instantiated(action, *problem_) /
-          get_num_instantiated(effect, action, *problem_);
-      for_each_instantiation(
-          effect, action,
-          [&](const auto &new_condition, const auto &) {
-            (effect.positive ? pos_effect_support_
-                             : neg_effect_support_)[get_id(new_condition)] -=
-                num_instantiations;
-          },
-          *problem_);
-    }
-    return SimplifyResult::Invalid;
-  }
-
-  if (auto it = std::remove_if(
+  if (auto it = std::partition(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
-          [this](const auto &p) { return is_rigid(p.first, p.second); });
+          [&](const auto &p) { return !is_rigid(p.first, p.second); });
       it != action.pre_instantiated.end()) {
     std::for_each(
         it, action.pre_instantiated.end(), [&](const auto &precondition) {
+          assert(
+              (precondition.second
+                   ? pos_precondition_support_
+                   : neg_precondition_support_)[get_id(precondition.first)] >=
+              num_action_instantiations);
           (precondition.second
                ? pos_precondition_support_
                : neg_precondition_support_)[get_id(precondition.first)] -=
@@ -448,6 +452,7 @@ Preprocessor::SimplifyResult Preprocessor::simplify(Action &action) const
   }
 
   return result;
+  /* return SimplifyResult::Unchanged; */
 }
 
 std::shared_ptr<Problem> Preprocessor::extract_problem() const noexcept {
