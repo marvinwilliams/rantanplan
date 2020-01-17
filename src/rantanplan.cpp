@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
+    LOG_INFO(main_logger, "Preprocessed to %.1f%% resulting in %lu actions",
              preprocessor.get_progress() * 100, preprocessor.get_num_actions());
     LOG_INFO(main_logger, "Finished");
     return 0;
