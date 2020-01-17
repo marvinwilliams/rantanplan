@@ -3,6 +3,7 @@
 
 #include "logging/logging.hpp"
 
+#include <unordered_map>
 #include <algorithm>
 #include <exception>
 #include <iostream>
