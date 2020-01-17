@@ -25,6 +25,12 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
   trivially_rigid_.resize(problem_->predicates.size(), true);
   trivially_effectless_.resize(problem_->predicates.size(), true);
 
+  num_actions_ =
+      std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
+                      [this](uint_fast64_t sum, const auto &a) {
+                        return sum + get_num_instantiated(a, *problem_);
+                      });
+
   for (const auto &action : problem_->actions) {
     for (const auto &[precondition, positive] : action.pre_instantiated) {
       trivially_effectless_[precondition.definition] = false;
@@ -65,12 +71,6 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
 
   simplify_actions();
 
-  num_actions_ =
-      std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
-                      [this](uint_fast64_t sum, const auto &a) {
-                        return sum + get_num_instantiated(a, *problem_);
-                      });
-
   progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
               static_cast<float>(num_actions_);
 
@@ -100,22 +100,10 @@ bool Preprocessor::refine(float progress) noexcept {
       for (auto a = action_list->begin(); a != action_list->end(); ++a) {
         auto selection = std::invoke(parameter_selector_, *this, *a);
 
-        if (selection.empty()) {
-          new_actions.push_back(*a);
-          continue;
-        }
-
         for_each_instantiation(
             selection, *a,
             [&](const auto &assignment) {
-              auto new_action = ground(assignment, *a);
-              if (is_valid(new_action)) {
-                simplify(new_action);
-                new_actions.push_back(new_action);
-              } else {
-                num_pruned_actions_ +=
-                    normalized::get_num_instantiated(new_action, *problem_);
-              }
+              new_actions.push_back(ground(assignment, *a));
             },
             *problem_);
       }
@@ -281,6 +269,7 @@ bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
     effectless.insert(id);
     return true;
   }
+
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
     const auto &action = problem_->actions[i];
     if (!has_precondition(action, predicate, positive)) {
@@ -368,7 +357,7 @@ void Preprocessor::simplify_actions() noexcept {
               std::partition(actions_[i].begin(), actions_[i].end(),
                              [this](const auto &a) { return is_valid(a); });
           it != actions_[i].end()) {
-        std::for_each(it, actions_[i].end(), [&](auto &a) {
+        std::for_each(it, actions_[i].end(), [&](const auto &a) {
           num_pruned_actions_ += normalized::get_num_instantiated(a, *problem_);
           for (const auto &precondition : a.preconditions) {
             (precondition.positive
@@ -425,15 +414,12 @@ bool Preprocessor::is_valid(const Action &action) const noexcept {
 
 bool Preprocessor::simplify(Action &action) const noexcept {
   bool changed = false;
-  if (auto it = std::partition(
+  // Cached not rigid predicates won't become rigid by removing them from
+  // actions
+  if (auto it = std::remove_if(
           action.eff_instantiated.begin(), action.eff_instantiated.end(),
-          [this](const auto &p) { return !is_rigid(p.first, p.second); });
+          [this](const auto &p) { return is_rigid(p.first, p.second); });
       it != action.eff_instantiated.end()) {
-    std::for_each(it, action.eff_instantiated.end(), [this](const auto &e) {
-      (e.second ? unsuccessful_cache_[e.first.definition].neg_rigid
-                : unsuccessful_cache_[e.first.definition].pos_rigid)
-          .erase(get_id(e.first));
-    });
     action.eff_instantiated.erase(it, action.eff_instantiated.end());
     changed = true;
   }
