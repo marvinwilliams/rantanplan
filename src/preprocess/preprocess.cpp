@@ -22,15 +22,14 @@ using namespace std::chrono_literals;
 Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
                            const Config &config) noexcept
     : config_{config}, problem_{problem} {
-  trivially_rigid_.resize(problem_->predicates.size(), true);
-  trivially_effectless_.resize(problem_->predicates.size(), true);
-
   num_actions_ =
       std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
                       [this](uint_fast64_t sum, const auto &a) {
                         return sum + get_num_instantiated(a, *problem_);
                       });
 
+  trivially_rigid_.resize(problem_->predicates.size(), true);
+  trivially_effectless_.resize(problem_->predicates.size(), true);
   for (const auto &action : problem_->actions) {
     for (const auto &[precondition, positive] : action.pre_instantiated) {
       trivially_effectless_[precondition.definition] = false;
@@ -129,8 +128,8 @@ float Preprocessor::get_progress() const noexcept { return progress_; }
 Preprocessor::PredicateId
 Preprocessor::get_id(const PredicateInstantiation &predicate) const noexcept {
   uint_fast64_t result = 0;
-  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    result = (result * problem_->constants.size()) + predicate.arguments[i];
+  for (auto arg : predicate.arguments) {
+    result = (result * problem_->constants.size()) + arg;
   }
   return result;
 }
