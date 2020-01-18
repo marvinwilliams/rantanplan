@@ -55,6 +55,7 @@ private:
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
 
+  void remove_action(const normalized::Action& a) noexcept;
   void simplify_actions() noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
