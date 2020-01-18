@@ -22,7 +22,7 @@ Engine::Status OneshotEngine::start_impl() noexcept {
            config_.preprocess_progress * 100);
   Preprocessor preprocessor{problem_, config_};
   while (preprocessor.get_progress() <= config_.preprocess_progress &&
-         preprocessor.refine()) {
+         preprocessor.refine(config_.preprocess_progress)) {
     if (config_.timeout > 0s &&
         std::chrono::ceil<std::chrono::seconds>(
             util::global_timer.get_elapsed_time()) >= config_.timeout) {

@@ -276,10 +276,12 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
 
   for (const auto &action : problem.get_actions()) {
     auto new_actions = normalize_action(*action, problem);
-    normalized_problem->actions.insert(normalized_problem->actions.cend(),
-                                       new_actions.begin(), new_actions.end());
-    normalized_problem->action_names.insert(
-        normalized_problem->action_names.end(), action->name);
+    for (const auto &a : new_actions) {
+      if (get_num_instantiated(a, *normalized_problem) > 0) {
+        normalized_problem->actions.push_back(a);
+        normalized_problem->action_names.push_back(action->name);
+      }
+    }
   }
 
   return normalized_problem;

@@ -175,21 +175,12 @@ int main(int argc, char *argv[]) {
     LOG_INFO(main_logger, "Preprocessing to %.1f%%...",
              config.preprocess_progress * 100);
     Preprocessor preprocessor{problem, config};
-    float progress = preprocessor.get_progress();
-    while (preprocessor.get_progress() < config.preprocess_progress || progress == 1.0f) {
-      if (!preprocessor.refine()) {
-        break;
-      }
-      progress = preprocessor.get_progress();
-      if (config.timeout > 0s &&
-          std::chrono::ceil<std::chrono::seconds>(
-              util::global_timer.get_elapsed_time()) >= config.timeout) {
-        LOG_INFO(main_logger, "Preprocessing timed out");
-        return 1;
-      }
+    if (!preprocessor.refine(config.preprocess_progress)) {
+      LOG_ERROR(main_logger, "Preprocessing timed out");
+      return 1;
     }
 
-    LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
+    LOG_INFO(main_logger, "Preprocessed to %.1f%% resulting in %lu actions",
              preprocessor.get_progress() * 100, preprocessor.get_num_actions());
     LOG_INFO(main_logger, "Finished");
     return 0;

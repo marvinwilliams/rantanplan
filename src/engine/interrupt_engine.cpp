@@ -39,7 +39,7 @@ Engine::Status InterruptEngine::start_impl() noexcept {
     }
 
     if (progress < next_progress || progress == 1.0f) {
-      if (!preprocessor.refine()) {
+      if (!preprocessor.refine(next_progress)) {
         break;
       }
       progress = preprocessor.get_progress();
