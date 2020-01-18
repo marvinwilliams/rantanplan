@@ -113,12 +113,13 @@ bool Preprocessor::refine(float progress) noexcept {
             *problem_);
       }
       *action_list = std::move(new_actions);
+      progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
+                  static_cast<float>(num_actions_);
+      if (progress_ >= progress) {
+        break;
+      }
     }
-    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
-                  [](auto &c) { c = Cache{}; });
     simplify_actions();
-    progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
-                static_cast<float>(num_actions_);
   }
   return true;
 }
@@ -211,12 +212,12 @@ bool Preprocessor::is_rigid(const PredicateInstantiation &predicate,
                 : unsuccessful_cache_[predicate.definition].neg_rigid);
   auto id = get_id(predicate);
 
-  if (not_rigid.find(id) != not_rigid.end()) {
-    return false;
-  }
-
   if (rigid.find(id) != rigid.end()) {
     return true;
+  }
+
+  if (not_rigid.find(id) != not_rigid.end()) {
+    return false;
   }
 
   if (std::binary_search(init_[predicate.definition].begin(),
@@ -257,12 +258,12 @@ bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
       (positive ? unsuccessful_cache_[predicate.definition].pos_effectless
                 : unsuccessful_cache_[predicate.definition].neg_effectless);
 
-  if (not_effectless.find(id) != not_effectless.end()) {
-    return false;
-  }
-
   if (effectless.find(id) != effectless.end()) {
     return true;
+  }
+
+  if (not_effectless.find(id) != not_effectless.end()) {
+    return false;
   }
 
   if (std::binary_search(goal_[predicate.definition].begin(),
@@ -359,25 +360,32 @@ void Preprocessor::simplify_actions() noexcept {
   bool changed;
   do {
     changed = false;
+    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
+                  [](auto &c) {
+                    c.pos_rigid.clear();
+                    c.neg_rigid.clear();
+                    c.pos_effectless.clear();
+                    c.neg_effectless.clear();
+                  });
     for (size_t i = 0; i < actions_.size(); ++i) {
-      if (auto it =
-              std::partition(actions_[i].begin(), actions_[i].end(),
-                             [this](const auto &a) { return is_valid(a); });
-          it != actions_[i].end()) {
-        std::for_each(it, actions_[i].end(), [this](const auto &a) {
-          num_pruned_actions_ += get_num_instantiated(a, *problem_);
-        });
-        actions_[i].erase(it, actions_[i].end());
+      auto it = std::remove_if(
+          actions_[i].begin(), actions_[i].end(), [this](const auto &a) {
+            if (!is_valid(a)) {
+              num_pruned_actions_ += get_num_instantiated(a, *problem_);
+              return true;
+            }
+            return false;
+          });
+      if (it != actions_[i].end()) {
         changed = true;
       }
+      actions_[i].erase(it, actions_[i].end());
       std::for_each(actions_[i].begin(), actions_[i].end(), [&](auto &a) {
         if (simplify(a)) {
           changed = true;
         }
       });
     }
-    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
-                  [](auto &c) { c = Cache{}; });
   } while (changed);
 }
 
@@ -401,9 +409,13 @@ bool Preprocessor::is_valid(const Action &action) const noexcept {
 
 bool Preprocessor::simplify(Action &action) const noexcept {
   bool changed = false;
-  if (auto it = std::remove_if(
-          action.eff_instantiated.begin(), action.eff_instantiated.end(),
-          [this](const auto &p) { return is_rigid(p.first, p.second); });
+  if (auto it = std::remove_if(action.eff_instantiated.begin(),
+                               action.eff_instantiated.end(),
+                               [this](const auto &p) {
+                                 return is_rigid(p.first, p.second) ||
+                                        (is_effectless(p.first, p.second) &&
+                                         is_effectless(p.first, !p.second));
+                               });
       it != action.eff_instantiated.end()) {
     action.eff_instantiated.erase(it, action.eff_instantiated.end());
     changed = true;
