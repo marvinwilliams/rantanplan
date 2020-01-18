@@ -68,6 +68,11 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
 
   successful_cache_.resize(problem_->predicates.size());
   unsuccessful_cache_.resize(problem_->predicates.size());
+  defer_remove_cache_.resize(problem_->predicates.size());
+  pos_rigid_dirty.resize(problem_->predicates.size(), false);
+  neg_rigid_dirty.resize(problem_->predicates.size(), false);
+  pos_effectless_dirty.resize(problem_->predicates.size(), false);
+  neg_effectless_dirty.resize(problem_->predicates.size(), false);
 
   simplify_actions();
 
@@ -97,7 +102,6 @@ bool Preprocessor::refine(float progress) noexcept {
         return false;
       }
       std::vector<Action> new_actions;
-      std::vector<Action> remove_actions;
       for (auto a = action_list->begin(); a != action_list->end(); ++a) {
         auto selection = std::invoke(parameter_selector_, *this, *a);
         for_each_instantiation(
@@ -108,17 +112,15 @@ bool Preprocessor::refine(float progress) noexcept {
                 simplify(new_action);
                 new_actions.push_back(new_action);
               } else {
-                remove_actions.push_back(new_action);
+                num_pruned_actions_ +=
+                    get_num_instantiated(new_action, *problem_);
+                defer_remove_action(new_action);
               }
             },
             *problem_);
       }
+      clear_cache();
       *action_list = std::move(new_actions);
-      std::for_each(remove_actions.begin(), remove_actions.end(),
-                    [this](const auto &a) {
-                      num_pruned_actions_ += get_num_instantiated(a, *problem_);
-                      remove_action(a);
-                    });
     }
     simplify_actions();
     progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
@@ -357,6 +359,65 @@ ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
   }
 
   return get_referenced_parameters(action, *max);
+}
+
+void Preprocessor::clear_cache() noexcept {
+  for (size_t i = 0; i < problem_->predicates.size(); ++i) {
+    if (pos_rigid_dirty[i]) {
+      unsuccessful_cache_[i].pos_rigid.clear();
+      pos_rigid_dirty[i] = false;
+    }
+    if (neg_rigid_dirty[i]) {
+      unsuccessful_cache_[i].neg_rigid.clear();
+      neg_rigid_dirty[i] = false;
+    }
+    if (pos_effectless_dirty[i]) {
+      unsuccessful_cache_[i].pos_effectless.clear();
+      pos_effectless_dirty[i] = false;
+    }
+    if (neg_effectless_dirty[i]) {
+      unsuccessful_cache_[i].neg_effectless.clear();
+      neg_effectless_dirty[i] = false;
+    }
+    for (auto id : defer_remove_cache_[i].pos_rigid) {
+      unsuccessful_cache_[i].pos_rigid.erase(id);
+    }
+    defer_remove_cache_[i].pos_rigid.clear();
+    for (auto id : defer_remove_cache_[i].neg_rigid) {
+      unsuccessful_cache_[i].neg_rigid.erase(id);
+    }
+    defer_remove_cache_[i].neg_rigid.clear();
+    for (auto id : defer_remove_cache_[i].pos_effectless) {
+      unsuccessful_cache_[i].pos_effectless.erase(id);
+    }
+    defer_remove_cache_[i].pos_effectless.clear();
+    for (auto id : defer_remove_cache_[i].neg_effectless) {
+      unsuccessful_cache_[i].neg_effectless.erase(id);
+    }
+    defer_remove_cache_[i].neg_effectless.clear();
+  }
+}
+
+void Preprocessor::defer_remove_action(const Action &a) noexcept {
+  for (const auto &precondition : a.preconditions) {
+    (precondition.positive ? pos_effectless_dirty
+                           : neg_effectless_dirty)[precondition.definition] =
+        true;
+  }
+  for (const auto &effect : a.effects) {
+    (effect.positive ? neg_rigid_dirty : pos_rigid_dirty)[effect.definition] =
+        true;
+  }
+  for (const auto &[precondition, positive] : a.pre_instantiated) {
+    (positive ? defer_remove_cache_[precondition.definition].pos_effectless
+              : defer_remove_cache_[precondition.definition].neg_effectless)
+        .insert(get_id(precondition));
+  }
+  for (const auto &[effect, positive] : a.eff_instantiated) {
+    (positive ? defer_remove_cache_[effect.definition].neg_rigid
+              : defer_remove_cache_[effect.definition].pos_rigid)
+        .insert(get_id(effect));
+  }
 }
 
 void Preprocessor::remove_action(const Action &a) noexcept {

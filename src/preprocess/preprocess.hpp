@@ -55,7 +55,9 @@ private:
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
 
-  void remove_action(const normalized::Action& a) noexcept;
+  void clear_cache() noexcept;
+  void defer_remove_action(const normalized::Action &a) noexcept;
+  void remove_action(const normalized::Action &a) noexcept;
   void simplify_actions() noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
@@ -78,6 +80,11 @@ private:
 
   mutable std::vector<Cache> successful_cache_;
   mutable std::vector<Cache> unsuccessful_cache_;
+  mutable std::vector<Cache> defer_remove_cache_;
+  mutable std::vector<bool> pos_rigid_dirty;
+  mutable std::vector<bool> neg_rigid_dirty;
+  mutable std::vector<bool> pos_effectless_dirty;
+  mutable std::vector<bool> neg_effectless_dirty;
 
   const Config &config_;
   decltype(&Preprocessor::select_free) parameter_selector_;
