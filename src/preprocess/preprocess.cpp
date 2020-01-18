@@ -96,7 +96,6 @@ bool Preprocessor::refine(float progress) noexcept {
         return false;
       }
       std::vector<Action> new_actions;
-      std::vector<Action> remove_actions;
       for (auto a = action_list->begin(); a != action_list->end(); ++a) {
         auto selection = std::invoke(parameter_selector_, *this, *a);
         for_each_instantiation(
@@ -107,18 +106,16 @@ bool Preprocessor::refine(float progress) noexcept {
                 simplify(new_action);
                 new_actions.push_back(new_action);
               } else {
-                remove_actions.push_back(new_action);
+                num_pruned_actions_ +=
+                    get_num_instantiated(new_action, *problem_);
               }
             },
             *problem_);
       }
       *action_list = std::move(new_actions);
-      std::for_each(remove_actions.begin(), remove_actions.end(),
-                    [this](const auto &a) {
-                      num_pruned_actions_ += get_num_instantiated(a, *problem_);
-                      remove_action(a);
-                    });
     }
+    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
+                  [](auto &c) { c = Cache{}; });
     simplify_actions();
     progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
                 static_cast<float>(num_actions_);
@@ -358,30 +355,6 @@ ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
   return get_referenced_parameters(action, *max);
 }
 
-void Preprocessor::remove_action(const Action &a) noexcept {
-  for (const auto &precondition : a.preconditions) {
-    (precondition.positive
-         ? unsuccessful_cache_[precondition.definition].pos_effectless
-         : unsuccessful_cache_[precondition.definition].neg_effectless)
-        .clear();
-  }
-  for (const auto &effect : a.effects) {
-    (effect.positive ? unsuccessful_cache_[effect.definition].neg_rigid
-                     : unsuccessful_cache_[effect.definition].pos_rigid)
-        .clear();
-  }
-  for (const auto &[precondition, positive] : a.pre_instantiated) {
-    (positive ? unsuccessful_cache_[precondition.definition].pos_effectless
-              : unsuccessful_cache_[precondition.definition].neg_effectless)
-        .erase(get_id(precondition));
-  }
-  for (const auto &[effect, positive] : a.eff_instantiated) {
-    (positive ? unsuccessful_cache_[effect.definition].neg_rigid
-              : unsuccessful_cache_[effect.definition].pos_rigid)
-        .erase(get_id(effect));
-  }
-}
-
 void Preprocessor::simplify_actions() noexcept {
   bool changed;
   do {
@@ -393,7 +366,6 @@ void Preprocessor::simplify_actions() noexcept {
           it != actions_[i].end()) {
         std::for_each(it, actions_[i].end(), [this](const auto &a) {
           num_pruned_actions_ += get_num_instantiated(a, *problem_);
-          remove_action(a);
         });
         actions_[i].erase(it, actions_[i].end());
         changed = true;
@@ -404,6 +376,8 @@ void Preprocessor::simplify_actions() noexcept {
         }
       });
     }
+    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
+                  [](auto &c) { c = Cache{}; });
   } while (changed);
 }
 
@@ -427,8 +401,6 @@ bool Preprocessor::is_valid(const Action &action) const noexcept {
 
 bool Preprocessor::simplify(Action &action) const noexcept {
   bool changed = false;
-  // Cached not rigid predicates won't become rigid by removing them from
-  // actions
   if (auto it = std::remove_if(
           action.eff_instantiated.begin(), action.eff_instantiated.end(),
           [this](const auto &p) { return is_rigid(p.first, p.second); });
@@ -437,15 +409,10 @@ bool Preprocessor::simplify(Action &action) const noexcept {
     changed = true;
   }
 
-  if (auto it = std::partition(
+  if (auto it = std::remove_if(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
-          [this](const auto &p) { return !is_rigid(p.first, p.second); });
+          [this](const auto &p) { return is_rigid(p.first, p.second); });
       it != action.pre_instantiated.end()) {
-    std::for_each(it, action.pre_instantiated.end(), [this](const auto &p) {
-      (p.second ? unsuccessful_cache_[p.first.definition].pos_effectless
-                : unsuccessful_cache_[p.first.definition].neg_effectless)
-          .erase(get_id(p.first));
-    });
     action.pre_instantiated.erase(it, action.pre_instantiated.end());
     changed = true;
   }
