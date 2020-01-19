@@ -2,8 +2,8 @@
 #define RANTANPLAN_OPTIONS_HPP
 
 #include "config.hpp"
-#include "options/options.hpp"
 #include "logging/logging.hpp"
+#include "options/options.hpp"
 
 #include <string>
 
@@ -35,6 +35,9 @@ inline options::Options set_options(const std::string &name) {
   options.add_option<unsigned int>(
       {"solver-timeout", 'u'},
       "Time for individual solvers before getting interrupted");
+  options.add_option<unsigned int>(
+      {"preprocess-timeout", 'w'},
+      "Time for individual preprocessing steps before getting interrupted");
   options.add_option<unsigned int>({"num-threads", 'j'}, "Number of threads");
   options.add_option<unsigned int>({"dnf-threshold", 'd'}, "DNF threshold");
   options.add_option<bool>({"debug-log", 'v'}, "Enable debug logging");
@@ -124,6 +127,11 @@ inline void set_config(Config &config, const options::Options &options) {
   if (const auto &o = options.get<unsigned int>("solver-timeout");
       o.count > 0) {
     config.solver_timeout = std::chrono::seconds{o.value};
+  }
+
+  if (const auto &o = options.get<unsigned int>("preprocess-timeout");
+      o.count > 0) {
+    config.preprocess_timeout = std::chrono::seconds{o.value};
   }
 
   if (const auto &o = options.get<unsigned int>("num-threads"); o.count > 0) {

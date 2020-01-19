@@ -98,8 +98,11 @@ if(DEBUG_BUILD)
   set(CMAKE_BUILD_TYPE "Debug")
   add_definitions(-DDEBUG_BUILD -D_GLIBCXX_DEBUG)
   add_compile_options(
-    -g -O0
-    )
+  -g
+  -O0
+  -fsanitize=address
+  -fsanitize=undefined
+  )
 else()
   set(CMAKE_BUILD_TYPE "Release")
   add_compile_options(

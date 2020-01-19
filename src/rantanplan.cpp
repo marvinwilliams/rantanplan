@@ -175,7 +175,8 @@ int main(int argc, char *argv[]) {
     LOG_INFO(main_logger, "Preprocessing to %.1f%%...",
              config.preprocess_progress * 100);
     Preprocessor preprocessor{problem, config};
-    if (!preprocessor.refine(config.preprocess_progress)) {
+    if (!preprocessor.refine(config.preprocess_progress,
+                             config.preprocess_timeout)) {
       LOG_ERROR(main_logger, "Preprocessing timed out");
       return 1;
     }
@@ -217,7 +218,7 @@ int main(int argc, char *argv[]) {
     PRINT_INFO("Finished");
     return 0;
   case Engine::Status::Timeout:
-    LOG_INFO(main_logger, "Search timed out");
+    LOG_ERROR(main_logger, "Search timed out");
     PRINT_INFO("Finished");
     return 1;
   default:

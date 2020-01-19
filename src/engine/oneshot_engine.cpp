@@ -21,13 +21,10 @@ Engine::Status OneshotEngine::start_impl() noexcept {
   LOG_INFO(engine_logger, "Preprocessing to %.1f%%...",
            config_.preprocess_progress * 100);
   Preprocessor preprocessor{problem_, config_};
-  while (preprocessor.get_progress() <= config_.preprocess_progress &&
-         preprocessor.refine(config_.preprocess_progress)) {
-    if (config_.timeout > 0s &&
-        std::chrono::ceil<std::chrono::seconds>(
-            util::global_timer.get_elapsed_time()) >= config_.timeout) {
-      return Status::Timeout;
-    }
+  if (!preprocessor.refine(config_.preprocess_progress,
+                           config_.preprocess_timeout)) {
+    LOG_ERROR(engine_logger, "Preprocessing timed out");
+    return Engine::Status::Timeout;
   }
 
   LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",

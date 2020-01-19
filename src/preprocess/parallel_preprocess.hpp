@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <unordered_set>
 #include <utility>
 
@@ -21,13 +22,12 @@ public:
   struct predicate_id_t {};
   using PredicateId = util::Index<predicate_id_t>;
 
-
-  explicit ParallelPreprocessor(
+  explicit ParallelPreprocessor(unsigned int num_threads,
       const std::shared_ptr<normalized::Problem> &problem,
       const Config &config) noexcept;
 
-  bool refine(unsigned int num_threads,
-              const std::atomic_bool &plan_found) noexcept;
+  bool refine(float progress, unsigned int num_threads,
+              const std::atomic_bool &stop_flag) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
   std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
@@ -58,41 +58,39 @@ private:
   select_min_new(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
+  void clear_cache() noexcept;
+  void defer_remove_action(const normalized::Action &a) noexcept;
+  void simplify_actions(unsigned int num_threads) noexcept;
+  bool is_valid(const normalized::Action &action) const noexcept;
+  bool simplify(normalized::Action &action) const noexcept;
 
-  enum class SimplifyResult { Unchanged, Changed, Invalid };
-  SimplifyResult simplify(normalized::Action &action) const noexcept;
-
-  float preprocess_progress_;
+  float progress_;
   uint_fast64_t num_actions_;
-  uint_fast64_t num_pruned_actions_ = 0;
-  std::vector<std::vector<normalized::Action>> partially_instantiated_actions_;
-  std::vector<uint_fast64_t> predicate_id_offset_;
+  std::atomic_uint_fast64_t num_pruned_actions_ = 0;
+  std::vector<std::vector<normalized::Action>> actions_;
   std::vector<bool> trivially_rigid_;
   std::vector<bool> trivially_effectless_;
-  std::vector<PredicateId> init_;
-  std::vector<std::pair<PredicateId, bool>> goal_;
+  std::vector<std::vector<PredicateId>> init_;
+  std::vector<std::vector<std::pair<PredicateId, bool>>> goal_;
 
   struct Cache {
     std::unordered_set<PredicateId> pos_rigid;
     std::unordered_set<PredicateId> neg_rigid;
     std::unordered_set<PredicateId> pos_effectless;
     std::unordered_set<PredicateId> neg_effectless;
+    std::mutex pos_rigid_mutex;
+    std::mutex neg_rigid_mutex;
+    std::mutex pos_effectless_mutex;
+    std::mutex neg_effectless_mutex;
   };
 
-  mutable Cache success_cache_;
-
-  struct ParallelRefine {
-    explicit ParallelRefine(const ParallelPreprocessor &preprocessor) noexcept;
-
-    void refine_action(normalized::Action &action) noexcept;
-
-    bool refinement_possible = false;
-    uint_fast64_t num_pruned_actions = 0;
-    std::vector<normalized::Action> new_actions;
-    Cache failure_cache;
-    Cache new_cache;
-    const ParallelPreprocessor &preprocessor;
-  };
+  mutable std::vector<Cache> successful_cache_;
+  mutable std::vector<Cache> unsuccessful_cache_;
+  std::vector<Cache> defer_remove_cache_;
+  mutable std::vector<std::atomic_bool> pos_rigid_dirty;
+  mutable std::vector<std::atomic_bool> neg_rigid_dirty;
+  mutable std::vector<std::atomic_bool> pos_effectless_dirty;
+  mutable std::vector<std::atomic_bool> neg_effectless_dirty;
 
   const Config &config_;
   decltype(&ParallelPreprocessor::select_free) parameter_selector_;

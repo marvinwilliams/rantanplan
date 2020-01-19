@@ -1,6 +1,7 @@
 #ifndef IPASIR_SOLVER_HPP
 #define IPASIR_SOLVER_HPP
 
+#include "config.hpp"
 #include "sat/model.hpp"
 #include "sat/solver.hpp"
 
@@ -14,12 +15,10 @@ namespace sat {
 
 class IpasirSolver final : public Solver {
 public:
-  explicit IpasirSolver() noexcept;
+  explicit IpasirSolver(const Config &config) noexcept;
 
   IpasirSolver(const IpasirSolver &) = delete;
   IpasirSolver &operator=(const IpasirSolver &) = delete;
-  IpasirSolver(IpasirSolver &&) noexcept;
-  IpasirSolver &operator=(IpasirSolver &&) noexcept;
 
   ~IpasirSolver() noexcept;
 
@@ -32,6 +31,7 @@ private:
 
   void *handle_ = nullptr;
   unsigned int num_vars_ = 0;
+  const Config &config_;
 };
 
 } // namespace sat

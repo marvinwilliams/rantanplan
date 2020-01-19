@@ -70,26 +70,30 @@ to_list(std::shared_ptr<parsed::Condition> condition) noexcept {
 std::vector<normalized::Action>
 normalize_action(const parsed::Action &action,
                  const parsed::Problem &problem) noexcept {
-  std::vector<normalized::Action> new_actions;
-
   auto precondition =
       std::dynamic_pointer_cast<parsed::Condition>(action.precondition);
-  assert(precondition);
-  precondition->to_dnf();
 
   auto effect = std::dynamic_pointer_cast<parsed::Condition>(action.effect);
-  assert(effect);
+
+  if (!precondition || !effect) {
+    return {};
+  }
+
+  precondition->to_dnf();
+
   auto effects = to_list(effect->to_dnf());
 
   if (effects.empty()) {
-    return new_actions;
+    return {};
   }
+
+  std::vector<normalized::Action> new_actions;
 
   if (auto junction =
           std::dynamic_pointer_cast<parsed::BaseJunction>(precondition);
       junction && junction->get_operator() == parsed::JunctionOperator::Or) {
     if (junction->get_conditions().empty()) {
-      return new_actions;
+      return {};
     }
     new_actions.reserve(junction->get_conditions().size());
     for (const auto &condition : junction->get_conditions()) {

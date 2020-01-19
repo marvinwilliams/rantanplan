@@ -28,94 +28,70 @@ Engine::Status InterruptEngine::start_impl() noexcept {
       config_.preprocess_progress / static_cast<float>(config_.num_solvers - 1);
   float next_progress = 0.0f;
 
-  unsigned int num_solves = 0;
+  unsigned int num_tries = 0;
 
-  while (progress < config_.preprocess_progress || progress == 1.0f) {
-    if (config_.timeout > 0s &&
-        std::chrono::ceil<std::chrono::seconds>(
-            util::global_timer.get_elapsed_time()) >= config_.timeout) {
-      LOG_INFO(engine_logger, "Engine started %u solves", num_solves);
-      return Status::Timeout;
-    }
+  Engine::Status result = Engine::Status::Ready;
 
-    if (progress < next_progress || progress == 1.0f) {
-      if (!preprocessor.refine(next_progress)) {
+  while (progress < config_.preprocess_progress) {
+    LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
+             next_progress * 100);
+
+    if (!preprocessor.refine(next_progress, config_.preprocess_timeout)) {
+      if (config_.timeout > 0s &&
+          std::chrono::ceil<std::chrono::seconds>(
+              util::global_timer.get_elapsed_time()) >= config_.timeout) {
+        LOG_ERROR(engine_logger, "Preprocessing timed out");
+        result = Status::Timeout;
         break;
       }
-      progress = preprocessor.get_progress();
-      continue;
     }
 
+    progress = preprocessor.get_progress();
+
+    while (next_progress <= progress) {
+      next_progress += step_size;
+    };
+
     LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
-             preprocessor.get_progress() * 100, preprocessor.get_num_actions());
+             progress * 100, preprocessor.get_num_actions());
 
     auto problem = preprocessor.extract_problem();
 
-    auto searchtime = config_.solver_timeout;
-    if (config_.timeout > 0s) {
-      auto remaining =
-          std::max(std::chrono::ceil<std::chrono::seconds>(
-                       config_.timeout - util::global_timer.get_elapsed_time()),
-                   1s);
-      searchtime = std::min(searchtime, remaining);
+    auto searchtime = 0s;
+    if (progress < config_.preprocess_progress) {
+      searchtime = config_.solver_timeout;
+      LOG_INFO(engine_logger, "Starting planner %u with %lu seconds timeout",
+               num_tries, searchtime.count());
+    } else {
+      LOG_INFO(engine_logger, "Starting planner %u", num_tries);
     }
-
-    LOG_INFO(engine_logger, "Planner started with %lu seconds timeout",
-             searchtime.count());
 
     planner.reset();
     planner.find_plan(problem, config_.max_steps, searchtime);
 
-    ++num_solves;
+    ++num_tries;
 
     if (planner.get_status() == Planner::Status::Success) {
-      LOG_INFO(engine_logger, "Engine started %u solves", num_solves);
+      result = Engine::Status::Success;
       plan_ = planner.get_plan();
-      return Engine::Status::Success;
+      break;
+    } else if (planner.get_status() == Planner::Status::Timeout ||
+               planner.get_status() == Planner::Status::MaxStepsExceeded) {
+      if (config_.timeout > 0s &&
+          std::chrono::ceil<std::chrono::seconds>(
+              util::global_timer.get_elapsed_time()) >= config_.timeout) {
+        LOG_ERROR(engine_logger, "Last planner timed out");
+        result = Status::Timeout;
+        break;
+      }
+      LOG_INFO(engine_logger, "Planner timed out");
+    } else if (planner.get_status() == Planner::Status::Error) {
+      result = Engine::Status::Error;
+      break;
     }
-
-    while (progress >= next_progress && progress < 1.0f) {
-      next_progress += step_size;
-    }
-
-    LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
-             next_progress * 100);
   }
 
-  LOG_INFO(engine_logger, "Preprocessed to %.1f% resulting in %lu actions",
-           preprocessor.get_progress() * 100, preprocessor.get_num_actions());
+  LOG_INFO(engine_logger, "Engine tried %u solves", num_tries);
 
-  auto problem = preprocessor.extract_problem();
-
-  auto searchtime = 0s;
-  if (config_.timeout > 0s) {
-    searchtime =
-        std::max(std::chrono::ceil<std::chrono::seconds>(
-                     config_.timeout - util::global_timer.get_elapsed_time()),
-                 1s);
-  }
-
-  if (searchtime > 0s) {
-    LOG_INFO(engine_logger, "Planner started with %lu seconds timeout",
-             searchtime.count());
-  } else {
-    LOG_INFO(engine_logger, "Planner started with no timeout");
-  }
-
-  planner.reset();
-  planner.find_plan(problem, config_.max_steps, searchtime);
-
-  ++num_solves;
-
-  LOG_INFO(engine_logger, "Engine started %u solves", num_solves);
-
-  switch (planner.get_status()) {
-  case Planner::Status::Success:
-    plan_ = planner.get_plan();
-    return Engine::Status::Success;
-  case Planner::Status::Timeout:
-    return Engine::Status::Timeout;
-  default:
-    return Engine::Status::Error;
-  }
+  return result;
 }

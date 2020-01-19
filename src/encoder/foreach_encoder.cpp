@@ -115,7 +115,6 @@ void ForeachEncoder::init_sat_vars() noexcept {
       predicates_[i] = num_vars_++;
     }
   }
-  LOG_INFO(encoding_logger, "Done");
 }
 
 void ForeachEncoder::encode_init() noexcept {

@@ -68,7 +68,7 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
   successful_cache_.resize(problem_->predicates.size());
   unsuccessful_cache_.resize(problem_->predicates.size());
 
-  simplify_actions();
+  prune_actions();
 
   progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
               static_cast<float>(num_actions_);
@@ -86,13 +86,17 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
   });
 }
 
-bool Preprocessor::refine(float progress) noexcept {
+bool Preprocessor::refine(float progress,
+                          std::chrono::seconds timeout) noexcept {
+  util::Timer timer;
   while (progress_ < progress) {
     for (auto action_list = actions_.begin(); action_list != actions_.end();
          ++action_list) {
-      if (config_.timeout > 0s &&
-          std::chrono::ceil<std::chrono::seconds>(
-              util::global_timer.get_elapsed_time()) >= config_.timeout) {
+      if ((config_.timeout > 0s &&
+           std::chrono::ceil<std::chrono::seconds>(
+               util::global_timer.get_elapsed_time()) >= config_.timeout) ||
+          (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                               timer.get_elapsed_time()) >= timeout)) {
         return false;
       }
       std::vector<Action> new_actions;
@@ -119,7 +123,7 @@ bool Preprocessor::refine(float progress) noexcept {
         break;
       }
     }
-    simplify_actions();
+    prune_actions();
   }
   return true;
 }
@@ -356,7 +360,7 @@ ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
   return get_referenced_parameters(action, *max);
 }
 
-void Preprocessor::simplify_actions() noexcept {
+void Preprocessor::prune_actions() noexcept {
   bool changed;
   do {
     changed = false;

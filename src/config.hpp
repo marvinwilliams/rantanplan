@@ -52,6 +52,7 @@ struct Config {
   // For interrupt planning
   unsigned int num_solvers = 2;
   std::chrono::seconds solver_timeout = std::chrono::seconds{60};
+  std::chrono::seconds preprocess_timeout = std::chrono::seconds{60};
 
   // Parallel
   unsigned int num_threads = 1;

@@ -38,7 +38,7 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                            std::chrono::seconds timeout) noexcept {
   util::Timer timer;
   auto encoder = get_encoder(problem, config_);
-  sat::IpasirSolver solver{};
+  sat::IpasirSolver solver{config_};
   solver << static_cast<int>(Encoder::SAT) << 0;
   solver << -static_cast<int>(Encoder::UNSAT) << 0;
   add_formula(solver, encoder->get_init(), 0, *encoder);
@@ -51,8 +51,11 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
     if (max_steps > 0 && step >= max_steps) {
       return Status::MaxStepsExceeded;
     }
-    if (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                            timer.get_elapsed_time()) >= timeout) {
+    if ((config_.timeout > 0s &&
+         std::chrono::ceil<std::chrono::seconds>(
+             util::global_timer.get_elapsed_time()) >= config_.timeout) ||
+        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                             timer.get_elapsed_time()) >= timeout)) {
       return Status::Timeout;
     }
     do {
@@ -61,8 +64,6 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
       add_formula(solver, encoder->get_universal_clauses(), step, *encoder);
     } while (step < static_cast<unsigned int>(current_step));
 
-    LOG_INFO(planner_logger, "Solving step %u", step);
-
     assume_goal(solver, step, *encoder);
 
     auto searchtime = 0s;
@@ -70,6 +71,13 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
       searchtime = std::max(std::chrono::ceil<std::chrono::seconds>(
                                 timeout - timer.get_elapsed_time()),
                             1s);
+    }
+
+    if (searchtime == 0s) {
+      LOG_INFO(planner_logger, "Trying to solve step %u", step);
+    } else {
+      LOG_INFO(planner_logger, "Trying %lu seconsd to solve step %u",
+               searchtime.count(), step);
     }
 
     solver.solve(searchtime);

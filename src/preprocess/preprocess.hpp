@@ -9,6 +9,7 @@
 #include "util/index.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <unordered_set>
 #include <utility>
@@ -23,7 +24,7 @@ public:
   explicit Preprocessor(const std::shared_ptr<normalized::Problem> &problem,
                         const Config &config) noexcept;
 
-  bool refine(float progress) noexcept;
+  bool refine(float progress, std::chrono::seconds timeout) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
   std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
@@ -55,7 +56,7 @@ private:
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
 
-  void simplify_actions() noexcept;
+  void prune_actions() noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
 
