@@ -40,14 +40,12 @@ void Support::set_predicate_support() noexcept {
 
       for (const auto &condition :
            is_effect ? action.effects : action.preconditions) {
-        for_each_instantiation(
-            condition, action,
-            [&](auto new_condition, auto assignment) {
-              auto id = get_id(new_condition);
-              select_support(id, condition.positive, is_effect)
-                  .emplace_back(ActionIndex{i}, std::move(assignment));
-            },
-            problem_);
+        for (ConditionIterator it{condition, action, problem_};
+             it != ConditionIterator{}; ++it) {
+          auto id = get_id(*it);
+          select_support(id, condition.positive, is_effect)
+              .emplace_back(ActionIndex{i}, std::move(it.get_assignment()));
+        }
       }
     }
   }

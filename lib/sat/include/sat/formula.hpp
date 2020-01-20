@@ -50,15 +50,13 @@ template <typename Variable> struct Formula {
       list_sizes.push_back(clause.literals.size());
     }
 
-    auto combination_iterator = util::CombinationIterator{list_sizes};
-
-    while (!combination_iterator.end()) {
-      const auto &combination = *combination_iterator;
+    for (util::CombinationIterator it{list_sizes};
+         it != util::CombinationIterator{}; ++it) {
+      const auto &combination = *it;
       for (size_t i = 0; i < combination.size(); ++i) {
         *this << formula.clauses[i].literals[combination[i]];
       }
       *this << EndClause;
-      ++combination_iterator;
     }
   }
 

@@ -199,79 +199,159 @@ inline size_t get_num_instantiated(const Condition &condition,
       });
 }
 
-template <typename Function>
-void for_each_instantiation(const Predicate &predicate, Function &&f,
-                            const Problem &problem) noexcept {
-  std::vector<size_t> number_arguments;
-  number_arguments.reserve(predicate.parameter_types.size());
-  for (auto type : predicate.parameter_types) {
-    number_arguments.push_back(problem.constants_by_type[type].size());
-  }
+class AssignmentIterator {
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = ParameterAssignment;
+  using difference_type = std::ptrdiff_t;
+  using pointer = const value_type *;
+  using reference = const value_type &;
 
-  auto combination_iterator =
-      util::CombinationIterator{std::move(number_arguments)};
+  explicit AssignmentIterator() noexcept = default;
 
-  std::vector<ConstantIndex> arguments(predicate.parameter_types.size());
-  while (!combination_iterator.end()) {
-    const auto &combination = *combination_iterator;
-    for (size_t i = 0; i < combination.size(); ++i) {
-      auto type = predicate.parameter_types[i];
-      arguments[i] = problem.constants_by_type[type][combination[i]];
+  explicit AssignmentIterator(const ParameterSelection &selection,
+                              const Action &action, const Problem &problem)
+      : selection_{&selection}, action_{&action}, problem_{&problem} {
+    std::vector<size_t> argument_size_list;
+    argument_size_list.reserve(selection.size());
+    for (auto p : selection) {
+      assert(!action.get(p).is_constant());
+      argument_size_list.push_back(
+          problem.constants_by_type[action.get(p).get_type()].size());
     }
-    f(arguments);
-    ++combination_iterator;
-  }
-}
 
-template <typename Function>
-void for_each_instantiation(const ParameterSelection &selection,
-                            const Action &action, Function &&f,
-                            const Problem &problem) {
-  std::vector<size_t> argument_size_list;
-  argument_size_list.reserve(selection.size());
-  for (auto p : selection) {
-    assert(!action.get(p).is_constant());
-    argument_size_list.push_back(
-        problem.constants_by_type[action.get(p).get_type()].size());
-  }
+    combination_iterator_ = util::CombinationIterator{argument_size_list};
+    assignment_.resize(selection.size());
 
-  auto combination_iterator = util::CombinationIterator{argument_size_list};
-
-  while (!combination_iterator.end()) {
-    const auto &combination = *combination_iterator;
-    ParameterAssignment assignment;
-    assignment.reserve(combination.size());
-    for (size_t i = 0; i < combination.size(); ++i) {
-      assert(!action.get(selection[i]).is_constant());
-      auto type = action.get(selection[i]).get_type();
-      assignment.emplace_back(selection[i],
-                              problem.constants_by_type[type][combination[i]]);
+    if (combination_iterator_ != util::CombinationIterator{}) {
+      const auto &combination = *combination_iterator_;
+      for (size_t i = 0; i < selection.size(); ++i) {
+        assert(!action.get(selection[i]).is_constant());
+        auto type = action_->get(selection[i]).get_type();
+        assignment_[i] = std::make_pair(
+            (*selection_)[i], problem.constants_by_type[type][combination[i]]);
+      }
     }
-    f(std::move(assignment));
-    ++combination_iterator;
   }
-}
 
-template <typename Function>
-void for_each_instantiation(const Condition &condition, const Action &action,
-                            Function &&f, const Problem &problem) {
-  auto mapping = get_mapping(action, condition);
-  for_each_instantiation(
-      mapping.parameters, action,
-      [&](auto assignment) {
-        auto new_condition = condition;
-        for (size_t i = 0; i < mapping.parameters.size(); ++i) {
-          assert(assignment[i].first == mapping.parameters[i]);
-          for (auto a : mapping.arguments[i]) {
-            assert(new_condition.arguments[a].get_parameter() ==
-                   assignment[i].first);
-            new_condition.arguments[a].set(assignment[i].second);
-          }
+  AssignmentIterator &operator++() noexcept {
+    assert(problem_);
+    ++combination_iterator_;
+    if (combination_iterator_ != util::CombinationIterator{}) {
+      const auto &combination = *combination_iterator_;
+      for (size_t i = 0; i < combination.size(); ++i) {
+        assert(!action_->get((*selection_)[i]).is_constant());
+        auto type = action_->get((*selection_)[i]).get_type();
+        assignment_[i] =
+            std::make_pair((*selection_)[i],
+                           problem_->constants_by_type[type][combination[i]]);
+      }
+    }
+    return *this;
+  }
+
+  AssignmentIterator operator++(int) noexcept {
+    auto old = *this;
+    ++(*this);
+    return old;
+  }
+
+  size_t get_num_instantiations() const noexcept {
+    return combination_iterator_.get_num_combinations();
+  }
+
+  inline reference operator*() const noexcept { return assignment_; }
+
+  bool operator!=(const AssignmentIterator &) const noexcept {
+    return combination_iterator_ != util::CombinationIterator{};
+  }
+
+  bool operator==(const AssignmentIterator &) const noexcept {
+    return combination_iterator_ == util::CombinationIterator{};
+  }
+
+private:
+  ParameterAssignment assignment_;
+  util::CombinationIterator combination_iterator_;
+  const ParameterSelection *selection_ = nullptr;
+  const Action *action_ = nullptr;
+  const Problem *problem_ = nullptr;
+};
+
+class ConditionIterator {
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = PredicateInstantiation;
+  using difference_type = std::ptrdiff_t;
+  using pointer = const value_type *;
+  using reference = const value_type &;
+
+  explicit ConditionIterator() noexcept : predicate_{PredicateIndex{0}, {}} {}
+
+  explicit ConditionIterator(const Condition &condition, const Action &action,
+                             const Problem &problem)
+      : predicate_{condition.definition,
+                   std::vector<ConstantIndex>(condition.arguments.size())},
+        mapping_{get_mapping(action, condition)}, assignment_iterator_{
+                                                      mapping_.parameters,
+                                                      action, problem} {
+
+    for (size_t i = 0; i < condition.arguments.size(); ++i) {
+      if (condition.arguments[i].is_constant()) {
+        predicate_.arguments[i] = condition.arguments[i].get_constant();
+      }
+    }
+    if (assignment_iterator_ != AssignmentIterator{}) {
+      const auto &assignment = *assignment_iterator_;
+      for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
+        assert(assignment[i].first == mapping_.parameters[i]);
+        for (auto a : mapping_.arguments[i]) {
+          predicate_.arguments[a] = assignment[i].second;
         }
-        f(instantiate(new_condition), std::move(assignment));
-      },
-      problem);
-}
+      }
+    }
+  }
+
+  ConditionIterator &operator++() noexcept {
+    ++assignment_iterator_;
+    if (assignment_iterator_ != AssignmentIterator{}) {
+      const auto &assignment = *assignment_iterator_;
+      for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
+        for (auto a : mapping_.arguments[i]) {
+          predicate_.arguments[a] = assignment[i].second;
+        }
+      }
+    }
+    return *this;
+  }
+
+  ConditionIterator operator++(int) noexcept {
+    auto old = *this;
+    ++(*this);
+    return old;
+  }
+
+  size_t get_num_instantiations() const noexcept {
+    return assignment_iterator_.get_num_instantiations();
+  }
+
+  inline reference operator*() const noexcept { return predicate_; }
+
+  const auto &get_assignment() const noexcept { return *assignment_iterator_; }
+
+  bool operator!=(const ConditionIterator &) const noexcept {
+    return assignment_iterator_ != AssignmentIterator{};
+  }
+
+  bool operator==(const ConditionIterator &) const noexcept {
+    return assignment_iterator_ == AssignmentIterator{};
+  }
+
+private:
+  PredicateInstantiation predicate_;
+  ParameterMapping mapping_;
+  AssignmentIterator assignment_iterator_;
+};
 
 inline bool is_instantiatable(const Condition &condition,
                               const std::vector<ConstantIndex> &arguments,

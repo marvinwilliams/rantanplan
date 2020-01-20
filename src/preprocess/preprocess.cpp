@@ -100,22 +100,21 @@ bool Preprocessor::refine(float progress,
         return false;
       }
       std::vector<Action> new_actions;
-      for (auto a = action_list->begin(); a != action_list->end(); ++a) {
-        auto selection = std::invoke(parameter_selector_, *this, *a);
-        for_each_instantiation(
-            selection, *a,
-            [&](const auto &assignment) {
-              if (auto new_action = ground(assignment, *a);
-                  is_valid(new_action)) {
-                simplify(new_action);
-                new_actions.push_back(new_action);
-              } else {
-                num_pruned_actions_ +=
-                    get_num_instantiated(new_action, *problem_);
-              }
-            },
-            *problem_);
-      }
+      std::for_each(
+          action_list->begin(), action_list->end(), [&](const auto action) {
+            auto selection = std::invoke(parameter_selector_, *this, action);
+            std::for_each(AssignmentIterator{selection, action, *problem_},
+                          AssignmentIterator{}, [&](const auto &assignment) {
+                            if (auto new_action = ground(assignment, action);
+                                is_valid(new_action)) {
+                              simplify(new_action);
+                              new_actions.push_back(new_action);
+                            } else {
+                              num_pruned_actions_ +=
+                                  get_num_instantiated(new_action, *problem_);
+                            }
+                          });
+          });
       *action_list = std::move(new_actions);
       progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
                   static_cast<float>(num_actions_);
@@ -329,29 +328,18 @@ ParameterSelection Preprocessor::select_min_new(const Action &action) const
 
 ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
     noexcept {
-  auto max =
-      std::max_element(action.preconditions.begin(), action.preconditions.end(),
-                       [this, &action](const auto &c1, const auto &c2) {
-                         uint_fast64_t c1_pruned = 0;
-                         uint_fast64_t c2_pruned = 0;
-                         for_each_instantiation(
-                             c1, action,
-                             [&](const auto &new_condition, const auto &) {
-                               if (is_rigid(new_condition, !c1.positive)) {
-                                 ++c1_pruned;
-                               }
-                             },
-                             *problem_);
-                         for_each_instantiation(
-                             c2, action,
-                             [&](const auto &new_condition, const auto &) {
-                               if (is_rigid(new_condition, !c2.positive)) {
-                                 ++c2_pruned;
-                               }
-                             },
-                             *problem_);
-                         return c1_pruned < c2_pruned;
-                       });
+  auto max = std::max_element(
+      action.preconditions.begin(), action.preconditions.end(),
+      [this, &action](const auto &c1, const auto &c2) {
+        return std::count_if(
+                   ConditionIterator{c1, action, *problem_},
+                   ConditionIterator{},
+                   [&](const auto p) { return is_rigid(p, !c1.positive); }) <
+               std::count_if(
+                   ConditionIterator{c2, action, *problem_},
+                   ConditionIterator{},
+                   [&](const auto p) { return is_rigid(p, !c2.positive); });
+      });
 
   if (max == action.preconditions.end()) {
     return select_free(action);
@@ -372,18 +360,15 @@ void Preprocessor::prune_actions() noexcept {
                     c.neg_effectless.clear();
                   });
     for (size_t i = 0; i < actions_.size(); ++i) {
-      auto it = std::remove_if(
-          actions_[i].begin(), actions_[i].end(), [this](const auto &a) {
-            if (!is_valid(a)) {
-              num_pruned_actions_ += get_num_instantiated(a, *problem_);
-              return true;
-            }
-            return false;
-          });
+      auto it = std::partition(actions_[i].begin(), actions_[i].end(),
+                               [this](const auto &a) { return is_valid(a); });
       if (it != actions_[i].end()) {
+        std::for_each(it, actions_[i].end(), [&](const auto &a) {
+          num_pruned_actions_ += get_num_instantiated(a, *problem_);
+        });
+        actions_[i].erase(it, actions_[i].end());
         changed = true;
       }
-      actions_[i].erase(it, actions_[i].end());
       std::for_each(actions_[i].begin(), actions_[i].end(), [&](auto &a) {
         if (simplify(a)) {
           changed = true;

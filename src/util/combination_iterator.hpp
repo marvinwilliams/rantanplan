@@ -15,6 +15,8 @@ public:
   using pointer = const std::vector<size_t> *;
   using reference = const std::vector<size_t> &;
 
+  explicit CombinationIterator() noexcept = default;
+
   explicit CombinationIterator(std::vector<size_t> list_sizes) noexcept
       : list_sizes_{std::move(list_sizes)},
         current_combination_(list_sizes_.size()) {
@@ -45,32 +47,24 @@ public:
     return old;
   }
 
-  void reset() noexcept {
-    if (!is_end_) {
-      std::fill(current_combination_.begin(), current_combination_.end(), 0);
-    }
-    is_end_ = (number_combinations_ == 0);
-  }
-
-  inline size_t number_combinations() const noexcept {
+  inline size_t get_num_combinations() const noexcept {
     return number_combinations_;
   }
 
-  inline bool operator==(const CombinationIterator &other) const noexcept {
-    return current_combination_ == other.current_combination_;
-  }
-
-  inline bool operator!=(const CombinationIterator &other) const noexcept {
-    return !(*this == other);
-  }
-
   inline reference operator*() const noexcept { return current_combination_; }
-  inline bool end() const noexcept { return is_end_; }
+
+  bool operator!=(const CombinationIterator &) const noexcept {
+    return !is_end_;
+  }
+
+  bool operator==(const CombinationIterator &) const noexcept {
+    return is_end_;
+  }
 
 private:
-  bool is_end_;
+  bool is_end_ = true;
   size_t number_combinations_;
-  const std::vector<size_t> list_sizes_;
+  std::vector<size_t> list_sizes_;
   std::vector<size_t> current_combination_;
 };
 
