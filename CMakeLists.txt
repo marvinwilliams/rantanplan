@@ -76,7 +76,6 @@ add_executable(rantanplan_glucose
 "src/pddl/model_builder.cpp"
 "src/encoder/foreach_encoder.cpp"
 "src/encoder/support.cpp"
-# "src/preprocess/parallel_preprocess.cpp"
 "src/preprocess/preprocess.cpp"
 "src/planner/planner.cpp"
 "src/planner/sat_planner.cpp"
@@ -121,6 +120,9 @@ endif()
 
 if(PARALLEL_MODE)
   add_definitions(-DPARALLEL)
+  target_sources(rantanplan_glucose PRIVATE
+    "src/preprocess/parallel_preprocess.cpp"
+    "src/engine/parallel_engine.cpp")
   target_link_libraries(rantanplan_glucose PRIVATE -lpthread)
 endif()
 

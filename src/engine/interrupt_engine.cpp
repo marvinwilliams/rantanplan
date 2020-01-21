@@ -32,7 +32,8 @@ Engine::Status InterruptEngine::start_impl() noexcept {
 
   Engine::Status result = Engine::Status::Ready;
 
-  while (progress < config_.preprocess_progress) {
+  while (progress < config_.preprocess_progress &&
+         num_tries < config_.num_solvers) {
     LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
              next_progress * 100);
 

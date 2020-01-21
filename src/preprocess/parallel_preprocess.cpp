@@ -25,7 +25,9 @@ using namespace std::chrono_literals;
 ParallelPreprocessor::ParallelPreprocessor(
     unsigned int num_threads, const std::shared_ptr<Problem> &problem,
     const Config &config) noexcept
-    : config_{config}, problem_{problem} {
+    : successful_cache_(problem->predicates.size()),
+      unsuccessful_cache_(problem->predicates.size()), config_{config},
+      problem_{problem} {
   num_actions_ =
       std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
                       [this](uint_fast64_t sum, const auto &a) {
@@ -69,11 +71,7 @@ ParallelPreprocessor::ParallelPreprocessor(
     actions_.push_back({action});
   }
 
-  successful_cache_.resize(problem_->predicates.size());
-  unsuccessful_cache_.resize(problem_->predicates.size());
-  defer_remove_cache_.resize(problem_->predicates.size());
-
-  simplify_actions(num_threads);
+  prune_actions(num_threads);
 
   progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
               static_cast<float>(num_actions_);
@@ -91,15 +89,19 @@ ParallelPreprocessor::ParallelPreprocessor(
   });
 }
 
-bool ParallelPreprocessor::refine(float progress, unsigned int num_threads,
+bool ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
+                                  unsigned int num_threads,
                                   const std::atomic_bool &stop_token) noexcept {
+  util::Timer timer;
   while (progress_ < progress) {
     for (auto action_list = actions_.begin(); action_list != actions_.end();
          ++action_list) {
       if (stop_token ||
           (config_.timeout > 0s &&
            std::chrono::ceil<std::chrono::seconds>(
-               util::global_timer.get_elapsed_time()) >= config_.timeout)) {
+               util::global_timer.get_elapsed_time()) >= config_.timeout) ||
+          (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                               timer.get_elapsed_time()) >= timeout)) {
         return false;
       }
       std::vector<normalized::Action> new_actions;
@@ -111,7 +113,7 @@ bool ParallelPreprocessor::refine(float progress, unsigned int num_threads,
           std::vector<normalized::Action> thread_new_actions;
           while (!stop_token) {
             auto action_index = i++;
-            if (i >= action_list->size()) {
+            if (action_index >= action_list->size()) {
               std::lock_guard l{new_actions_mutex};
               new_actions.insert(
                   new_actions.end(),
@@ -119,33 +121,35 @@ bool ParallelPreprocessor::refine(float progress, unsigned int num_threads,
                   std::make_move_iterator(thread_new_actions.end()));
               break;
             }
-            const auto a = (*action_list)[action_index];
-            auto selection = std::invoke(parameter_selector_, *this, a);
-
-            for_each_instantiation(
-                selection, a,
-                [&](const auto &assignment) {
-                  auto new_action = ground(assignment, a);
-                  if (is_valid(new_action)) {
-                    simplify(new_action);
-                    thread_new_actions.push_back(new_action);
-                  } else {
-                    defer_remove_action(new_action);
-                    num_pruned_actions_ +=
-                        get_num_instantiated(new_action, *problem_);
-                  }
-                },
-                *problem_);
+            const auto action = (*action_list)[action_index];
+            auto selection = std::invoke(parameter_selector_, *this, action);
+            auto assignment_it =
+                AssignmentIterator{selection, action, *problem_};
+            thread_new_actions.reserve(thread_new_actions.size() +
+                                       assignment_it.get_num_instantiations());
+            std::for_each(assignment_it, AssignmentIterator{},
+                          [&](const auto &assignment) {
+                            if (auto new_action = ground(assignment, action);
+                                is_valid(new_action)) {
+                              simplify(new_action);
+                              thread_new_actions.push_back(new_action);
+                            } else {
+                              num_pruned_actions_ +=
+                                  get_num_instantiated(new_action, *problem_);
+                            }
+                          });
           }
         }};
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-      clear_cache();
       *action_list = std::move(new_actions);
+      progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
+                  static_cast<float>(num_actions_);
+      if (progress_ >= progress) {
+        break;
+      }
     }
-    simplify_actions(num_threads);
-    progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
-                static_cast<float>(num_actions_);
+    prune_actions(num_threads);
   }
   return true;
 }
@@ -234,26 +238,35 @@ bool ParallelPreprocessor::is_rigid(const PredicateInstantiation &predicate,
                                     bool positive) const noexcept {
   auto &rigid = (positive ? successful_cache_[predicate.definition].pos_rigid
                           : successful_cache_[predicate.definition].neg_rigid);
+  auto &rigid_mutex =
+      (positive ? successful_cache_[predicate.definition].pos_rigid_mutex
+                : successful_cache_[predicate.definition].neg_rigid_mutex);
   auto &not_rigid =
       (positive ? unsuccessful_cache_[predicate.definition].pos_rigid
                 : unsuccessful_cache_[predicate.definition].neg_rigid);
+  auto &not_rigid_mutex =
+      (positive ? unsuccessful_cache_[predicate.definition].pos_rigid_mutex
+                : unsuccessful_cache_[predicate.definition].neg_rigid_mutex);
   auto id = get_id(predicate);
 
-  if (not_rigid.find(id) != not_rigid.end()) {
-    return false;
+  if (std::lock_guard l{rigid_mutex}; rigid.find(id) != rigid.end()) {
+    return true;
   }
 
-  if (rigid.find(id) != rigid.end()) {
-    return true;
+  if (std::lock_guard l{not_rigid_mutex};
+      not_rigid.find(id) != not_rigid.end()) {
+    return false;
   }
 
   if (std::binary_search(init_[predicate.definition].begin(),
                          init_[predicate.definition].end(), id) != positive) {
+    std::lock_guard l{not_rigid_mutex};
     not_rigid.insert(id);
     return false;
   }
 
   if (trivially_rigid_[predicate.definition]) {
+    std::lock_guard l{rigid_mutex};
     rigid.insert(id);
     return true;
   }
@@ -265,11 +278,13 @@ bool ParallelPreprocessor::is_rigid(const PredicateInstantiation &predicate,
     }
     for (const auto &action : actions_[i]) {
       if (has_effect(action, predicate, !positive)) {
+        std::lock_guard l{not_rigid_mutex};
         not_rigid.insert(id);
         return false;
       }
     }
   }
+  std::lock_guard l{rigid_mutex};
   rigid.insert(id);
   return true;
 }
@@ -277,30 +292,41 @@ bool ParallelPreprocessor::is_rigid(const PredicateInstantiation &predicate,
 // No action has this predicate as precondition and it is a not a goal
 bool ParallelPreprocessor::is_effectless(
     const PredicateInstantiation &predicate, bool positive) const noexcept {
-  auto id = get_id(predicate);
   auto &effectless =
       (positive ? successful_cache_[predicate.definition].pos_effectless
                 : successful_cache_[predicate.definition].neg_effectless);
+  auto &effectless_mutex =
+      (positive ? successful_cache_[predicate.definition].pos_effectless_mutex
+                : successful_cache_[predicate.definition].neg_effectless_mutex);
   auto &not_effectless =
       (positive ? unsuccessful_cache_[predicate.definition].pos_effectless
                 : unsuccessful_cache_[predicate.definition].neg_effectless);
+  auto &not_effectless_mutex =
+      (positive
+           ? unsuccessful_cache_[predicate.definition].pos_effectless_mutex
+           : unsuccessful_cache_[predicate.definition].neg_effectless_mutex);
+  auto id = get_id(predicate);
 
-  if (not_effectless.find(id) != not_effectless.end()) {
-    return false;
+  if (std::lock_guard l{effectless_mutex};
+      effectless.find(id) != effectless.end()) {
+    return true;
   }
 
-  if (effectless.find(id) != effectless.end()) {
-    return true;
+  if (std::lock_guard l{not_effectless_mutex};
+      not_effectless.find(id) != not_effectless.end()) {
+    return false;
   }
 
   if (std::binary_search(goal_[predicate.definition].begin(),
                          goal_[predicate.definition].end(),
                          std::make_pair(id, positive))) {
+    std::lock_guard l{not_effectless_mutex};
     not_effectless.insert(id);
     return false;
   }
 
   if (trivially_effectless_[predicate.definition]) {
+    std::lock_guard l{effectless_mutex};
     effectless.insert(id);
     return true;
   }
@@ -312,11 +338,13 @@ bool ParallelPreprocessor::is_effectless(
     }
     for (const auto &action : actions_[i]) {
       if (has_precondition(action, predicate, positive)) {
+        std::lock_guard l{not_effectless_mutex};
         not_effectless.insert(id);
         return false;
       }
     }
   }
+  std::lock_guard l{effectless_mutex};
   effectless.insert(id);
   return true;
 }
@@ -352,29 +380,18 @@ ParallelPreprocessor::select_min_new(const Action &action) const noexcept {
 
 ParameterSelection
 ParallelPreprocessor::select_max_rigid(const Action &action) const noexcept {
-  auto max =
-      std::max_element(action.preconditions.begin(), action.preconditions.end(),
-                       [this, &action](const auto &c1, const auto &c2) {
-                         uint_fast64_t c1_pruned = 0;
-                         uint_fast64_t c2_pruned = 0;
-                         for_each_instantiation(
-                             c1, action,
-                             [&](const auto &new_condition, const auto &) {
-                               if (is_rigid(new_condition, !c1.positive)) {
-                                 ++c1_pruned;
-                               }
-                             },
-                             *problem_);
-                         for_each_instantiation(
-                             c2, action,
-                             [&](const auto &new_condition, const auto &) {
-                               if (is_rigid(new_condition, !c2.positive)) {
-                                 ++c2_pruned;
-                               }
-                             },
-                             *problem_);
-                         return c1_pruned < c2_pruned;
-                       });
+  auto max = std::max_element(
+      action.preconditions.begin(), action.preconditions.end(),
+      [this, &action](const auto &c1, const auto &c2) {
+        return std::count_if(
+                   ConditionIterator{c1, action, *problem_},
+                   ConditionIterator{},
+                   [&](const auto p) { return is_rigid(p, !c1.positive); }) <
+               std::count_if(
+                   ConditionIterator{c2, action, *problem_},
+                   ConditionIterator{},
+                   [&](const auto p) { return is_rigid(p, !c2.positive); });
+      });
 
   if (max == action.preconditions.end()) {
     return select_free(action);
@@ -383,119 +400,50 @@ ParallelPreprocessor::select_max_rigid(const Action &action) const noexcept {
   return get_referenced_parameters(action, *max);
 }
 
-// call sequential
-void ParallelPreprocessor::clear_cache() noexcept {
-  for (size_t i = 0; i < problem_->predicates.size(); ++i) {
-    if (std::exchange(pos_rigid_dirty[i], false)) {
-      unsuccessful_cache_[i].pos_rigid.clear();
-    }
-    if (std::exchange(neg_rigid_dirty[i], false)) {
-      unsuccessful_cache_[i].neg_rigid.clear();
-    }
-    if (std::exchange(pos_effectless_dirty[i], false)) {
-      unsuccessful_cache_[i].pos_effectless.clear();
-    }
-    if (std::exchange(neg_effectless_dirty[i], false)) {
-      unsuccessful_cache_[i].neg_effectless.clear();
-    }
-    for (auto id : defer_remove_cache_[i].pos_rigid) {
-      unsuccessful_cache_[i].pos_rigid.erase(id);
-    }
-    defer_remove_cache_[i].pos_rigid.clear();
-    for (auto id : defer_remove_cache_[i].neg_rigid) {
-      unsuccessful_cache_[i].neg_rigid.erase(id);
-    }
-    defer_remove_cache_[i].neg_rigid.clear();
-    for (auto id : defer_remove_cache_[i].pos_effectless) {
-      unsuccessful_cache_[i].pos_effectless.erase(id);
-    }
-    defer_remove_cache_[i].pos_effectless.clear();
-    for (auto id : defer_remove_cache_[i].neg_effectless) {
-      unsuccessful_cache_[i].neg_effectless.erase(id);
-    }
-    defer_remove_cache_[i].neg_effectless.clear();
-  }
-}
-
-void ParallelPreprocessor::defer_remove_action(const Action &a) noexcept {
-  for (const auto &precondition : a.preconditions) {
-    (precondition.positive ? pos_effectless_dirty
-                           : neg_effectless_dirty)[precondition.definition] =
-        true;
-  }
-  for (const auto &effect : a.effects) {
-    (effect.positive ? neg_effectless_dirty
-                     : pos_effectless_dirty)[effect.definition] = true;
-  }
-  for (const auto &[precondition, positive] : a.pre_instantiated) {
-    if (positive) {
-      std::lock_guard l{
-          defer_remove_cache_[precondition.definition].pos_effectless_mutex};
-      defer_remove_cache_[precondition.definition].pos_effectless.insert(
-          get_id(precondition));
-    } else {
-      std::lock_guard l{
-          defer_remove_cache_[precondition.definition].neg_effectless_mutex};
-      defer_remove_cache_[precondition.definition].neg_effectless.insert(
-          get_id(precondition));
-    }
-  }
-  for (const auto &[effect, positive] : a.eff_instantiated) {
-    if (positive) {
-      std::lock_guard l{defer_remove_cache_[effect.definition].neg_rigid_mutex};
-      defer_remove_cache_[effect.definition].neg_rigid.insert(get_id(effect));
-    } else {
-      std::lock_guard l{defer_remove_cache_[effect.definition].pos_rigid_mutex};
-      defer_remove_cache_[effect.definition].pos_rigid.insert(get_id(effect));
-    }
-  }
-}
-
-void ParallelPreprocessor::simplify_actions(unsigned int num_threads) noexcept {
+void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
   std::atomic_bool changed;
   do {
     changed = false;
+    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
+                  [](auto &c) {
+                    c.pos_rigid.clear();
+                    c.neg_rigid.clear();
+                    c.pos_effectless.clear();
+                    c.neg_effectless.clear();
+                  });
     for (auto action_list = actions_.begin(); action_list != actions_.end();
          ++action_list) {
-      std::vector<normalized::Action> new_actions;
-      std::mutex new_actions_mutex;
+      std::vector<std::atomic_bool> remove_action(action_list->size());
+      std::fill(remove_action.begin(), remove_action.end(), false);
       std::vector<std::thread> threads(num_threads);
       std::atomic_uint_fast64_t i = 0;
       std::for_each(threads.begin(), threads.end(), [&](auto &t) {
-        t = std::thread {
-          [&]() {
-            std::vector<normalized::Action> thread_new_actions;
-            while (true) {
-              auto action_index = i++;
-              if (i >= action_list->size()) {
-                std::lock_guard l{new_actions_mutex};
-                new_actions.insert(
-                    new_actions.end(),
-                    std::make_move_iterator(thread_new_actions.begin()),
-                    std::make_move_iterator(thread_new_actions.end()));
-                break;
+        t = std::thread{[&]() {
+          auto action_index = i++;
+          while (i < action_list->size()) {
+            auto &action = (*action_list)[action_index];
+            if (is_valid(action)) {
+              if (simplify(action)) {
+                changed = true;
               }
-              if (is_valid(new_action)) {
-              },
-                *problem_);
-              simplify(new_action);
-              thread_new_actions.push_back(new_action);
+            } else {
+              remove_action[action_index] = true;
+              num_pruned_actions_ += get_num_instantiated(action, *problem_);
+              changed = true;
             }
-            else {
-              defer_remove_action(new_action);
-              num_pruned_actions_ +=
-                  get_num_instantiated(new_action, *problem_);
-            }
+            action_index = i++;
           }
         }};
-    });
-    std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-    clear_cache();
-    *action_list = std::move(new_actions);
-  }
-}
-while (changed)
-  ;
+      });
+      std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
+      action_list->erase(
+          std::remove_if(action_list->begin(), action_list->end(),
+                         [&](const auto &a) {
+                           return remove_action[&a - &*action_list->begin()].load();
+                         }),
+          action_list->end());
+    }
+  } while (changed);
 }
 
 bool ParallelPreprocessor::is_valid(const Action &action) const noexcept {
@@ -518,70 +466,26 @@ bool ParallelPreprocessor::is_valid(const Action &action) const noexcept {
 
 bool ParallelPreprocessor::simplify(Action &action) const noexcept {
   bool changed = false;
-  // Cached not rigid predicates won't become rigid by removing them from
-  // actions
-  if (auto it = std::remove_if(
-          action.eff_instantiated.begin(), action.eff_instantiated.end(),
-          [this](const auto &p) { return is_rigid(p.first, p.second); });
+  if (auto it = std::remove_if(action.eff_instantiated.begin(),
+                               action.eff_instantiated.end(),
+                               [this](const auto &p) {
+                                 return is_rigid(p.first, p.second) ||
+                                        (is_effectless(p.first, p.second) &&
+                                         is_effectless(p.first, !p.second));
+                               });
       it != action.eff_instantiated.end()) {
     action.eff_instantiated.erase(it, action.eff_instantiated.end());
     changed = true;
   }
 
-  if (auto it = std::partition(
+  if (auto it = std::remove_if(
           action.pre_instantiated.begin(), action.pre_instantiated.end(),
-          [this](const auto &p) { return !is_rigid(p.first, p.second); });
+          [this](const auto &p) { return is_rigid(p.first, p.second); });
       it != action.pre_instantiated.end()) {
-    std::for_each(it, action.pre_instantiated.end(), [this](const auto &p) {
-      (p.second ? unsuccessful_cache_[p.first.definition].pos_effectless
-                : unsuccessful_cache_[p.first.definition].neg_effectless)
-          .erase(get_id(p.first));
-    });
     action.pre_instantiated.erase(it, action.pre_instantiated.end());
     changed = true;
   }
   return changed;
-}
-
-ParallelPreprocessor::ParallelRefine::ParallelRefine(
-    const ParallelPreprocessor &preprocessor) noexcept
-    : preprocessor{preprocessor} {}
-
-void ParallelPreprocessor::ParallelRefine::refine_action(
-    Action &action) noexcept {
-  if (auto result = preprocessor.simplify(action);
-      result != SimplifyResult::Unchanged) {
-    refinement_possible = true;
-    if (result == SimplifyResult::Invalid) {
-      num_pruned_actions +=
-          normalized::get_num_instantiated(action, *preprocessor.problem_);
-      return;
-    }
-  }
-
-  auto selection =
-      std::invoke(preprocessor.parameter_selector_, preprocessor, action);
-
-  if (selection.empty()) {
-    new_actions.push_back(action);
-    return;
-  }
-
-  refinement_possible = true;
-
-  for_each_instantiation(
-      selection, action,
-      [&](const normalized::ParameterAssignment &assignment) {
-        auto new_action = ground(assignment, action);
-        if (auto result = preprocessor.simplify(new_action);
-            result != SimplifyResult::Invalid) {
-          new_actions.push_back(std::move(new_action));
-        } else {
-          num_pruned_actions += normalized::get_num_instantiated(
-              new_action, *preprocessor.problem_);
-        }
-      },
-      *preprocessor.problem_);
 }
 
 std::shared_ptr<Problem> ParallelPreprocessor::extract_problem() const

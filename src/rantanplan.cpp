@@ -12,9 +12,16 @@
 #include "pddl/model_builder.hpp"
 #include "pddl/parser.hpp"
 #include "planner/planner.hpp"
+#ifdef PARALLEL
+#include "preprocess/parallel_preprocess.hpp"
+#else
 #include "preprocess/preprocess.hpp"
+#endif
 #include "rantanplan_options.hpp"
 #include "util/timer.hpp"
+#ifdef PARALLEL
+#include "engine/parallel_engine.hpp"
+#endif
 
 #include <chrono>
 #include <climits>
@@ -174,9 +181,16 @@ int main(int argc, char *argv[]) {
   if (config.planning_mode == Config::PlanningMode::Preprocess) {
     LOG_INFO(main_logger, "Preprocessing to %.1f%%...",
              config.preprocess_progress * 100);
+#ifdef PARALLEL
+    ParallelPreprocessor preprocessor{config.num_threads, problem, config};
+    if (!preprocessor.refine(config.preprocess_progress,
+                             config.preprocess_timeout, config.num_threads,
+                             std::atomic_bool{false})) {
+#else
     Preprocessor preprocessor{problem, config};
     if (!preprocessor.refine(config.preprocess_progress,
                              config.preprocess_timeout)) {
+#endif
       LOG_ERROR(main_logger, "Preprocessing timed out");
       return 1;
     }
@@ -197,8 +211,13 @@ int main(int argc, char *argv[]) {
     engine = std::make_unique<InterruptEngine>(problem, config);
     break;
   case Config::PlanningMode::Parallel:
-    /* engine = std::make_unique<ParallelEngine>(problem, config); */
+#ifdef PARALLEL
+    engine = std::make_unique<ParallelEngine>(problem, config);
     break;
+#else
+    LOG_ERROR(main_logger, "Please compile with parallel support");
+    return 3;
+#endif
   default:
     assert(false);
     engine = std::make_unique<OneshotEngine>(problem, config);

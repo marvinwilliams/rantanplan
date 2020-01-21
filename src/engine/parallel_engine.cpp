@@ -22,112 +22,73 @@ Engine::Status ParallelEngine::start_impl() noexcept {
 
   assert(config_.num_threads > 0);
 
-  ParallelPreprocessor preprocessor{problem_, config_};
+  ParallelPreprocessor preprocessor{config_.num_threads, problem_, config_};
 
   float progress = preprocessor.get_progress();
   float step_size =
-      config_.preprocess_progress / static_cast<float>(config_.num_solvers - 1);
+      config_.preprocess_progress / static_cast<float>(config_.num_threads - 1);
   float next_progress = 0.0f;
 
-  unsigned int num_solves = 0;
+  unsigned int num_tries = 0;
 
   std::atomic_bool plan_found = false;
+  Engine::Status result = Engine::Status::Ready;
 
-  while (progress < config_.preprocess_progress || progress == 1.0f) {
-    if (config_.timeout > 0s &&
-        std::chrono::ceil<std::chrono::seconds>(
-            util::global_timer.get_elapsed_time()) >= config_.timeout) {
-      LOG_INFO(engine_logger, "Engine started %u solves", num_solves);
-      return Status::Timeout;
-    }
+  std::vector<std::thread> threads(config_.num_threads);
 
-    if (progress < next_progress || progress == 1.0f) {
-      std::atomic_bool keep_refining;
-      std::atomic_bool refinement_done = false;
-      auto preprocess_thread =
-          std::thread{[&preprocessor, &keep_refining, &refinement_done]() {
-            keep_refining = preprocessor.refine();
-            refinement_done = true;
-          }};
-      while (!refinement_done) {
-        if (plan_found) {
-          
-        }
-      }
-      progress = preprocessor.get_progress();
-      continue;
-    }
-
-    LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
-             preprocessor.get_progress() * 100, preprocessor.get_num_actions());
-
-    auto problem = preprocessor.extract_problem();
-
-    auto searchtime = config_.solver_timeout;
-    if (config_.timeout > 0s) {
-      auto remaining =
-          std::max(std::chrono::ceil<std::chrono::seconds>(
-                       config_.timeout - util::global_timer.get_elapsed_time()),
-                   1s);
-      searchtime = std::min(searchtime, remaining);
-    }
-
-    LOG_INFO(engine_logger, "Planner started with %lu seconds timeout",
-             searchtime.count());
-
-    planner.reset();
-    planner.find_plan(problem, config_.max_steps, searchtime);
-
-    ++num_solves;
-
-    if (planner.get_status() == Planner::Status::Success) {
-      LOG_INFO(engine_logger, "Engine started %u solves", num_solves);
-      plan_ = planner.get_plan();
-      return Engine::Status::Success;
-    }
-
-    while (progress >= next_progress && progress < 1.0f) {
-      next_progress += step_size;
-    }
-
+  while (progress < config_.preprocess_progress &&
+         num_tries < config_.num_threads && !plan_found) {
     LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
              next_progress * 100);
+
+    if (!preprocessor.refine(next_progress, config_.preprocess_timeout,
+                             config_.num_threads - num_tries, plan_found)) {
+      if (config_.timeout > 0s &&
+          std::chrono::ceil<std::chrono::seconds>(
+              util::global_timer.get_elapsed_time()) >= config_.timeout) {
+        LOG_ERROR(engine_logger, "Preprocessing timed out");
+        result = Status::Timeout;
+        break;
+      }
+    }
+
+    progress = preprocessor.get_progress();
+
+    while (next_progress <= progress) {
+      next_progress += step_size;
+    };
+
+    LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
+             progress * 100, preprocessor.get_num_actions());
+
+    LOG_INFO(engine_logger, "Starting planner %u", num_tries);
+
+    threads[num_tries] = std::thread{
+        [&](auto problem, auto id) {
+          SatPlanner planner{config_};
+          planner.find_plan(problem, config_.max_steps, 0s);
+          if (planner.get_status() == Planner::Status::Success) {
+            if (!plan_found.exchange(true)) {
+              LOG_INFO(engine_logger, "Planner %u found a plan", id);
+              plan_ = planner.get_plan();
+            }
+          }
+        },
+        preprocessor.extract_problem(), num_tries};
+
+    ++num_tries;
   }
 
-  LOG_INFO(engine_logger, "Preprocessed to %.1f% resulting in %lu actions",
-           preprocessor.get_progress() * 100, preprocessor.get_num_actions());
+  std::for_each(threads.begin(), threads.end(), [](auto &t) {
+    if (t.joinable()) {
+      t.join();
+    }
+  });
 
-  auto problem = preprocessor.extract_problem();
+  LOG_INFO(engine_logger, "Engine started %u planners", num_tries);
 
-  auto searchtime = 0s;
-  if (config_.timeout > 0s) {
-    searchtime =
-        std::max(std::chrono::ceil<std::chrono::seconds>(
-                     config_.timeout - util::global_timer.get_elapsed_time()),
-                 1s);
-  }
-
-  if (searchtime > 0s) {
-    LOG_INFO(engine_logger, "Planner started with %lu seconds timeout",
-             searchtime.count());
-  } else {
-    LOG_INFO(engine_logger, "Planner started with no timeout");
-  }
-
-  planner.reset();
-  planner.find_plan(problem, config_.max_steps, searchtime);
-
-  ++num_solves;
-
-  LOG_INFO(engine_logger, "Engine started %u solves", num_solves);
-
-  switch (planner.get_status()) {
-  case Planner::Status::Success:
-    plan_ = planner.get_plan();
+  if (plan_found) {
     return Engine::Status::Success;
-  case Planner::Status::Timeout:
-    return Engine::Status::Timeout;
-  default:
-    return Engine::Status::Error;
   }
+  return result;
 }

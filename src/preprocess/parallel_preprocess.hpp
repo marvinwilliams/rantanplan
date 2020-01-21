@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <unordered_set>
@@ -26,7 +27,7 @@ public:
       const std::shared_ptr<normalized::Problem> &problem,
       const Config &config) noexcept;
 
-  bool refine(float progress, unsigned int num_threads,
+  bool refine(float progress, std::chrono::seconds timeout, unsigned int num_threads,
               const std::atomic_bool &stop_flag) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
@@ -58,9 +59,8 @@ private:
   select_min_new(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
-  void clear_cache() noexcept;
-  void defer_remove_action(const normalized::Action &a) noexcept;
-  void simplify_actions(unsigned int num_threads) noexcept;
+
+  void prune_actions(unsigned int num_threads) noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
 
@@ -86,11 +86,6 @@ private:
 
   mutable std::vector<Cache> successful_cache_;
   mutable std::vector<Cache> unsuccessful_cache_;
-  std::vector<Cache> defer_remove_cache_;
-  mutable std::vector<std::atomic_bool> pos_rigid_dirty;
-  mutable std::vector<std::atomic_bool> neg_rigid_dirty;
-  mutable std::vector<std::atomic_bool> pos_effectless_dirty;
-  mutable std::vector<std::atomic_bool> neg_effectless_dirty;
 
   const Config &config_;
   decltype(&ParallelPreprocessor::select_free) parameter_selector_;
