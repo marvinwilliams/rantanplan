@@ -440,7 +440,8 @@ void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
           std::remove_if(
               action_list->begin(), action_list->end(),
               [&](const auto &a) {
-                return remove_action[std::distance(&*action_list->begin(), &a)]
+                return remove_action[static_cast<size_t>(
+                                         &a - &*action_list->begin())]
                     .load();
               }),
           action_list->end());
