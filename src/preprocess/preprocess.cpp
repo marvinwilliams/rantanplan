@@ -1,5 +1,4 @@
 #include "preprocess/preprocess.hpp"
-#include "build_config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
@@ -19,9 +18,8 @@
 using namespace normalized;
 using namespace std::chrono_literals;
 
-Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
-                           const Config &config) noexcept
-    : config_{config}, problem_{problem} {
+Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem) noexcept
+    : problem_{problem} {
   num_actions_ =
       std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
                       [this](uint_fast64_t sum, const auto &a) {
@@ -73,7 +71,7 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
   progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
               static_cast<float>(num_actions_);
 
-  parameter_selector_ = std::invoke([mode = config_.preprocess_mode]() {
+  parameter_selector_ = std::invoke([mode = config.preprocess_mode]() {
     switch (mode) {
     case Config::PreprocessMode::New:
       return &Preprocessor::select_min_new;
@@ -89,33 +87,41 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem,
 bool Preprocessor::refine(float progress,
                           std::chrono::seconds timeout) noexcept {
   util::Timer timer;
+
+  auto check_timeout = [&]() {
+    if ((config.timeout > 0s &&
+         std::chrono::ceil<std::chrono::seconds>(
+             global_timer.get_elapsed_time()) >= config.timeout) ||
+        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                             timer.get_elapsed_time()) >= timeout)) {
+      return true;
+    }
+    return false;
+  };
+
   while (progress_ < progress) {
-    for (auto action_list = actions_.begin(); action_list != actions_.end();
-         ++action_list) {
-      if ((config_.timeout > 0s &&
-           std::chrono::ceil<std::chrono::seconds>(
-               util::global_timer.get_elapsed_time()) >= config_.timeout) ||
-          (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                               timer.get_elapsed_time()) >= timeout)) {
-        return false;
-      }
+    if (check_timeout()) {
+      return false;
+    }
+    for (auto &action_list : actions_) {
       std::vector<Action> new_actions;
-      std::for_each(
-          action_list->begin(), action_list->end(), [&](const auto action) {
-            auto selection = std::invoke(parameter_selector_, *this, action);
-            std::for_each(AssignmentIterator{selection, action, *problem_},
-                          AssignmentIterator{}, [&](const auto &assignment) {
-                            if (auto new_action = ground(assignment, action);
-                                is_valid(new_action)) {
-                              simplify(new_action);
-                              new_actions.push_back(new_action);
-                            } else {
-                              num_pruned_actions_ +=
-                                  get_num_instantiated(new_action, *problem_);
-                            }
-                          });
-          });
-      *action_list = std::move(new_actions);
+      uint_fast64_t new_pruned_actions = 0;
+      for (const auto &action : action_list) {
+        auto selection = std::invoke(parameter_selector_, *this, action);
+        std::for_each(AssignmentIterator{selection, action, *problem_},
+                      AssignmentIterator{}, [&](const auto &assignment) {
+                        if (auto new_action = ground(assignment, action);
+                            is_valid(new_action)) {
+                          simplify(new_action);
+                          new_actions.push_back(new_action);
+                        } else {
+                          new_pruned_actions +=
+                              get_num_instantiated(new_action, *problem_);
+                        }
+                      });
+      };
+      num_pruned_actions_ += new_pruned_actions;
+      action_list = std::move(new_actions);
       progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
                   static_cast<float>(num_actions_);
       if (progress_ >= progress) {

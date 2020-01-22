@@ -14,8 +14,7 @@ class Engine {
 public:
   enum class Status { Ready, Success, Timeout, Error };
 
-  explicit Engine(const std::shared_ptr<normalized::Problem> &problem,
-                  const Config &config);
+  explicit Engine(const std::shared_ptr<normalized::Problem> &problem);
 
   void start();
   Status get_status() const;
@@ -24,7 +23,6 @@ public:
   virtual ~Engine() = default;
 
 protected:
-  const Config& config_;
   std::shared_ptr<normalized::Problem> problem_;
   Plan plan_;
 

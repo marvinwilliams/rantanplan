@@ -12,11 +12,11 @@
 
 using namespace normalized;
 
-ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem,
-                               const Config &config) noexcept
-    : Encoder{problem}, config_{config}, support_{*problem} {
-  LOG_INFO(encoding_logger, "Encoding...");
+ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
+    : Encoder{problem}, support_{*problem} {
+  LOG_INFO(encoding_logger, "Init sat variables...");
   init_sat_vars();
+  LOG_INFO(encoding_logger, "Encode problem...");
   encode_init();
   encode_actions();
   parameter_implies_predicate();
@@ -255,7 +255,7 @@ void ForeachEncoder::frame_axioms() noexcept {
         if (assignment.empty()) {
           dnf << Literal{Variable{actions_[action_index]}, true};
         } else if (assignment.size() == 1 ||
-                   num_nontrivial_clauses < config_.dnf_threshold) {
+                   num_nontrivial_clauses < config.dnf_threshold) {
           for (auto [parameter_index, constant_index] : assignment) {
             const auto &constants =
                 problem_->constants_by_type[problem_->actions[action_index]

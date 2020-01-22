@@ -9,11 +9,12 @@
 #include <cstdint>
 #include <vector>
 
-class ForeachEncoder final : public Encoder {
+extern Config config;
 
+class ForeachEncoder final : public Encoder {
 public:
-  explicit ForeachEncoder(const std::shared_ptr<normalized::Problem> &problem,
-                          const Config &config) noexcept;
+  explicit ForeachEncoder(
+      const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
   int to_sat_var(Literal l, unsigned int step) const noexcept override;
   Plan extract_plan(const sat::Model &model, unsigned int num_steps) const
@@ -33,7 +34,6 @@ private:
   std::vector<uint_fast64_t> actions_;
   std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;
 
-  const Config &config_;
   Support support_;
 };
 

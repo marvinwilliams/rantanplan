@@ -8,6 +8,7 @@
 #include <string>
 
 extern logging::Logger main_logger;
+extern Config config;
 
 inline options::Options set_options(const std::string &name) {
   options::Options options(name);
@@ -53,7 +54,7 @@ inline options::Options set_options(const std::string &name) {
   return options;
 }
 
-inline void set_config(Config &config, const options::Options &options) {
+inline void set_config(const options::Options &options) {
   if (const auto &domain = options.get<std::string>("domain");
       domain.count > 0) {
     config.domain_file = domain.value;

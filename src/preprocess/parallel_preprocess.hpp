@@ -7,6 +7,7 @@
 #include "model/normalized/utils.hpp"
 #include "planner/planner.hpp"
 #include "util/index.hpp"
+#include "util/timer.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -17,18 +18,23 @@
 #include <utility>
 
 extern logging::Logger preprocess_logger;
+extern Config config;
+extern const util::Timer global_timer;
+extern std::atomic_bool thread_stop_flag;
 
 class ParallelPreprocessor {
 public:
   struct predicate_id_t {};
   using PredicateId = util::Index<predicate_id_t>;
+  enum class Status { Success, Timeout, Interrupt };
 
-  explicit ParallelPreprocessor(unsigned int num_threads,
-      const std::shared_ptr<normalized::Problem> &problem,
-      const Config &config) noexcept;
+  explicit ParallelPreprocessor(
+      unsigned int num_threads,
+      const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
-  bool refine(float progress, std::chrono::seconds timeout, unsigned int num_threads,
-              const std::atomic_bool &stop_flag) noexcept;
+  Status get_status() const noexcept;
+  void refine(float progress, std::chrono::seconds timeout,
+              unsigned int num_threads) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
   std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
@@ -64,6 +70,7 @@ private:
   bool is_valid(const normalized::Action &action) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
 
+  Status status_ = Status::Success;
   float progress_;
   uint_fast64_t num_actions_;
   std::atomic_uint_fast64_t num_pruned_actions_ = 0;
@@ -87,7 +94,6 @@ private:
   mutable std::vector<Cache> successful_cache_;
   mutable std::vector<Cache> unsuccessful_cache_;
 
-  const Config &config_;
   decltype(&ParallelPreprocessor::select_free) parameter_selector_;
   std::shared_ptr<normalized::Problem> problem_;
 };

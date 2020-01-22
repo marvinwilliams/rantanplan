@@ -15,30 +15,38 @@
 using namespace std::chrono_literals;
 
 std::unique_ptr<Encoder>
-get_encoder(const std::shared_ptr<normalized::Problem> &problem,
-            const Config &config) noexcept {
+get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept {
   switch (config.encoding) {
   case Config::Encoding::Sequential:
     /* return std::make_unique<SequentialEncoder>(problem, config); */
-    return std::make_unique<ForeachEncoder>(problem, config);
+    return std::make_unique<ForeachEncoder>(problem);
   case Config::Encoding::Foreach:
-    return std::make_unique<ForeachEncoder>(problem, config);
+    return std::make_unique<ForeachEncoder>(problem);
   case Config::Encoding::Exists:
     /* return std::make_unique<ExistsEncoder>(problem, config); */
-    return std::make_unique<ForeachEncoder>(problem, config);
+    return std::make_unique<ForeachEncoder>(problem);
   }
-  return std::make_unique<ForeachEncoder>(problem, config);
+  return std::make_unique<ForeachEncoder>(problem);
 }
-
-SatPlanner::SatPlanner(const Config &config) : config_{config} {}
 
 Planner::Status
 SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                            unsigned int max_steps,
                            std::chrono::seconds timeout) noexcept {
   util::Timer timer;
-  auto encoder = get_encoder(problem, config_);
-  sat::IpasirSolver solver{config_};
+  auto check_timeout = [&]() {
+    if ((config.timeout > 0s &&
+         std::chrono::ceil<std::chrono::seconds>(
+             global_timer.get_elapsed_time()) >= config.timeout) ||
+        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                             timer.get_elapsed_time()) >= timeout)) {
+      return true;
+    }
+    return false;
+  };
+
+  auto encoder = get_encoder(problem);
+  sat::IpasirSolver solver;
   solver << static_cast<int>(Encoder::SAT) << 0;
   solver << -static_cast<int>(Encoder::UNSAT) << 0;
   add_formula(solver, encoder->get_init(), 0, *encoder);
@@ -51,11 +59,7 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
     if (max_steps > 0 && step >= max_steps) {
       return Status::MaxStepsExceeded;
     }
-    if ((config_.timeout > 0s &&
-         std::chrono::ceil<std::chrono::seconds>(
-             util::global_timer.get_elapsed_time()) >= config_.timeout) ||
-        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                             timer.get_elapsed_time()) >= timeout)) {
+    if (check_timeout()) {
       return Status::Timeout;
     }
     do {
@@ -82,16 +86,20 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
 
     solver.solve(searchtime);
 
-    if (auto status = solver.get_status();
-        status == sat::Solver::Status::Solved) {
+    switch (solver.get_status()) {
+    case sat::Solver::Status::Solved:
       plan_ = encoder->extract_plan(solver.get_model(), step);
       return Status::Success;
-    } else if (status == sat::Solver::Status::Timeout) {
+    case sat::Solver::Status::Timeout:
       return Status::Timeout;
-    } else if (status == sat::Solver::Status::Error) {
+    case sat::Solver::Status::Error:
       return Status::Error;
+    case sat::Solver::Status::Unsolvable:
+      break;
+    default:
+      assert(false);
     }
-    current_step *= config_.step_factor;
+    current_step *= config.step_factor;
   }
   assert(false);
   return Status::Error;

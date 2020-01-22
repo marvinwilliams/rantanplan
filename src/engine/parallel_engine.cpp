@@ -4,7 +4,6 @@
 #include "planner/planner.hpp"
 #include "planner/sat_planner.hpp"
 #include "preprocess/parallel_preprocess.hpp"
-#include "util/timer.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -13,70 +12,76 @@
 using namespace std::chrono_literals;
 
 ParallelEngine::ParallelEngine(
-    const std::shared_ptr<normalized::Problem> &problem,
-    const Config &config) noexcept
-    : Engine(problem, config) {}
+    const std::shared_ptr<normalized::Problem> &problem) noexcept
+    : Engine(problem) {}
 
 Engine::Status ParallelEngine::start_impl() noexcept {
+  assert(config.num_threads > 1);
+
   LOG_INFO(engine_logger, "Using parallel engine");
 
-  assert(config_.num_threads > 0);
+  auto check_timeout = []() {
+    if (config.timeout > 0s &&
+        std::chrono::ceil<std::chrono::seconds>(
+            global_timer.get_elapsed_time()) >= config.timeout) {
+      return true;
+    }
+    return false;
+  };
 
-  ParallelPreprocessor preprocessor{config_.num_threads, problem_, config_};
+  ParallelPreprocessor preprocessor{config.num_threads, problem_};
 
   float progress = preprocessor.get_progress();
   float step_size =
-      config_.preprocess_progress / static_cast<float>(config_.num_threads - 1);
+      config.preprocess_progress / static_cast<float>(config.num_threads - 1);
   float next_progress = 0.0f;
 
-  unsigned int num_tries = 0;
+  std::vector<std::thread> threads(config.num_threads);
+  std::atomic_bool found_plan = false;
 
-  std::atomic_bool plan_found = false;
-  Engine::Status result = Engine::Status::Ready;
-
-  std::vector<std::thread> threads(config_.num_threads);
-
-  while (progress < config_.preprocess_progress &&
-         num_tries < config_.num_threads && !plan_found) {
+  for (unsigned int planner_id = 0; planner_id < config.num_threads;
+       ++planner_id) {
+    if (check_timeout()) {
+      break;
+    }
     LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
              next_progress * 100);
+    preprocessor.refine(next_progress, config.preprocess_timeout,
+                        config.num_threads - planner_id);
 
-    if (!preprocessor.refine(next_progress, config_.preprocess_timeout,
-                             config_.num_threads - num_tries, plan_found)) {
-      if (config_.timeout > 0s &&
-          std::chrono::ceil<std::chrono::seconds>(
-              util::global_timer.get_elapsed_time()) >= config_.timeout) {
-        LOG_ERROR(engine_logger, "Preprocessing timed out");
-        result = Status::Timeout;
-        break;
-      }
+    if (found_plan.load(std::memory_order_acquire)) {
+      break;
     }
 
-    progress = preprocessor.get_progress();
+    assert(preprocessor.get_status() !=
+           ParallelPreprocessor::Status::Interrupt);
 
-    while (next_progress <= progress) {
-      next_progress += step_size;
-    };
+    progress = preprocessor.get_progress();
 
     LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
              progress * 100, preprocessor.get_num_actions());
 
-    LOG_INFO(engine_logger, "Starting planner %u", num_tries);
+    LOG_INFO(engine_logger, "Starting planner %u", planner_id);
 
-    threads[num_tries] = std::thread{
-        [&](auto problem, auto id) {
-          SatPlanner planner{config_};
-          planner.find_plan(problem, config_.max_steps, 0s);
+    threads[planner_id] = std::thread{
+        [planner_id, &found_plan, this](auto problem) {
+          SatPlanner planner;
+          planner.find_plan(problem, config.max_steps, config.solver_timeout);
           if (planner.get_status() == Planner::Status::Success) {
-            if (!plan_found.exchange(true)) {
-              LOG_INFO(engine_logger, "Planner %u found a plan", id);
+            if (!found_plan.exchange(true, std::memory_order_acq_rel)) {
+              thread_stop_flag.store(true, std::memory_order_release);
+              LOG_INFO(engine_logger, "Planner %u found a plan", planner_id);
               plan_ = planner.get_plan();
             }
+          } else if (planner.get_status() == Planner::Status::Timeout) {
+            LOG_INFO(engine_logger, "Planner %u timed out", planner_id);
           }
         },
-        preprocessor.extract_problem(), num_tries};
+        preprocessor.extract_problem()};
 
-    ++num_tries;
+    while (next_progress <= progress) {
+      next_progress += step_size;
+    }
   }
 
   std::for_each(threads.begin(), threads.end(), [](auto &t) {
@@ -85,10 +90,8 @@ Engine::Status ParallelEngine::start_impl() noexcept {
     }
   });
 
-  LOG_INFO(engine_logger, "Engine started %u planners", num_tries);
-
-  if (plan_found) {
+  if (found_plan.load(std::memory_order_acquire)) {
     return Engine::Status::Success;
   }
-  return result;
+  return Engine::Status::Timeout;
 }

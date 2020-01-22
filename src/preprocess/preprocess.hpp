@@ -7,6 +7,7 @@
 #include "model/normalized/utils.hpp"
 #include "planner/planner.hpp"
 #include "util/index.hpp"
+#include "util/timer.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -15,15 +16,18 @@
 #include <utility>
 
 extern logging::Logger preprocess_logger;
+extern Config config;
+extern const util::Timer timer;
 
 class Preprocessor {
 public:
   struct predicate_id_t {};
   using PredicateId = util::Index<predicate_id_t>;
 
-  explicit Preprocessor(const std::shared_ptr<normalized::Problem> &problem,
-                        const Config &config) noexcept;
+  explicit Preprocessor(
+      const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
+  // returns true if progress is reached, false on timeout
   bool refine(float progress, std::chrono::seconds timeout) noexcept;
   size_t get_num_actions() const noexcept;
   float get_progress() const noexcept;
@@ -79,7 +83,6 @@ private:
   mutable std::vector<Cache> successful_cache_;
   mutable std::vector<Cache> unsuccessful_cache_;
 
-  const Config &config_;
   decltype(&Preprocessor::select_free) parameter_selector_;
   std::shared_ptr<normalized::Problem> problem_;
 };

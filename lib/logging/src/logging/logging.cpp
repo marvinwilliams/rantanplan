@@ -84,7 +84,7 @@ void Logger::log(Level level, const char *file, unsigned int line,
   std::strftime(time_buffer.data(), time_buffer.size(), "%F %T",
                 std::localtime(&time));
   auto uptime =
-      std::chrono::duration<float>(util::global_timer.get_elapsed_time())
+      std::chrono::duration<float>(global_timer.get_elapsed_time())
           .count();
   auto format_message = [&](char *buffer, size_t length) {
     if (line == 0) {

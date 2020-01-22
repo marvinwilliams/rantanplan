@@ -6,17 +6,17 @@
 #include "model/normalized/model.hpp"
 #include "planner/planner.hpp"
 #include "sat/solver.hpp"
+#include "util/timer.hpp"
 
 #include <memory>
 
+extern Config config;
+extern const util::Timer global_timer;
+
 std::unique_ptr<Encoder>
-get_encoder(const std::shared_ptr<normalized::Problem> &problem,
-            const Config &config) noexcept;
+get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
 class SatPlanner final : public Planner {
-public:
-  explicit SatPlanner(const Config &config);
-
 private:
   Status find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                         unsigned int max_steps,
@@ -26,8 +26,6 @@ private:
                    unsigned int step, const Encoder &encoder) const noexcept;
   void assume_goal(sat::Solver &solver, unsigned int step,
                    const Encoder &encoder) const noexcept;
-
-  const Config &config_;
 };
 
 #endif /* end of include guard: SAT_PLANNER_HPP */

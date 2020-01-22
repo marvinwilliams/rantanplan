@@ -23,11 +23,9 @@ using namespace normalized;
 using namespace std::chrono_literals;
 
 ParallelPreprocessor::ParallelPreprocessor(
-    unsigned int num_threads, const std::shared_ptr<Problem> &problem,
-    const Config &config) noexcept
+    unsigned int num_threads, const std::shared_ptr<Problem> &problem) noexcept
     : successful_cache_(problem->predicates.size()),
-      unsuccessful_cache_(problem->predicates.size()), config_{config},
-      problem_{problem} {
+      unsuccessful_cache_(problem->predicates.size()), problem_{problem} {
   num_actions_ =
       std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
                       [this](uint_fast64_t sum, const auto &a) {
@@ -76,7 +74,7 @@ ParallelPreprocessor::ParallelPreprocessor(
   progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
               static_cast<float>(num_actions_);
 
-  parameter_selector_ = std::invoke([mode = config_.preprocess_mode]() {
+  parameter_selector_ = std::invoke([mode = config.preprocess_mode]() {
     switch (mode) {
     case Config::PreprocessMode::New:
       return &ParallelPreprocessor::select_min_new;
@@ -89,39 +87,47 @@ ParallelPreprocessor::ParallelPreprocessor(
   });
 }
 
-bool ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
-                                  unsigned int num_threads,
-                                  const std::atomic_bool &stop_token) noexcept {
+ParallelPreprocessor::Status ParallelPreprocessor::get_status() const noexcept {
+  return status_;
+}
+
+void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
+                                  unsigned int num_threads) noexcept {
+  assert(status_ != Status::Interrupt);
+  status_ = Status::Success;
   util::Timer timer;
-  while (progress_ < progress) {
-    for (auto action_list = actions_.begin(); action_list != actions_.end();
-         ++action_list) {
-      if (stop_token ||
-          (config_.timeout > 0s &&
-           std::chrono::ceil<std::chrono::seconds>(
-               util::global_timer.get_elapsed_time()) >= config_.timeout) ||
-          (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                               timer.get_elapsed_time()) >= timeout)) {
-        return false;
-      }
+
+  auto check_timeout = [&]() {
+    if ((config.timeout > 0s &&
+         std::chrono::ceil<std::chrono::seconds>(
+             global_timer.get_elapsed_time()) >= config.timeout) ||
+        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                             timer.get_elapsed_time()) >= timeout)) {
+      return true;
+    }
+    return false;
+  };
+
+  while (progress_ < progress && status_ == Status::Success) {
+    if (check_timeout()) {
+      status_ = Status::Timeout;
+      return;
+    }
+    for (auto &action_list : actions_) {
       std::vector<normalized::Action> new_actions;
       std::mutex new_actions_mutex;
       std::vector<std::thread> threads(num_threads);
-      std::atomic_uint_fast64_t i = 0;
+      std::atomic_uint_fast64_t index_counter = 0;
       std::for_each(threads.begin(), threads.end(), [&](auto &t) {
         t = std::thread{[&]() {
           std::vector<normalized::Action> thread_new_actions;
-          while (!stop_token) {
-            auto action_index = i++;
-            if (action_index >= action_list->size()) {
-              std::lock_guard l{new_actions_mutex};
-              new_actions.insert(
-                  new_actions.end(),
-                  std::make_move_iterator(thread_new_actions.begin()),
-                  std::make_move_iterator(thread_new_actions.end()));
-              break;
+          uint_fast64_t action_index;
+          while ((action_index = index_counter.fetch_add(
+                      1, std::memory_order_relaxed)) < action_list.size()) {
+            if (thread_stop_flag.load(std::memory_order_acquire)) {
+              return;
             }
-            const auto action = (*action_list)[action_index];
+            const auto action = action_list[action_index];
             auto selection = std::invoke(parameter_selector_, *this, action);
             auto assignment_it =
                 AssignmentIterator{selection, action, *problem_};
@@ -134,15 +140,25 @@ bool ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
                               simplify(new_action);
                               thread_new_actions.push_back(new_action);
                             } else {
-                              num_pruned_actions_ +=
-                                  get_num_instantiated(new_action, *problem_);
+                              num_pruned_actions_.fetch_add(
+                                  get_num_instantiated(new_action, *problem_),
+                                  std::memory_order_relaxed);
                             }
                           });
           }
+          std::lock_guard l{new_actions_mutex};
+          new_actions.insert(
+              new_actions.end(),
+              std::make_move_iterator(thread_new_actions.begin()),
+              std::make_move_iterator(thread_new_actions.end()));
         }};
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-      *action_list = std::move(new_actions);
+      if (thread_stop_flag.load(std::memory_order_acquire)) {
+        status_ = Status::Interrupt;
+        return;
+      }
+      action_list = std::move(new_actions);
       progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
                   static_cast<float>(num_actions_);
       if (progress_ >= progress) {
@@ -151,7 +167,6 @@ bool ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
     }
     prune_actions(num_threads);
   }
-  return true;
 }
 
 size_t ParallelPreprocessor::get_num_actions() const noexcept {
@@ -411,17 +426,20 @@ void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
                     c.pos_effectless.clear();
                     c.neg_effectless.clear();
                   });
-    for (auto action_list = actions_.begin(); action_list != actions_.end();
-         ++action_list) {
-      std::vector<std::atomic_bool> remove_action(action_list->size());
+    for (auto &action_list : actions_) {
+      std::vector<std::atomic_bool> remove_action(action_list.size());
       std::fill(remove_action.begin(), remove_action.end(), false);
       std::vector<std::thread> threads(num_threads);
-      std::atomic_uint_fast64_t i = 0;
+      std::atomic_uint_fast64_t index_counter = 0;
       std::for_each(threads.begin(), threads.end(), [&](auto &t) {
         t = std::thread{[&]() {
-          auto action_index = i++;
-          while (i < action_list->size()) {
-            auto &action = (*action_list)[action_index];
+          uint_fast64_t action_index;
+          while ((action_index = index_counter.fetch_add(
+                      1, std::memory_order_relaxed)) < action_list.size()) {
+            if (thread_stop_flag.load(std::memory_order_acquire)) {
+              return;
+            }
+            auto &action = action_list[action_index];
             if (is_valid(action)) {
               if (simplify(action)) {
                 changed = true;
@@ -431,20 +449,22 @@ void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
               num_pruned_actions_ += get_num_instantiated(action, *problem_);
               changed = true;
             }
-            action_index = i++;
           }
         }};
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-      action_list->erase(
-          std::remove_if(
-              action_list->begin(), action_list->end(),
-              [&](const auto &a) {
-                return remove_action[static_cast<size_t>(
-                                         &a - &*action_list->begin())]
-                    .load();
-              }),
-          action_list->end());
+      if (thread_stop_flag.load(std::memory_order_acquire)) {
+        status_ = Status::Interrupt;
+        return;
+      }
+      action_list.erase(
+          std::remove_if(action_list.begin(), action_list.end(),
+                         [&](const auto &a) {
+                           return remove_action[static_cast<size_t>(
+                                                    &a - &*action_list.begin())]
+                               .load();
+                         }),
+          action_list.end());
     }
   } while (changed);
 }

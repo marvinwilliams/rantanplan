@@ -1,10 +1,8 @@
 #include "engine/engine.hpp"
-#include "config.hpp"
 #include "planner/sat_planner.hpp"
 
-Engine::Engine(const std::shared_ptr<normalized::Problem> &problem,
-               const Config &config)
-    : config_{config}, problem_{problem} {}
+Engine::Engine(const std::shared_ptr<normalized::Problem> &problem)
+    : problem_{problem} {}
 
 void Engine::start() {
   assert(status_ == Status::Ready);

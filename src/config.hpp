@@ -51,8 +51,8 @@ struct Config {
   unsigned int max_steps = 0; // 0: Infinity
   // For interrupt planning
   unsigned int num_solvers = 2;
-  std::chrono::seconds solver_timeout = std::chrono::seconds{60};
-  std::chrono::seconds preprocess_timeout = std::chrono::seconds{60};
+  std::chrono::seconds solver_timeout = std::chrono::seconds{0};
+  std::chrono::seconds preprocess_timeout = std::chrono::seconds{0};
 
   // Parallel
   unsigned int num_threads = 1;

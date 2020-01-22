@@ -13,15 +13,13 @@
 #include "pddl/parser.hpp"
 #include "planner/planner.hpp"
 #ifdef PARALLEL
+#include "engine/parallel_engine.hpp"
 #include "preprocess/parallel_preprocess.hpp"
 #else
 #include "preprocess/preprocess.hpp"
 #endif
 #include "rantanplan_options.hpp"
 #include "util/timer.hpp"
-#ifdef PARALLEL
-#include "engine/parallel_engine.hpp"
-#endif
 
 #include <chrono>
 #include <climits>
@@ -32,6 +30,9 @@
 #include <sstream>
 #include <string>
 #include <unistd.h>
+#ifdef PARALLEL
+#include <atomic>
+#endif
 
 using namespace std::chrono_literals;
 
@@ -42,6 +43,13 @@ logging::Logger engine_logger{"Engine"};
 logging::Logger planner_logger{"Planner"};
 logging::Logger preprocess_logger{"Preprocess"};
 logging::Logger encoding_logger{"Encoding"};
+
+const util::Timer global_timer;
+Config config;
+
+#ifdef PARALLEL
+std::atomic_bool thread_stop_flag = false;
+#endif
 
 void print_memory_usage() {
   if (auto f = std::ifstream{"/proc/self/status"}; f.good()) {
@@ -94,14 +102,30 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  Config config;
-
   try {
-    set_config(config, options);
+    set_config(options);
   } catch (const ConfigException &e) {
     PRINT_ERROR(e.what());
     PRINT_INFO("Try %s --help for further information", argv[0]);
     return 1;
+  }
+
+  if (config.planning_mode == Config::PlanningMode::Interrupt) {
+    if (config.timeout == 0s) {
+      if (config.preprocess_timeout == 0s) {
+        config.preprocess_timeout = 30s;
+      }
+      if (config.solver_timeout == 0s) {
+        config.solver_timeout = 120s;
+      }
+    } else {
+      if (config.preprocess_timeout == 0s) {
+        config.preprocess_timeout = (config.timeout / config.num_solvers) / 5;
+      }
+      if (config.solver_timeout == 0s) {
+        config.solver_timeout = (4 * config.timeout / config.num_solvers) / 5;
+      }
+    }
   }
 
   logging::default_appender.set_level(config.log_level);
@@ -182,12 +206,12 @@ int main(int argc, char *argv[]) {
     LOG_INFO(main_logger, "Preprocessing to %.1f%%...",
              config.preprocess_progress * 100);
 #ifdef PARALLEL
-    ParallelPreprocessor preprocessor{config.num_threads, problem, config};
-    if (!preprocessor.refine(config.preprocess_progress,
-                             config.preprocess_timeout, config.num_threads,
-                             std::atomic_bool{false})) {
+    ParallelPreprocessor preprocessor{config.num_threads, problem};
+    preprocessor.refine(config.preprocess_progress, config.preprocess_timeout,
+                        config.num_threads);
+    if (preprocessor.get_status() == ParallelPreprocessor::Status::Timeout) {
 #else
-    Preprocessor preprocessor{problem, config};
+    Preprocessor preprocessor{problem};
     if (!preprocessor.refine(config.preprocess_progress,
                              config.preprocess_timeout)) {
 #endif
@@ -205,14 +229,14 @@ int main(int argc, char *argv[]) {
 
   switch (config.planning_mode) {
   case Config::PlanningMode::Oneshot:
-    engine = std::make_unique<OneshotEngine>(problem, config);
+    engine = std::make_unique<OneshotEngine>(problem);
     break;
   case Config::PlanningMode::Interrupt:
-    engine = std::make_unique<InterruptEngine>(problem, config);
+    engine = std::make_unique<InterruptEngine>(problem);
     break;
   case Config::PlanningMode::Parallel:
 #ifdef PARALLEL
-    engine = std::make_unique<ParallelEngine>(problem, config);
+    engine = std::make_unique<ParallelEngine>(problem);
     break;
 #else
     LOG_ERROR(main_logger, "Please compile with parallel support");
@@ -220,7 +244,7 @@ int main(int argc, char *argv[]) {
 #endif
   default:
     assert(false);
-    engine = std::make_unique<OneshotEngine>(problem, config);
+    engine = std::make_unique<OneshotEngine>(problem);
   }
 
   LOG_INFO(main_logger, "Starting search...");

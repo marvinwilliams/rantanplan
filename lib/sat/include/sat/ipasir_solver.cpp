@@ -11,8 +11,7 @@ using namespace std::chrono_literals;
 
 namespace sat {
 
-IpasirSolver::IpasirSolver(const Config &config) noexcept
-    : handle_{ipasir_init()}, num_vars_{0}, config_{config} {
+IpasirSolver::IpasirSolver() noexcept : handle_{ipasir_init()}, num_vars_{0} {
   ipasir_set_learn(handle_, NULL, 0, NULL);
 }
 
@@ -31,19 +30,27 @@ void IpasirSolver::add_impl(int l) noexcept {
 void IpasirSolver::assume_impl(int l) noexcept { ipasir_assume(handle_, l); }
 
 Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
-  struct State {
-    std::chrono::seconds timeout;
-    util::Timer timer;
-    const Config &config;
-  };
-  State state{timeout, {}, config_};
-  ipasir_set_terminate(handle_, &state, [](void *state) {
-    State *s = static_cast<State *>(state);
-    if ((s->config.timeout > 0s &&
+  util::Timer timer;
+  auto check_timeout = [&]() {
+    if ((config.timeout > 0s &&
          std::chrono::ceil<std::chrono::seconds>(
-             util::global_timer.get_elapsed_time()) >= s->config.timeout) ||
-        (s->timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                                s->timer.get_elapsed_time()) >= s->timeout)) {
+             global_timer.get_elapsed_time()) >= config.timeout) ||
+        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
+                             timer.get_elapsed_time()) >= timeout)) {
+      return true;
+    }
+    return false;
+  };
+
+  ipasir_set_terminate(handle_, &check_timeout, [](void *terminate_handler) {
+#ifdef PARALLEL
+    if (thread_stop_flag.load(std::memory_order_acquire)) {
+      return 1;
+    }
+#endif
+    if (static_cast<decltype(check_timeout) *>(terminate_handler)
+            ->
+            operator()()) {
       return 1;
     }
     return 0;
