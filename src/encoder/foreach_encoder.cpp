@@ -7,6 +7,7 @@
 #include "planner/planner.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <vector>
 
@@ -21,10 +22,12 @@ ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
   encode_actions();
   parameter_implies_predicate();
   interference();
-  frame_axioms();
+  auto num_helpers = frame_axioms();
   assume_goal();
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
   LOG_INFO(encoding_logger, "Variables per step: %u", num_vars_);
+  LOG_INFO(encoding_logger, "Helper variables to mitigate dnf explosion: %u",
+           num_helpers);
   LOG_INFO(encoding_logger, "Init clauses: %u", init_.clauses.size());
   LOG_INFO(encoding_logger, "Universal clauses: %u",
            universal_clauses_.clauses.size());
@@ -81,7 +84,6 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
 }
 
 void ForeachEncoder::init_sat_vars() noexcept {
-  LOG_INFO(encoding_logger, "Initializing sat variables...");
   actions_.reserve(problem_->actions.size());
   parameters_.resize(problem_->actions.size());
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
@@ -233,8 +235,8 @@ void ForeachEncoder::interference() noexcept {
   }
 }
 
-void ForeachEncoder::frame_axioms() noexcept {
-  unsigned int num_helpers = 0;
+uint_fast64_t ForeachEncoder::frame_axioms() noexcept {
+  uint_fast64_t num_helpers = 0;
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     for (bool positive : {true, false}) {
       size_t num_nontrivial_clauses = 0;
@@ -296,8 +298,7 @@ void ForeachEncoder::frame_axioms() noexcept {
       transition_clauses_.add_dnf(dnf);
     }
   }
-  LOG_INFO(encoding_logger, "Helper variables to mitigate dnf explosion: %u",
-           num_helpers);
+  return num_helpers;
 }
 
 void ForeachEncoder::assume_goal() noexcept {

@@ -25,7 +25,7 @@ private:
   void encode_actions() noexcept;
   void parameter_implies_predicate() noexcept;
   void interference() noexcept;
-  void frame_axioms() noexcept;
+  uint_fast64_t frame_axioms() noexcept;
   void assume_goal() noexcept;
   void init_sat_vars() noexcept;
 
