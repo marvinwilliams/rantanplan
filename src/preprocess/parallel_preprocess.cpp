@@ -437,10 +437,12 @@ void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
       action_list->erase(
-          std::remove_if(action_list->begin(), action_list->end(),
-                         [&](const auto &a) {
-                           return remove_action[&a - &*action_list->begin()].load();
-                         }),
+          std::remove_if(
+              action_list->begin(), action_list->end(),
+              [&](const auto &a) {
+                return remove_action[std::distance(&*action_list->begin(), &a)]
+                    .load();
+              }),
           action_list->end());
     }
   } while (changed);
