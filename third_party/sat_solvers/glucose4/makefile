@@ -28,7 +28,7 @@ TARGET=$(BUILD_DIR)/libipasir$(SIG).a
 
 #-----------------------------------------------------------------------#
 
-CXX=g++  
+CXX=g++
 
 CXXFLAGS= -g -std=c++11 -Wall -DNDEBUG -O3
 

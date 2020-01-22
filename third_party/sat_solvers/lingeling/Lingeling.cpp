@@ -9,7 +9,7 @@
 #include "ipasir.h"
 
 extern "C" {
-	#include "sat/lingeling/lglib.h"
+	#include "lglib.h"
 }
 
 const char* ipasir_signature() {

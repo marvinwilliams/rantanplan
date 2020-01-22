@@ -30,7 +30,7 @@ TARGET=libipasir$(SIG).a
 #-----------------------------------------------------------------------#
 
 CXX=g++
-CXXFLAGS=-Wall -DNDEBUG -O3
+CXXFLAGS=-Wall -DNDEBUG -O3 -fpermissive
 
 #-----------------------------------------------------------------------#
 #- REQUIRED TOP RULES --------------------------------------------------#
@@ -50,13 +50,9 @@ libipasir$(SIG).a: .FORCE
 	@#
 	@# extract library
 	@#
-	rm -rf $(DIR)
-	tar xvf $(DIR).tar.gz
 	@#
 	@# apply patch for set_terminate and learn_callback
 	@#
-	patch minisat-220/minisat/core/Solver.cc < minisat-cc.patch
-	patch minisat-220/minisat/core/Solver.h < minisat-h.patch
 	@#
 	@# patch verbose output
 	@#
