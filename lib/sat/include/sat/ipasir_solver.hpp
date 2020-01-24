@@ -16,10 +16,6 @@ extern "C" {
 #endif
 
 extern Config config;
-extern const util::Timer global_timer;
-#ifdef PARALLEL
-extern std::atomic_bool thread_stop_flag;
-#endif
 
 namespace sat {
 

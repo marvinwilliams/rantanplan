@@ -6,7 +6,6 @@
 #include "util/timer.hpp"
 
 extern Config config;
-extern const util::Timer global_timer;
 
 class InterruptEngine final : public Engine {
 public:

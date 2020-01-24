@@ -15,19 +15,37 @@ using namespace normalized;
 
 ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
     : Encoder{problem}, support_{*problem} {
+  if (!support_.is_initialized()) {
+    return;
+  }
   LOG_INFO(encoding_logger, "Init sat variables...");
-  init_sat_vars();
+  if (!init_sat_vars()) {
+    return;
+  }
   LOG_INFO(encoding_logger, "Encode problem...");
-  encode_init();
-  encode_actions();
-  parameter_implies_predicate();
-  interference();
-  auto num_helpers = frame_axioms();
-  assume_goal();
+  if (!encode_init()) {
+    return;
+  }
+  if (!encode_actions()) {
+    return;
+  }
+  if (!parameter_implies_predicate()) {
+    return;
+  }
+  if (!interference()) {
+    return;
+  }
+  if (!frame_axioms()) {
+    return;
+  }
+  if (!assume_goal()) {
+    return;
+  }
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
+  initialized_ = true;
   LOG_INFO(encoding_logger, "Variables per step: %u", num_vars_);
   LOG_INFO(encoding_logger, "Helper variables to mitigate dnf explosion: %u",
-           num_helpers);
+           num_helpers_);
   LOG_INFO(encoding_logger, "Init clauses: %u", init_.clauses.size());
   LOG_INFO(encoding_logger, "Universal clauses: %u",
            universal_clauses_.clauses.size());
@@ -83,7 +101,7 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
   return plan;
 }
 
-void ForeachEncoder::init_sat_vars() noexcept {
+bool ForeachEncoder::init_sat_vars() noexcept {
   actions_.reserve(problem_->actions.size());
   parameters_.resize(problem_->actions.size());
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
@@ -117,17 +135,19 @@ void ForeachEncoder::init_sat_vars() noexcept {
       predicates_[i] = num_vars_++;
     }
   }
+  return true;
 }
 
-void ForeachEncoder::encode_init() noexcept {
+bool ForeachEncoder::encode_init() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     auto literal = Literal{Variable{predicates_[i]},
                            support_.is_init(Support::PredicateId{i})};
     init_ << literal << sat::EndClause;
   }
+  return true;
 }
 
-void ForeachEncoder::encode_actions() noexcept {
+bool ForeachEncoder::encode_actions() noexcept {
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
     const auto &action = problem_->actions[i];
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
@@ -158,10 +178,14 @@ void ForeachEncoder::encode_actions() noexcept {
       universal_clauses_.at_most_one(all_arguments);
     }
   }
+  return true;
 }
 
-void ForeachEncoder::parameter_implies_predicate() noexcept {
+bool ForeachEncoder::parameter_implies_predicate() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+    if (config.check_timeout()) {
+      return false;
+    }
     for (bool positive : {true, false}) {
       for (bool is_effect : {true, false}) {
         auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
@@ -191,10 +215,14 @@ void ForeachEncoder::parameter_implies_predicate() noexcept {
       }
     }
   }
+  return true;
 }
 
-void ForeachEncoder::interference() noexcept {
+bool ForeachEncoder::interference() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+    if (config.check_timeout()) {
+      return false;
+    }
     for (bool positive : {true, false}) {
       const auto &precondition_support =
           support_.get_support(Support::PredicateId{i}, positive, false);
@@ -233,11 +261,14 @@ void ForeachEncoder::interference() noexcept {
       }
     }
   }
+  return true;
 }
 
-uint_fast64_t ForeachEncoder::frame_axioms() noexcept {
-  uint_fast64_t num_helpers = 0;
+bool ForeachEncoder::frame_axioms() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+    if (config.check_timeout()) {
+      return false;
+    }
     for (bool positive : {true, false}) {
       size_t num_nontrivial_clauses = 0;
       for (const auto &[action_index, assignment] :
@@ -291,19 +322,20 @@ uint_fast64_t ForeachEncoder::frame_axioms() noexcept {
           }
           dnf << Literal{Variable{num_vars_}, true};
           ++num_vars_;
-          ++num_helpers;
+          ++num_helpers_;
         }
         dnf << sat::EndClause;
       }
       transition_clauses_.add_dnf(dnf);
     }
   }
-  return num_helpers;
+  return true;
 }
 
-void ForeachEncoder::assume_goal() noexcept {
+bool ForeachEncoder::assume_goal() noexcept {
   for (const auto &[goal, positive] : problem_->goal) {
     goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;
   }
+  return true;
 }

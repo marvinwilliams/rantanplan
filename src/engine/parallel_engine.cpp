@@ -20,15 +20,6 @@ Engine::Status ParallelEngine::start_impl() noexcept {
 
   LOG_INFO(engine_logger, "Using parallel engine");
 
-  auto check_timeout = []() {
-    if (config.timeout > 0s &&
-        std::chrono::ceil<std::chrono::seconds>(
-            global_timer.get_elapsed_time()) >= config.timeout) {
-      return true;
-    }
-    return false;
-  };
-
   ParallelPreprocessor preprocessor{config.num_threads, problem_};
 
   float progress = preprocessor.get_progress();
@@ -41,7 +32,7 @@ Engine::Status ParallelEngine::start_impl() noexcept {
 
   for (unsigned int planner_id = 0; planner_id < config.num_threads;
        ++planner_id) {
-    if (check_timeout()) {
+    if (config.check_timeout()) {
       break;
     }
     LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
@@ -69,7 +60,7 @@ Engine::Status ParallelEngine::start_impl() noexcept {
           planner.find_plan(problem, config.max_steps, config.solver_timeout);
           if (planner.get_status() == Planner::Status::Success) {
             if (!found_plan.exchange(true, std::memory_order_acq_rel)) {
-              thread_stop_flag.store(true, std::memory_order_release);
+              config.global_stop_flag.store(true, std::memory_order_relaxed);
               LOG_INFO(engine_logger, "Planner %u found a plan", planner_id);
               plan_ = planner.get_plan();
             }

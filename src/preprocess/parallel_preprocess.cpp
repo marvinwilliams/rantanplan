@@ -98,9 +98,7 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
   util::Timer timer;
 
   auto check_timeout = [&]() {
-    if ((config.timeout > 0s &&
-         std::chrono::ceil<std::chrono::seconds>(
-             global_timer.get_elapsed_time()) >= config.timeout) ||
+    if (config.check_timeout() ||
         (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
                              timer.get_elapsed_time()) >= timeout)) {
       return true;
@@ -124,7 +122,7 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
           uint_fast64_t action_index;
           while ((action_index = index_counter.fetch_add(
                       1, std::memory_order_relaxed)) < action_list.size()) {
-            if (thread_stop_flag.load(std::memory_order_acquire)) {
+            if (config.global_stop_flag.load(std::memory_order_acquire)) {
               return;
             }
             const auto action = action_list[action_index];
@@ -154,7 +152,7 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
         }};
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-      if (thread_stop_flag.load(std::memory_order_acquire)) {
+      if (config.global_stop_flag.load(std::memory_order_acquire)) {
         status_ = Status::Interrupt;
         return;
       }
@@ -436,7 +434,7 @@ void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
           uint_fast64_t action_index;
           while ((action_index = index_counter.fetch_add(
                       1, std::memory_order_relaxed)) < action_list.size()) {
-            if (thread_stop_flag.load(std::memory_order_acquire)) {
+            if (config.global_stop_flag.load(std::memory_order_acquire)) {
               return;
             }
             auto &action = action_list[action_index];
@@ -453,7 +451,7 @@ void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
         }};
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-      if (thread_stop_flag.load(std::memory_order_acquire)) {
+      if (config.global_stop_flag.load(std::memory_order_acquire)) {
         status_ = Status::Interrupt;
         return;
       }

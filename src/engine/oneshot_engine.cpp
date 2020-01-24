@@ -32,22 +32,9 @@ Engine::Status OneshotEngine::start_impl() noexcept {
 
   SatPlanner planner{};
 
-  auto searchtime = 0s;
-  if (config.timeout > 0s) {
-    searchtime =
-        std::max(std::chrono::ceil<std::chrono::seconds>(
-                    config.timeout - global_timer.get_elapsed_time()),
-                 1s);
-  }
+  LOG_INFO(engine_logger, "Planner started with no timeout");
 
-  if (searchtime > 0s) {
-    LOG_INFO(engine_logger, "Planner started with %lu seconds timeout",
-             searchtime.count());
-  } else {
-    LOG_INFO(engine_logger, "Planner started with no timeout");
-  }
-
-  planner.find_plan(problem, config.max_steps, searchtime);
+  planner.find_plan(problem, config.max_steps, 0s);
 
   switch (planner.get_status()) {
   case Planner::Status::Success:

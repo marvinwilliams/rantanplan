@@ -11,7 +11,6 @@
 #include <memory>
 
 extern Config config;
-extern const util::Timer global_timer;
 
 std::unique_ptr<Encoder>
 get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept;

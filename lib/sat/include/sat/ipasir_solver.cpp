@@ -32,9 +32,7 @@ void IpasirSolver::assume_impl(int l) noexcept { ipasir_assume(handle_, l); }
 Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
   util::Timer timer;
   auto check_timeout = [&]() {
-    if ((config.timeout > 0s &&
-         std::chrono::ceil<std::chrono::seconds>(
-             global_timer.get_elapsed_time()) >= config.timeout) ||
+    if (config.check_timeout() ||
         (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
                              timer.get_elapsed_time()) >= timeout)) {
       return true;
@@ -44,7 +42,7 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
 
   ipasir_set_terminate(handle_, &check_timeout, [](void *terminate_handler) {
 #ifdef PARALLEL
-    if (thread_stop_flag.load(std::memory_order_acquire)) {
+    if (config.global_stop_flag.load(std::memory_order_acquire)) {
       return 1;
     }
 #endif

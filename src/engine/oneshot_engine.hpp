@@ -6,7 +6,6 @@
 #include "util/timer.hpp"
 
 extern Config config;
-extern const util::Timer global_timer;
 
 class OneshotEngine final : public Engine {
 public:

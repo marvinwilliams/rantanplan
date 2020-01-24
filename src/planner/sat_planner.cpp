@@ -35,9 +35,7 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                            std::chrono::seconds timeout) noexcept {
   util::Timer timer;
   auto check_timeout = [&]() {
-    if ((config.timeout > 0s &&
-         std::chrono::ceil<std::chrono::seconds>(
-             global_timer.get_elapsed_time()) >= config.timeout) ||
+    if (config.check_timeout() ||
         (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
                              timer.get_elapsed_time()) >= timeout)) {
       return true;
@@ -46,6 +44,9 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
   };
 
   auto encoder = get_encoder(problem);
+  if (!encoder->is_initialized()) {
+    return Status::Timeout;
+  }
   sat::IpasirSolver solver;
   solver << static_cast<int>(Encoder::SAT) << 0;
   solver << -static_cast<int>(Encoder::UNSAT) << 0;

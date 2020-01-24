@@ -17,7 +17,6 @@
 
 extern logging::Logger preprocess_logger;
 extern Config config;
-extern const util::Timer timer;
 
 class Preprocessor {
 public:

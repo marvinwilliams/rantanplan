@@ -7,6 +7,9 @@
 #include <chrono>
 #include <exception>
 #include <string>
+#ifdef PARALLEL
+#include <atomic>
+#endif
 
 class ConfigException : public std::exception {
 public:
@@ -31,6 +34,11 @@ struct Config {
   enum class PreprocessMode { New, Rigid, Free };
   enum class Encoding { Sequential, Foreach, Exists };
   enum class Solver { Ipasir };
+
+  const util::Timer global_timer;
+#ifdef PARALLEL
+  std::atomic_bool global_stop_flag = false;
+#endif
 
   // General
   std::string domain_file = "";
@@ -115,6 +123,20 @@ struct Config {
     } else {
       throw ConfigException{"Unknown solver \'" + std::string{input} + "\'"};
     }
+  }
+
+  bool check_timeout() const noexcept {
+    if (timeout > std::chrono::seconds{0} &&
+        std::chrono::ceil<std::chrono::seconds>(
+            global_timer.get_elapsed_time()) >= timeout) {
+      return true;
+    }
+#ifdef PARALLEL
+    if (global_stop_flag.load(std::memory_order_acquire)) {
+      return true;
+    }
+#endif
+    return false;
   }
 };
 

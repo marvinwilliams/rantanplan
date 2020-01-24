@@ -19,8 +19,6 @@
 
 extern logging::Logger preprocess_logger;
 extern Config config;
-extern const util::Timer global_timer;
-extern std::atomic_bool thread_stop_flag;
 
 class ParallelPreprocessor {
 public:

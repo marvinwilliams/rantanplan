@@ -17,15 +17,6 @@ InterruptEngine::InterruptEngine(
 Engine::Status InterruptEngine::start_impl() noexcept {
   LOG_INFO(engine_logger, "Using interrupt engine");
 
-  auto check_timeout = []() {
-    if (config.timeout > 0s &&
-        std::chrono::ceil<std::chrono::seconds>(
-            global_timer.get_elapsed_time()) >= config.timeout) {
-      return true;
-    }
-    return false;
-  };
-
   assert(config.num_solvers > 1);
 
   Preprocessor preprocessor{problem_};
@@ -38,7 +29,7 @@ Engine::Status InterruptEngine::start_impl() noexcept {
 
   for (unsigned int planner_id = 0; planner_id < config.num_solvers;
        ++planner_id) {
-    if (check_timeout()) {
+    if (config.check_timeout()) {
       return Status::Timeout;
     }
 

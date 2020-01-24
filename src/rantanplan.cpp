@@ -44,12 +44,7 @@ logging::Logger planner_logger{"Planner"};
 logging::Logger preprocess_logger{"Preprocess"};
 logging::Logger encoding_logger{"Encoding"};
 
-const util::Timer global_timer;
 Config config;
-
-#ifdef PARALLEL
-std::atomic_bool thread_stop_flag = false;
-#endif
 
 void print_memory_usage() {
   if (auto f = std::ifstream{"/proc/self/status"}; f.good()) {
@@ -112,9 +107,6 @@ int main(int argc, char *argv[]) {
 
   if (config.planning_mode == Config::PlanningMode::Interrupt) {
     if (config.timeout == 0s) {
-      if (config.preprocess_timeout == 0s) {
-        config.preprocess_timeout = 30s;
-      }
       if (config.solver_timeout == 0s) {
         config.solver_timeout = 120s;
       }

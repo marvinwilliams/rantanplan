@@ -1,15 +1,12 @@
 #ifndef LOGGING_HPP
 #define LOGGING_HPP
 
-#include "build_config.hpp"
 #include "util/timer.hpp"
 
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <vector>
-
-extern const util::Timer global_timer;
 
 namespace logging {
 

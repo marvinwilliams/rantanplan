@@ -10,6 +10,7 @@
 #include <variant>
 
 using namespace normalized;
+using namespace std::chrono_literals;
 
 Support::Support(const Problem &problem) noexcept : problem_{problem} {
   num_instantations_ =
@@ -40,6 +41,9 @@ void Support::set_predicate_support() noexcept {
 
       for (const auto &condition :
            is_effect ? action.effects : action.preconditions) {
+        if (config.check_timeout()) {
+          return;
+        }
         for (ConditionIterator it{condition, action, problem_};
              it != ConditionIterator{}; ++it) {
           auto id = get_id(*it);
@@ -49,4 +53,5 @@ void Support::set_predicate_support() noexcept {
       }
     }
   }
+  initialized_ = true;
 }

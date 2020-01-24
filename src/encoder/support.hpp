@@ -1,6 +1,7 @@
 #ifndef SUPPORT_HPP
 #define SUPPORT_HPP
 
+#include "config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
@@ -14,6 +15,7 @@
 #include <vector>
 
 extern logging::Logger encoding_logger;
+extern Config config;
 
 class Support {
 public:
@@ -74,6 +76,10 @@ public:
            is_init(id) == positive;
   }
 
+  bool is_initialized() const noexcept {
+    return initialized_;
+  }
+
 private:
   inline auto &select_support(PredicateId id, bool positive,
                               bool is_effect) noexcept {
@@ -85,6 +91,7 @@ private:
 
   void set_predicate_support() noexcept;
 
+  bool initialized_ = false;
   size_t num_instantations_;
   std::unordered_set<PredicateId> init_;
   mutable std::unordered_map<normalized::PredicateInstantiation, PredicateId>

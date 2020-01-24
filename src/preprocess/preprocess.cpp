@@ -89,9 +89,7 @@ bool Preprocessor::refine(float progress,
   util::Timer timer;
 
   auto check_timeout = [&]() {
-    if ((config.timeout > 0s &&
-         std::chrono::ceil<std::chrono::seconds>(
-             global_timer.get_elapsed_time()) >= config.timeout) ||
+    if (config.check_timeout() ||
         (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
                              timer.get_elapsed_time()) >= timeout)) {
       return true;

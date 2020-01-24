@@ -21,15 +21,16 @@ public:
       noexcept override;
 
 private:
-  void encode_init() noexcept;
-  void encode_actions() noexcept;
-  void parameter_implies_predicate() noexcept;
-  void interference() noexcept;
-  uint_fast64_t frame_axioms() noexcept;
-  void assume_goal() noexcept;
-  void init_sat_vars() noexcept;
+  bool encode_init() noexcept;
+  bool encode_actions() noexcept;
+  bool parameter_implies_predicate() noexcept;
+  bool interference() noexcept;
+  bool frame_axioms() noexcept;
+  bool assume_goal() noexcept;
+  bool init_sat_vars() noexcept;
 
   uint_fast64_t num_vars_ = 3;
+  uint_fast64_t num_helpers_ = 0;
   std::vector<uint_fast64_t> predicates_;
   std::vector<uint_fast64_t> actions_;
   std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;
