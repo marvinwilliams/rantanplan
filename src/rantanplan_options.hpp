@@ -108,7 +108,7 @@ inline void set_config(const options::Options &options) {
   }
 
   if (const auto &o = options.get<float>("step-factor"); o.count > 0) {
-    if (o.value > 1.0f) {
+    if (o.value < 1.0f) {
       LOG_WARN(main_logger, "Step factor should be at least 1.0");
     }
     config.step_factor = std::max(o.value, 1.0f);
