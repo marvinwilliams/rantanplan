@@ -1,6 +1,7 @@
 #ifndef COMBINATION_ITERATOR_HPP
 #define COMBINATION_ITERATOR_HPP
 
+#include <cassert>
 #include <iterator>
 #include <numeric>
 #include <vector>
@@ -29,9 +30,8 @@ public:
     if (is_end_) {
       return *this;
     }
-    for (size_t i = 0; i < list_sizes_.size(); ++i) {
-      current_combination_[i]++;
-      if (current_combination_[i] < list_sizes_[i]) {
+    for (size_t i = list_sizes_.size(); i-- > 0;) {
+      if (++current_combination_[i] < list_sizes_[i]) {
         return *this;
       } else {
         current_combination_[i] = 0;

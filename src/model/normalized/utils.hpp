@@ -185,18 +185,15 @@ inline size_t get_num_instantiated(const Action &action,
       });
 }
 
-inline size_t get_num_instantiated(const Condition &condition,
+inline size_t get_num_instantiated(const ParameterSelection &selection,
                                    const Action &action,
                                    const Problem &problem) noexcept {
-  return std::accumulate(
-      condition.arguments.begin(), condition.arguments.end(), 1ul,
-      [&action, &problem](size_t product, const Argument &a) {
-        if (a.is_constant()) {
-          return product;
-        }
-        auto type = action.get(a.get_parameter()).get_type();
-        return product * problem.constants_by_type[type].size();
-      });
+  return std::accumulate(selection.begin(), selection.end(), 1ul,
+                         [&action, &problem](size_t product, auto index) {
+                           auto type = action.get(index).get_type();
+                           return product *
+                                  problem.constants_by_type[type].size();
+                         });
 }
 
 class AssignmentIterator {
