@@ -87,21 +87,21 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
       }
       for (size_t selection_index = 0; selection_index < selections_[i].size();
            ++selection_index) {
-        for (const auto &selection : selections_[i])
-          for (auto it = AssignmentIterator{selection, action, *problem_};
-               it != AssignmentIterator{}; ++it) {
-            assert(assignments_[i][selection_index].find(
-                       get_assignment_id(*it, *problem_)) !=
-                   assignments_[i][selection_index].end());
-            if (model[assignments_[i][selection_index].at(
-                          get_assignment_id(*it, *problem_)) +
-                      s * num_vars_]) {
-              for (auto [index, c] : *it) {
-                constants[index] = c;
-              }
-              break;
+        const auto &selection = selections_[i][selection_index];
+        for (auto it = AssignmentIterator{selection, action, *problem_};
+             it != AssignmentIterator{}; ++it) {
+          assert(assignments_[i][selection_index].find(
+                     get_assignment_id(*it, *problem_)) !=
+                 assignments_[i][selection_index].end());
+          if (model[assignments_[i][selection_index].at(
+                        get_assignment_id(*it, *problem_)) +
+                    s * num_vars_]) {
+            for (auto [index, c] : *it) {
+              constants[index] = c;
             }
+            break;
           }
+        }
       }
       plan.sequence.emplace_back(ActionIndex{i}, std::move(constants));
     }
@@ -243,6 +243,9 @@ bool ForeachEncoder::encode_actions() noexcept {
             std::merge((*second_it).begin(), (*second_it).end(),
                        (*both_it).begin(), (*both_it).end(),
                        std::back_inserter(second_assignment));
+            assert(assignments_[i][k].find(
+                       get_assignment_id(second_assignment, *problem_)) !=
+                   assignments_[i][k].end());
             second_assignments.push_back(Variable{
                 assignments_[i][k]
                             [get_assignment_id(second_assignment, *problem_)]});
@@ -254,6 +257,9 @@ bool ForeachEncoder::encode_actions() noexcept {
             std::merge((*first_it).begin(), (*first_it).end(),
                        (*both_it).begin(), (*both_it).end(),
                        std::back_inserter(first_assignment));
+            assert(assignments_[i][j].find(
+                       get_assignment_id(first_assignment, *problem_)) !=
+                   assignments_[i][j].end());
             universal_clauses_
                 << Literal{Variable{assignments_[i][j][get_assignment_id(
                                first_assignment, *problem_)]},
@@ -283,6 +289,12 @@ bool ForeachEncoder::parameter_implies_predicate() noexcept {
           if (assignment.empty()) {
             formula << Literal{Variable{actions_[action_index]}, false};
           } else {
+            assert(assignments_[action_index][get_selection_index(action_index,
+                                                                  assignment)]
+                       .find(get_assignment_id(assignment, *problem_)) !=
+                   assignments_[action_index]
+                               [get_selection_index(action_index, assignment)]
+                                   .end());
             formula << Literal{
                 Variable{assignments_[action_index][get_selection_index(
                     action_index, assignment)][get_assignment_id(assignment,
@@ -320,6 +332,12 @@ bool ForeachEncoder::interference() noexcept {
               universal_clauses_
                   << Literal{Variable{actions_[action_index]}, false};
             } else {
+              assert(assignments_[action_index][get_selection_index(
+                                                    action_index, assignment)]
+                         .find(get_assignment_id(assignment, *problem_)) !=
+                     assignments_[action_index]
+                                 [get_selection_index(action_index, assignment)]
+                                     .end());
               universal_clauses_ << Literal{
                   Variable{assignments_[action_index][get_selection_index(
                       action_index, assignment)][get_assignment_id(assignment,
@@ -347,6 +365,12 @@ bool ForeachEncoder::frame_axioms() noexcept {
           transition_clauses_
               << Literal{Variable{actions_[action_index]}, true};
         } else {
+          assert(assignments_[action_index][get_selection_index(action_index,
+                                                                assignment)]
+                     .find(get_assignment_id(assignment, *problem_)) !=
+                 assignments_[action_index]
+                             [get_selection_index(action_index, assignment)]
+                                 .end());
           transition_clauses_ << Literal{
               Variable{assignments_[action_index][get_selection_index(
                   action_index, assignment)]
