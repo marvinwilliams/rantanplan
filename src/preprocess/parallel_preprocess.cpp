@@ -377,12 +377,14 @@ ParameterSelection ParallelPreprocessor::select_free(const Action &action) const
 
 ParameterSelection
 ParallelPreprocessor::select_min_new(const Action &action) const noexcept {
-  auto min =
-      std::min_element(action.preconditions.begin(), action.preconditions.end(),
-                       [&](const auto &c1, const auto &c2) {
-                         return get_num_instantiated(c1, action, *problem_) <
-                                get_num_instantiated(c2, action, *problem_);
-                       });
+  auto min = std::min_element(
+      action.preconditions.begin(), action.preconditions.end(),
+      [&](const auto &c1, const auto &c2) {
+        return get_num_instantiated(get_referenced_parameters(action, c1),
+                                    action, *problem_) <
+               get_num_instantiated(get_referenced_parameters(action, c2),
+                                    action, *problem_);
+      });
 
   if (min == action.preconditions.end()) {
     return select_free(action);
