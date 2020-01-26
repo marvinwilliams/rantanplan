@@ -30,8 +30,7 @@ public:
       return *this;
     }
     for (size_t i = 0; i < list_sizes_.size(); ++i) {
-      current_combination_[i]++;
-      if (current_combination_[i] < list_sizes_[i]) {
+      if (++current_combination_[i] < list_sizes_[i]) {
         return *this;
       } else {
         current_combination_[i] = 0;
