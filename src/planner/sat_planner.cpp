@@ -93,9 +93,6 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
     switch (solver.get_status()) {
     case sat::Solver::Status::Solved:
       plan_ = encoder->extract_plan(solver.get_model(), step);
-      LOG_INFO(
-          planner_logger, "Solved in step %u in %.2f seconds", step,
-          std::chrono::duration<float>(step_timer.get_elapsed_time()).count());
       return Status::Success;
     case sat::Solver::Status::Timeout:
       return Status::Timeout;
