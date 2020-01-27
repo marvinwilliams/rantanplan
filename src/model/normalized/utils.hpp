@@ -133,8 +133,8 @@ inline ParameterMapping get_mapping(const Action &action,
 }
 
 inline ParameterSelection
-get_referenced_parameters(const Action &action,
-                          const Condition &predicate) noexcept {
+get_referenced_parameters(const Condition &predicate,
+                          const Action &action) noexcept {
   std::vector<bool> parameter_matches(action.parameters.size(), false);
   for (size_t i = 0; i < predicate.arguments.size(); ++i) {
     if (!predicate.arguments[i].is_constant()) {

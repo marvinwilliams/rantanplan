@@ -100,7 +100,7 @@ private:
 extern ConsoleAppender default_appender;
 extern Logger default_logger;
 
-#ifdef DEBUG_LOG
+#ifdef DEBUG_BUILD
 #define LOG_DEBUG(logger, ...)                                                 \
   logger.log(::logging::Level::DEBUG, __FILE__, __LINE__, __VA_ARGS__)
 #define PRINT_DEBUG(...)                                                       \

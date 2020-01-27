@@ -73,12 +73,18 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem) noexcept
 
   parameter_selector_ = std::invoke([mode = config.preprocess_mode]() {
     switch (mode) {
+    case Config::PreprocessMode::Free:
+      return &Preprocessor::select_free;
     case Config::PreprocessMode::New:
       return &Preprocessor::select_min_new;
     case Config::PreprocessMode::Rigid:
       return &Preprocessor::select_max_rigid;
-    case Config::PreprocessMode::Free:
-      return &Preprocessor::select_free;
+    case Config::PreprocessMode::ApproxNew:
+      return &Preprocessor::select_approx_min_new;
+    case Config::PreprocessMode::ApproxRigid:
+      return &Preprocessor::select_approx_max_rigid;
+    case Config::PreprocessMode::OneEffect:
+      return &Preprocessor::select_one_effect;
     }
     return &Preprocessor::select_free;
   });
@@ -101,11 +107,15 @@ bool Preprocessor::refine(float progress,
     if (check_timeout()) {
       return false;
     }
+    bool is_grounding = false;
     for (auto &action_list : actions_) {
       std::vector<Action> new_actions;
       uint_fast64_t new_pruned_actions = 0;
       for (const auto &action : action_list) {
         auto selection = std::invoke(parameter_selector_, *this, action);
+        if (!selection.empty()) {
+          is_grounding = true;
+        }
         std::for_each(AssignmentIterator{selection, action, *problem_},
                       AssignmentIterator{}, [&](const auto &assignment) {
                         if (auto new_action = ground(assignment, action);
@@ -125,6 +135,9 @@ bool Preprocessor::refine(float progress,
       if (progress_ >= progress) {
         break;
       }
+    }
+    if (!is_grounding) {
+      return true;
     }
     prune_actions();
   }
@@ -303,25 +316,82 @@ bool Preprocessor::is_effectless(const PredicateInstantiation &predicate,
 
 ParameterSelection Preprocessor::select_free(const Action &action) const
     noexcept {
-  auto first_free =
-      std::find_if(action.parameters.begin(), action.parameters.end(),
-                   [](const auto &p) { return !p.is_constant(); });
-
-  if (first_free == action.parameters.end()) {
-    return ParameterSelection{};
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
+    if (!action.parameters[i].is_constant()) {
+      return {ParameterIndex{i}};
+    }
   }
-
-  return ParameterSelection{{first_free - action.parameters.begin()}};
+  return {};
 }
 
 ParameterSelection Preprocessor::select_min_new(const Action &action) const
     noexcept {
+  if (action.preconditions.empty()) {
+    return select_free(action);
+  }
+  auto min_it = action.preconditions.begin();
+  uint_fast64_t min = get_num_instantiated(
+      get_referenced_parameters(*min_it, action), action, *problem_);
+  std::for_each(ConditionIterator{*min_it, action, *problem_},
+                ConditionIterator{}, [&](const auto p) {
+                  if (is_rigid(p, !min_it->positive)) {
+                    --min;
+                  }
+                });
+  for (auto it = std::next(min_it, 1); it != action.preconditions.end(); ++it) {
+    uint_fast64_t current = get_num_instantiated(
+        get_referenced_parameters(*it, action), action, *problem_);
+    std::for_each(ConditionIterator{*it, action, *problem_},
+                  ConditionIterator{}, [&](const auto p) {
+                    if (is_rigid(p, !it->positive)) {
+                      --current;
+                    }
+                  });
+    if (current < min) {
+      min = current;
+      min_it = it;
+    }
+  }
+  return get_referenced_parameters(*min_it, action);
+}
+
+ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
+    noexcept {
+  if (action.preconditions.empty()) {
+    return select_free(action);
+  }
+  auto max_it = action.preconditions.begin();
+  uint_fast64_t max = 0;
+  std::for_each(ConditionIterator{*max_it, action, *problem_},
+                ConditionIterator{}, [&](const auto p) {
+                  if (is_rigid(p, !max_it->positive)) {
+                    ++max;
+                  }
+                });
+  for (auto it = std::next(max_it, 1); it != action.preconditions.end(); ++it) {
+    uint_fast64_t current = 0;
+    std::for_each(ConditionIterator{*it, action, *problem_},
+                  ConditionIterator{}, [&](const auto p) {
+                    if (is_rigid(p, !it->positive)) {
+                      ++current;
+                    }
+                  });
+    if (current > max) {
+      max = current;
+      max_it = it;
+    }
+  }
+  return get_referenced_parameters(*max_it, action);
+}
+
+ParameterSelection
+Preprocessor::select_approx_min_new(const Action &action) const noexcept {
   auto min = std::min_element(
       action.preconditions.begin(), action.preconditions.end(),
       [&](const auto &c1, const auto &c2) {
-        return get_num_instantiated(get_referenced_parameters(action, c1),
+        return get_num_instantiated(get_referenced_parameters(c1, action),
                                     action, *problem_) <
-               get_num_instantiated(get_referenced_parameters(action, c2),
+               get_num_instantiated(get_referenced_parameters(c2, action),
                                     action, *problem_);
       });
 
@@ -329,29 +399,50 @@ ParameterSelection Preprocessor::select_min_new(const Action &action) const
     return select_free(action);
   }
 
-  return get_referenced_parameters(action, *min);
+  return get_referenced_parameters(*min, action);
 }
 
-ParameterSelection Preprocessor::select_max_rigid(const Action &action) const
-    noexcept {
+ParameterSelection
+Preprocessor::select_approx_max_rigid(const Action &action) const noexcept {
   auto max = std::max_element(
       action.preconditions.begin(), action.preconditions.end(),
-      [this, &action](const auto &c1, const auto &c2) {
-        return std::count_if(
-                   ConditionIterator{c1, action, *problem_},
-                   ConditionIterator{},
-                   [&](const auto p) { return is_rigid(p, !c1.positive); }) <
-               std::count_if(
-                   ConditionIterator{c2, action, *problem_},
-                   ConditionIterator{},
-                   [&](const auto p) { return is_rigid(p, !c2.positive); });
+      [&](const auto &c1, const auto &c2) {
+        return (c1.positive
+                    ? successful_cache_[c1.definition].neg_rigid.size()
+                    : successful_cache_[c1.definition].pos_rigid.size()) <
+               (c2.positive
+                    ? successful_cache_[c2.definition].neg_rigid.size()
+                    : successful_cache_[c2.definition].pos_rigid.size());
       });
 
   if (max == action.preconditions.end()) {
     return select_free(action);
   }
 
-  return get_referenced_parameters(action, *max);
+  return get_referenced_parameters(*max, action);
+}
+
+ParameterSelection Preprocessor::select_one_effect(const Action &action) const
+    noexcept {
+  std::vector<uint_fast64_t> parameter_occurs(action.parameters.size(), 0);
+  uint_fast64_t max = 0;
+  ParameterIndex max_index{0};
+  for (const auto &effect : action.effects) {
+    auto selection = get_referenced_parameters(effect, action);
+    if (selection.size() > 1) {
+      for (auto p : selection) {
+        ++parameter_occurs[p];
+        if (parameter_occurs[p] > max) {
+          max = parameter_occurs[p];
+          max_index = p;
+        }
+      }
+    }
+  }
+  if (max == 0) {
+    return {};
+  }
+  return {max_index};
 }
 
 void Preprocessor::prune_actions() noexcept {

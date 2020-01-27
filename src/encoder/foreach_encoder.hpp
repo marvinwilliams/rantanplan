@@ -5,8 +5,10 @@
 #include "encoder/encoder.hpp"
 #include "encoder/support.hpp"
 #include "model/normalized/model.hpp"
+#include "model/normalized/utils.hpp"
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
 extern Config config;
@@ -21,6 +23,8 @@ public:
       noexcept override;
 
 private:
+  size_t get_constant_index(normalized::ConstantIndex constant,
+                            normalized::TypeIndex type) const noexcept;
   bool encode_init() noexcept;
   bool encode_actions() noexcept;
   bool parameter_implies_predicate() noexcept;
@@ -30,10 +34,11 @@ private:
   bool init_sat_vars() noexcept;
 
   uint_fast64_t num_vars_ = 3;
-  uint_fast64_t num_helpers_ = 0;
   std::vector<uint_fast64_t> predicates_;
   std::vector<uint_fast64_t> actions_;
   std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;
+  std::vector<std::map<normalized::ParameterAssignment, uint_fast64_t>>
+      dnf_helpers_;
 
   Support support_;
 };

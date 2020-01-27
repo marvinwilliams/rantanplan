@@ -31,7 +31,14 @@ struct Config {
     Interrupt,
     Parallel
   };
-  enum class PreprocessMode { New, Rigid, Free };
+  enum class PreprocessMode {
+    Free,
+    New,
+    Rigid,
+    ApproxNew,
+    ApproxRigid,
+    OneEffect
+  };
   enum class Encoding { Sequential, Foreach, Exists };
   enum class Solver { Ipasir };
 
@@ -48,7 +55,7 @@ struct Config {
   std::optional<std::string> plan_file;
 
   // Preprocess
-  PreprocessMode preprocess_mode = PreprocessMode::New;
+  PreprocessMode preprocess_mode = PreprocessMode::ApproxRigid;
   bool parallel_preprocess = false;
   float preprocess_progress = 1.0f;
 
@@ -57,6 +64,7 @@ struct Config {
   Solver solver = Solver::Ipasir;
   float step_factor = 1.4f;
   unsigned int max_steps = 0; // 0: Infinity
+  bool parameter_implies_action = true;
   // For interrupt planning
   unsigned int num_solvers = 2;
   std::chrono::seconds solver_timeout = std::chrono::seconds{0};
@@ -68,7 +76,7 @@ struct Config {
   // Number of dnf clauses with more than 1 literal to be converted to cnf.
   // Above this limit, helper variables are introduced to mitigate a too high
   // clause count.
-  unsigned int dnf_threshold = 16;
+  unsigned int dnf_threshold = 4;
 
   // Logging
   logging::Level log_level = logging::Level::INFO;
@@ -105,12 +113,18 @@ struct Config {
   }
 
   void parse_preprocess_mode(const std::string &input) {
-    if (input == "new") {
+    if (input == "free") {
+      preprocess_mode = PreprocessMode::Free;
+    } else if (input == "new") {
       preprocess_mode = PreprocessMode::New;
     } else if (input == "rigid") {
       preprocess_mode = PreprocessMode::Rigid;
-    } else if (input == "free") {
-      preprocess_mode = PreprocessMode::Free;
+    } else if (input == "approxnew") {
+      preprocess_mode = PreprocessMode::ApproxNew;
+    } else if (input == "approxrigid") {
+      preprocess_mode = PreprocessMode::ApproxRigid;
+    } else if (input == "effect") {
+      preprocess_mode = PreprocessMode::OneEffect;
     } else {
       throw ConfigException{"Unknown preprocess mode \'" + std::string{input} +
                             "\'"};

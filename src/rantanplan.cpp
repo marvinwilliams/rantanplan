@@ -63,9 +63,8 @@ void print_memory_usage() {
 void print_version() noexcept {
   char hostname[HOST_NAME_MAX];
   gethostname(hostname, HOST_NAME_MAX);
-  PRINT_INFO("Rantanplan v%u.%u %s%srunning on %s", VERSION_MAJOR,
-             VERSION_MINOR, DEBUG_MODE ? "debug build " : "",
-             DEBUG_LOG_ACTIVE ? "with debug log " : "", hostname);
+  PRINT_INFO("Rantanplan v%u.%u %srunning on %s", VERSION_MAJOR,
+             VERSION_MINOR, DEBUG_MODE ? "debug build " : "", hostname);
 }
 
 int main(int argc, char *argv[]) {
@@ -180,7 +179,7 @@ int main(int argc, char *argv[]) {
   if (!problem) {
     LOG_INFO(main_logger, "Problem unsolvable");
     LOG_INFO(main_logger, "Finished");
-    return 1;
+    return 2;
   }
 
   LOG_DEBUG(main_logger, "Normalized problem:\n%s",
@@ -213,6 +212,8 @@ int main(int argc, char *argv[]) {
 
     LOG_INFO(main_logger, "Preprocessed to %.1f%% resulting in %lu actions",
              preprocessor.get_progress() * 100, preprocessor.get_num_actions());
+    LOG_DEBUG(main_logger, "Preprocessed problem:\n%s",
+              to_string(*preprocessor.extract_problem()).c_str());
     LOG_INFO(main_logger, "Finished");
     return 0;
   }
@@ -224,6 +225,11 @@ int main(int argc, char *argv[]) {
     engine = std::make_unique<OneshotEngine>(problem);
     break;
   case Config::PlanningMode::Interrupt:
+    if (config.preprocess_mode == Config::PreprocessMode::OneEffect) {
+      LOG_ERROR(main_logger, "Using effect preprocess mode can only be used "
+                             "with oneshot planning");
+      return 3;
+    }
     engine = std::make_unique<InterruptEngine>(problem);
     break;
   case Config::PlanningMode::Parallel:
