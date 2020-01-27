@@ -63,8 +63,8 @@ void print_memory_usage() {
 void print_version() noexcept {
   char hostname[HOST_NAME_MAX];
   gethostname(hostname, HOST_NAME_MAX);
-  PRINT_INFO("Rantanplan v%u.%u %srunning on %s", VERSION_MAJOR,
-             VERSION_MINOR, DEBUG_MODE ? "debug build " : "", hostname);
+  PRINT_INFO("Rantanplan v%u.%u %srunning on %s", VERSION_MAJOR, VERSION_MINOR,
+             DEBUG_MODE ? "debug build " : "", hostname);
 }
 
 int main(int argc, char *argv[]) {
@@ -251,7 +251,8 @@ int main(int argc, char *argv[]) {
 
   switch (engine->get_status()) {
   case Engine::Status::Success:
-    LOG_INFO(main_logger, "Found plan");
+    LOG_INFO(main_logger, "Found plan of length %lu",
+             engine->get_plan().sequence.size());
     std::cout << to_string(engine->get_plan()) << std::endl;
     if (config.plan_file) {
       std::ofstream{*config.plan_file} << to_string(engine->get_plan());
