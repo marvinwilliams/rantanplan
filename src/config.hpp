@@ -65,6 +65,7 @@ struct Config {
   float step_factor = 1.4f;
   unsigned int max_steps = 0; // 0: Infinity
   bool parameter_implies_action = true;
+  bool skip_step = false;
   // For interrupt planning
   unsigned int num_solvers = 2;
   std::chrono::seconds solver_timeout = std::chrono::seconds{0};

@@ -31,16 +31,17 @@ void IpasirSolver::assume_impl(int l) noexcept { ipasir_assume(handle_, l); }
 
 Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
   util::Timer timer;
-  bool skip = false;
+  bool skip_step = false;
   auto check_timeout = [&]() {
     if (config.check_timeout() ||
         (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
                              timer.get_elapsed_time()) >= timeout)) {
       return true;
     }
-    if (config.timeout > 0s && timer.get_elapsed_time() > 120s &&
+    if (config.skip_step && config.timeout > 0s &&
+        timer.get_elapsed_time() > 120s &&
         config.timeout - config.global_timer.get_elapsed_time() > 120s) {
-      skip = true;
+      skip_step = true;
       return true;
     }
     return false;
@@ -61,7 +62,7 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
       model_.assignment.push_back(ipasir_val(handle_, index) == index);
     }
     return Status::Solved;
-  } else if (result == 20 || skip) {
+  } else if (result == 20 || skip_step) {
     return Status::Unsolvable;
   } else if (result == 0) {
     return Status::Timeout;

@@ -33,6 +33,7 @@ inline options::Options set_options(const std::string &name) {
                                    "Maximum number of steps");
   options.add_option<bool>({"no-imply-action", 'y'},
                            "Deactivate parameter implies action");
+  options.add_option<bool>({"skip-step", 'k'}, "Skip long taking steps");
   options.add_option<unsigned int>({"num-solvers", 'i'},
                                    "Maximum number solvers");
   options.add_option<unsigned int>(
@@ -122,6 +123,8 @@ inline void set_config(const options::Options &options) {
 
   config.parameter_implies_action =
       options.get<bool>("no-imply-action").count == 0;
+
+  config.skip_step = options.get<bool>("skip-step").count > 0;
 
   if (const auto &o = options.get<unsigned int>("num-solvers"); o.count > 0) {
     if (o.value < 2) {
