@@ -63,27 +63,31 @@ add_custom_command(
 link_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
 set(COMMON_SOURCES
+"lib/logging/src/logging/logging.cpp"
 "lib/sat/include/sat/ipasir_solver.cpp"
 "lib/sat/include/sat/solver.cpp"
-"lib/logging/src/logging/logging.cpp"
+"src/encoder/foreach_encoder.cpp"
+"src/encoder/lifted_foreach_encoder.cpp"
+"src/encoder/sequential_encoder.cpp"
+"src/encoder/support.cpp"
 "src/engine/engine.cpp"
-"src/engine/oneshot_engine.cpp"
 "src/engine/interrupt_engine.cpp"
-"src/preprocess/preprocess.cpp"
+"src/engine/oneshot_engine.cpp"
 "src/model/normalize.cpp"
 "src/model/parsed/model.cpp"
 "src/model/to_string.cpp"
-"src/rantanplan.cpp"
-"src/pddl/parser.cpp"
 "src/pddl/model_builder.cpp"
-"src/encoder/foreach_encoder.cpp"
-"src/encoder/support.cpp"
+"src/pddl/parser.cpp"
 "src/planner/planner.cpp"
-"src/planner/sat_planner.cpp")
+"src/planner/sat_planner.cpp"
+"src/preprocess/preprocess.cpp"
+"src/rantanplan.cpp"
+)
 
 set(PARALLEL_SOURCES
 "src/engine/parallel_engine.cpp"
-"src/preprocess/parallel_preprocess.cpp")
+"src/preprocess/parallel_preprocess.cpp"
+)
 
 add_executable(rantanplan_glucose ${COMMON_SOURCES} "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a")
 add_executable(rantanplan_glucose_parallel ${COMMON_SOURCES} ${PARALLEL_SOURCES} "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a")

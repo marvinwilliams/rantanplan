@@ -11,7 +11,7 @@ namespace sat {
 
 class Solver {
 public:
-  enum class Status { Constructing, Solved, Unsolvable, Timeout, Error };
+  enum class Status { Constructing, Solved, Unsolvable, Skip, Timeout, Error };
 
   Solver &add(int l);
   Solver &operator<<(int l);

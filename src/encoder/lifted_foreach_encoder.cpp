@@ -1,4 +1,4 @@
-#include "encoder/foreach_encoder.hpp"
+#include "encoder/lifted_foreach_encoder.hpp"
 #include "config.hpp"
 #include "encoder/encoder.hpp"
 #include "encoder/support.hpp"
@@ -14,7 +14,8 @@
 
 using namespace normalized;
 
-ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
+LiftedForeachEncoder::LiftedForeachEncoder(
+    const std::shared_ptr<Problem> &problem) noexcept
     : Encoder{problem}, support_{*problem} {
   if (!support_.is_initialized()) {
     return;
@@ -57,7 +58,8 @@ ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
   LOG_INFO(encoding_logger, "Goal clauses: %lu", goal_.clauses.size());
 }
 
-int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
+int LiftedForeachEncoder::to_sat_var(Literal l, unsigned int step) const
+    noexcept {
   uint_fast64_t variable = 0;
   variable = l.variable.sat_var;
   if (variable == DONTCARE) {
@@ -70,8 +72,8 @@ int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
   return (l.positive ? 1 : -1) * static_cast<int>(variable + step * num_vars_);
 }
 
-Plan ForeachEncoder::extract_plan(const sat::Model &model,
-                                  unsigned int step) const noexcept {
+Plan LiftedForeachEncoder::extract_plan(const sat::Model &model,
+                                        unsigned int step) const noexcept {
   Plan plan;
   plan.problem = problem_;
   for (unsigned int s = 0; s < step; ++s) {
@@ -104,7 +106,7 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
   return plan;
 }
 
-bool ForeachEncoder::init_sat_vars() noexcept {
+bool LiftedForeachEncoder::init_sat_vars() noexcept {
   actions_.reserve(problem_->actions.size());
   parameters_.resize(problem_->actions.size());
   dnf_helpers_.resize(problem_->actions.size());
@@ -142,8 +144,8 @@ bool ForeachEncoder::init_sat_vars() noexcept {
   return true;
 }
 
-size_t ForeachEncoder::get_constant_index(ConstantIndex constant,
-                                          TypeIndex type) const noexcept {
+size_t LiftedForeachEncoder::get_constant_index(ConstantIndex constant,
+                                                TypeIndex type) const noexcept {
   for (size_t i = 0; i < problem_->constants_by_type[type].size(); ++i) {
     if (problem_->constants_by_type[type][i] == constant) {
       return i;
@@ -153,7 +155,7 @@ size_t ForeachEncoder::get_constant_index(ConstantIndex constant,
   return problem_->constants_by_type[type].size();
 }
 
-bool ForeachEncoder::encode_init() noexcept {
+bool LiftedForeachEncoder::encode_init() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     auto literal = Literal{Variable{predicates_[i]},
                            support_.is_init(Support::PredicateId{i})};
@@ -162,7 +164,7 @@ bool ForeachEncoder::encode_init() noexcept {
   return true;
 }
 
-bool ForeachEncoder::encode_actions() noexcept {
+bool LiftedForeachEncoder::encode_actions() noexcept {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
     const auto &action = problem_->actions[i];
@@ -201,7 +203,7 @@ bool ForeachEncoder::encode_actions() noexcept {
   return true;
 }
 
-bool ForeachEncoder::parameter_implies_predicate() noexcept {
+bool LiftedForeachEncoder::parameter_implies_predicate() noexcept {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     if (config.check_timeout()) {
@@ -235,42 +237,43 @@ bool ForeachEncoder::parameter_implies_predicate() noexcept {
   return true;
 }
 
-bool ForeachEncoder::interference() noexcept {
+bool LiftedForeachEncoder::interference() noexcept {
   uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
-    }
-    for (bool positive : {true, false}) {
-      const auto &precondition_support =
-          support_.get_support(Support::PredicateId{i}, positive, false);
-      const auto &effect_support =
-          support_.get_support(Support::PredicateId{i}, !positive, true);
-      for (const auto &[p_action_index, p_assignment] : precondition_support) {
-        for (const auto &[e_action_index, e_assignment] : effect_support) {
-          if (p_action_index == e_action_index) {
-            continue;
-          }
-          for (bool is_effect : {true, false}) {
-            const auto &assignment = is_effect ? e_assignment : p_assignment;
-            auto action_index = is_effect ? e_action_index : p_action_index;
-            if (!config.parameter_implies_action || assignment.empty()) {
-              universal_clauses_
-                  << Literal{Variable{actions_[action_index]}, false};
-            }
-            for (auto [parameter_index, constant_index] : assignment) {
-              auto index = get_constant_index(constant_index,
-                                              problem_->actions[action_index]
-                                                  .parameters[parameter_index]
-                                                  .get_type());
-              universal_clauses_ << Literal{
-                  Variable{parameters_[action_index][parameter_index][index]},
-                  false};
-            }
-          }
-          universal_clauses_ << sat::EndClause;
-          ++clause_count;
-        }
+  for (size_t i = 0; i < problem_->actions.size(); ++i) {
+    const auto &first = problem_->actions[i];
+    for (size_t j = 0; j < problem_->actions.size(); ++j) {
+      if (i == j) {
+        continue;
+      }
+      if (config.check_timeout()) {
+        return false;
+      }
+      const auto &second = problem_->actions[j];
+      if (std::any_of(first.preconditions.begin(), first.preconditions.end(),
+                      [&second](const auto &precondition) {
+                        return std::any_of(
+                            second.effects.begin(), second.effects.end(),
+                            [&](const auto &effect) {
+                              return precondition.definition ==
+                                         effect.definition &&
+                                     precondition.positive != effect.positive;
+                            });
+                      }) ||
+          std::any_of(
+              first.pre_instantiated.begin(), first.pre_instantiated.end(),
+              [&second](const auto &precondition) {
+                return std::any_of(
+                    second.eff_instantiated.begin(),
+                    second.eff_instantiated.end(), [&](const auto &effect) {
+                      return precondition.first.definition ==
+                                 effect.first.definition &&
+                             precondition.second != effect.second;
+                    });
+              })) {
+        universal_clauses_ << Literal{Variable{actions_[i]}, false}
+                           << Literal{Variable{actions_[j]}, false};
+        universal_clauses_ << sat::EndClause;
+        ++clause_count;
       }
     }
   }
@@ -278,7 +281,7 @@ bool ForeachEncoder::interference() noexcept {
   return true;
 }
 
-bool ForeachEncoder::frame_axioms() noexcept {
+bool LiftedForeachEncoder::frame_axioms() noexcept {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     if (config.check_timeout()) {
@@ -290,7 +293,8 @@ bool ForeachEncoder::frame_axioms() noexcept {
         size_t num_nontrivial_clauses = 0;
         for (const auto &[action_index, assignment] :
              support_.get_support(Support::PredicateId{i}, positive, true)) {
-          // Assignments with multiple arguments lead to combinatorial explosion
+          // Assignments with multiple arguments lead to combinatorial
+          // explosion
           if (assignment.size() > (config.parameter_implies_action ? 1 : 0)) {
             ++num_nontrivial_clauses;
           }
@@ -354,7 +358,7 @@ bool ForeachEncoder::frame_axioms() noexcept {
   return true;
 }
 
-bool ForeachEncoder::assume_goal() noexcept {
+bool LiftedForeachEncoder::assume_goal() noexcept {
   for (const auto &[goal, positive] : problem_->goal) {
     goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;

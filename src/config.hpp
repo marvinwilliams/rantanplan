@@ -39,7 +39,7 @@ struct Config {
     ApproxRigid,
     OneEffect
   };
-  enum class Encoding { Sequential, Foreach, Exists };
+  enum class Encoding { Sequential, Foreach, LiftedForeach, Exists, TrueExists };
   enum class Solver { Ipasir };
 
   const util::Timer global_timer;
@@ -64,7 +64,7 @@ struct Config {
   Solver solver = Solver::Ipasir;
   float step_factor = 1.4f;
   unsigned int max_steps = 0; // 0: Infinity
-  bool parameter_implies_action = true;
+  bool parameter_implies_action = false;
   bool skip_step = false;
   // For interrupt planning
   unsigned int num_solvers = 2;
@@ -106,8 +106,12 @@ struct Config {
       encoding = Encoding::Sequential;
     } else if (input == "f" || input == "foreach") {
       encoding = Encoding::Foreach;
+    } else if (input == "lf" || input == "liftedforeach") {
+      encoding = Encoding::LiftedForeach;
     } else if (input == "e" || input == "exists") {
       encoding = Encoding::Exists;
+    } else if (input == "te" || input == "trueexists") {
+      encoding = Encoding::TrueExists;
     } else {
       throw ConfigException{"Unknown encoding \'" + std::string{input} + "\'"};
     }

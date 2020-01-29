@@ -1,4 +1,4 @@
-#include "encoder/foreach_encoder.hpp"
+#include "encoder/sequential_encoder.hpp"
 #include "config.hpp"
 #include "encoder/encoder.hpp"
 #include "encoder/support.hpp"
@@ -14,7 +14,8 @@
 
 using namespace normalized;
 
-ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
+SequentialEncoder::SequentialEncoder(
+    const std::shared_ptr<Problem> &problem) noexcept
     : Encoder{problem}, support_{*problem} {
   if (!support_.is_initialized()) {
     return;
@@ -31,9 +32,6 @@ ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
     return;
   }
   if (!parameter_implies_predicate()) {
-    return;
-  }
-  if (!interference()) {
     return;
   }
   if (!frame_axioms()) {
@@ -57,7 +55,7 @@ ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
   LOG_INFO(encoding_logger, "Goal clauses: %lu", goal_.clauses.size());
 }
 
-int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
+int SequentialEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
   uint_fast64_t variable = 0;
   variable = l.variable.sat_var;
   if (variable == DONTCARE) {
@@ -70,8 +68,8 @@ int ForeachEncoder::to_sat_var(Literal l, unsigned int step) const noexcept {
   return (l.positive ? 1 : -1) * static_cast<int>(variable + step * num_vars_);
 }
 
-Plan ForeachEncoder::extract_plan(const sat::Model &model,
-                                  unsigned int step) const noexcept {
+Plan SequentialEncoder::extract_plan(const sat::Model &model,
+                                     unsigned int step) const noexcept {
   Plan plan;
   plan.problem = problem_;
   for (unsigned int s = 0; s < step; ++s) {
@@ -84,49 +82,47 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
           auto &parameter = action.parameters[parameter_pos];
           if (parameter.is_constant()) {
             constants.push_back(parameter.get_constant());
-          } else {
-            for (size_t j = 0;
-                 j < problem_->constants_by_type[parameter.get_type()].size();
-                 ++j) {
-              if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
-                constants.push_back(
-                    problem_->constants_by_type[parameter.get_type()][j]);
-                break;
-              }
+            continue;
+          }
+          for (size_t j = 0; j < problem_->constants.size(); ++j) {
+            if (model[parameters_[parameter_pos][j] + s * num_vars_]) {
+              constants.push_back(ConstantIndex{j});
+              break;
             }
           }
           assert(constants.size() == parameter_pos + 1);
         }
         plan.sequence.emplace_back(ActionIndex{i}, std::move(constants));
+        break;
       }
     }
   }
   return plan;
 }
 
-bool ForeachEncoder::init_sat_vars() noexcept {
+bool SequentialEncoder::init_sat_vars() noexcept {
   actions_.reserve(problem_->actions.size());
-  parameters_.resize(problem_->actions.size());
+  auto last_parameter = [](const auto &action) {
+    return static_cast<size_t>(std::distance(
+        action.parameters.begin(),
+        std::find_if(action.parameters.rbegin(), action.parameters.rend(),
+                     [](const auto &p) { return !p.is_constant(); })
+            .base()));
+  };
+  parameters_.resize(last_parameter(
+      *std::max_element(problem_->actions.begin(), problem_->actions.end(),
+                        [&](const auto &a1, const auto &a2) {
+                          return last_parameter(a1) < last_parameter(a2);
+                        })));
   dnf_helpers_.resize(problem_->actions.size());
-  for (size_t i = 0; i < problem_->actions.size(); ++i) {
-    const auto &action = problem_->actions[i];
-    actions_.push_back(num_vars_++);
-
-    parameters_[i].resize(action.parameters.size());
-
-    for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
-         ++parameter_pos) {
-      const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.is_constant()) {
-        continue;
-      }
-      parameters_[i][parameter_pos].reserve(
-          problem_->constants_by_type[parameter.get_type()].size());
-      for (size_t j = 0;
-           j < problem_->constants_by_type[parameter.get_type()].size(); ++j) {
-        parameters_[i][parameter_pos].push_back(num_vars_++);
-      }
+  for (size_t i = 0; i < parameters_.size(); ++i) {
+    parameters_[i].reserve(problem_->constants.size());
+    for (size_t j = 0; j < problem_->constants.size(); ++j) {
+      parameters_[i].push_back(num_vars_++);
     }
+  }
+  for (size_t i = 0; i < problem_->actions.size(); ++i) {
+    actions_.push_back(num_vars_++);
   }
 
   predicates_.resize(support_.get_num_instantiations());
@@ -142,18 +138,7 @@ bool ForeachEncoder::init_sat_vars() noexcept {
   return true;
 }
 
-size_t ForeachEncoder::get_constant_index(ConstantIndex constant,
-                                          TypeIndex type) const noexcept {
-  for (size_t i = 0; i < problem_->constants_by_type[type].size(); ++i) {
-    if (problem_->constants_by_type[type][i] == constant) {
-      return i;
-    }
-  }
-  assert(false);
-  return problem_->constants_by_type[type].size();
-}
-
-bool ForeachEncoder::encode_init() noexcept {
+bool SequentialEncoder::encode_init() noexcept {
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     auto literal = Literal{Variable{predicates_[i]},
                            support_.is_init(Support::PredicateId{i})};
@@ -162,8 +147,18 @@ bool ForeachEncoder::encode_init() noexcept {
   return true;
 }
 
-bool ForeachEncoder::encode_actions() noexcept {
+bool SequentialEncoder::encode_actions() noexcept {
   uint_fast64_t clause_count = 0;
+  for (size_t i = 0; i < parameters_.size(); ++i) {
+    std::vector<Variable> all_arguments;
+    all_arguments.reserve(problem_->constants.size());
+    for (size_t j = 0; j < problem_->constants.size(); ++j) {
+      all_arguments.push_back(Variable{parameters_[i][j]});
+    }
+    clause_count += universal_clauses_.at_most_one(all_arguments);
+  }
+  std::vector<Variable> all_actions;
+  all_actions.reserve(problem_->actions.size());
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
     const auto &action = problem_->actions[i];
     auto action_var = Variable{actions_[i]};
@@ -173,35 +168,27 @@ bool ForeachEncoder::encode_actions() noexcept {
       if (parameter.is_constant()) {
         continue;
       }
-      size_t number_arguments =
-          problem_->constants_by_type[parameter.get_type()].size();
-      std::vector<Variable> all_arguments;
-      all_arguments.reserve(number_arguments);
+      const auto &constants_by_type =
+          problem_->constants_by_type[parameter.get_type()];
       universal_clauses_ << Literal{action_var, false};
-      for (size_t constant_index = 0; constant_index < number_arguments;
+      for (size_t constant_index = 0; constant_index < constants_by_type.size();
            ++constant_index) {
-        auto argument = Variable{parameters_[i][parameter_pos][constant_index]};
-        universal_clauses_ << Literal{argument, true};
-        all_arguments.push_back(argument);
+        universal_clauses_ << Literal{
+            Variable{
+                parameters_[parameter_pos][constants_by_type[constant_index]]},
+            true};
       }
       universal_clauses_ << sat::EndClause;
       ++clause_count;
-      clause_count += universal_clauses_.at_most_one(all_arguments);
-      if (config.parameter_implies_action) {
-        for (auto argument : all_arguments) {
-          universal_clauses_ << Literal{argument, false};
-          universal_clauses_ << Literal{action_var, true};
-          universal_clauses_ << sat::EndClause;
-        }
-        clause_count += all_arguments.size();
-      }
     }
+    all_actions.push_back(action_var);
   }
+  clause_count += universal_clauses_.at_most_one(all_actions);
   LOG_INFO(encoding_logger, "Action clauses: %lu", clause_count);
   return true;
 }
 
-bool ForeachEncoder::parameter_implies_predicate() noexcept {
+bool SequentialEncoder::parameter_implies_predicate() noexcept {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     if (config.check_timeout()) {
@@ -212,17 +199,10 @@ bool ForeachEncoder::parameter_implies_predicate() noexcept {
         auto &formula = is_effect ? transition_clauses_ : universal_clauses_;
         for (const auto &[action_index, assignment] : support_.get_support(
                  Support::PredicateId{i}, positive, is_effect)) {
-          if (!config.parameter_implies_action || assignment.empty()) {
-            formula << Literal{Variable{actions_[action_index]}, false};
-          }
+          formula << Literal{Variable{actions_[action_index]}, false};
           for (auto [parameter_index, constant_index] : assignment) {
-            auto index = get_constant_index(constant_index,
-                                            problem_->actions[action_index]
-                                                .parameters[parameter_index]
-                                                .get_type());
             formula << Literal{
-                Variable{parameters_[action_index][parameter_index][index]},
-                false};
+                Variable{parameters_[parameter_index][constant_index]}, false};
           }
           formula << Literal{Variable{predicates_[i], !is_effect}, positive}
                   << sat::EndClause;
@@ -235,50 +215,7 @@ bool ForeachEncoder::parameter_implies_predicate() noexcept {
   return true;
 }
 
-bool ForeachEncoder::interference() noexcept {
-  uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
-    }
-    for (bool positive : {true, false}) {
-      const auto &precondition_support =
-          support_.get_support(Support::PredicateId{i}, positive, false);
-      const auto &effect_support =
-          support_.get_support(Support::PredicateId{i}, !positive, true);
-      for (const auto &[p_action_index, p_assignment] : precondition_support) {
-        for (const auto &[e_action_index, e_assignment] : effect_support) {
-          if (p_action_index == e_action_index) {
-            continue;
-          }
-          for (bool is_effect : {true, false}) {
-            const auto &assignment = is_effect ? e_assignment : p_assignment;
-            auto action_index = is_effect ? e_action_index : p_action_index;
-            if (!config.parameter_implies_action || assignment.empty()) {
-              universal_clauses_
-                  << Literal{Variable{actions_[action_index]}, false};
-            }
-            for (auto [parameter_index, constant_index] : assignment) {
-              auto index = get_constant_index(constant_index,
-                                              problem_->actions[action_index]
-                                                  .parameters[parameter_index]
-                                                  .get_type());
-              universal_clauses_ << Literal{
-                  Variable{parameters_[action_index][parameter_index][index]},
-                  false};
-            }
-          }
-          universal_clauses_ << sat::EndClause;
-          ++clause_count;
-        }
-      }
-    }
-  }
-  LOG_INFO(encoding_logger, "Interference clauses: %lu", clause_count);
-  return true;
-}
-
-bool ForeachEncoder::frame_axioms() noexcept {
+bool SequentialEncoder::frame_axioms() noexcept {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
     if (config.check_timeout()) {
@@ -291,7 +228,7 @@ bool ForeachEncoder::frame_axioms() noexcept {
         for (const auto &[action_index, assignment] :
              support_.get_support(Support::PredicateId{i}, positive, true)) {
           // Assignments with multiple arguments lead to combinatorial explosion
-          if (assignment.size() > (config.parameter_implies_action ? 1 : 0)) {
+          if (!assignment.empty()) {
             ++num_nontrivial_clauses;
           }
         }
@@ -304,27 +241,19 @@ bool ForeachEncoder::frame_axioms() noexcept {
           << sat::EndClause;
       for (const auto &[action_index, assignment] :
            support_.get_support(Support::PredicateId{i}, positive, true)) {
-        if (use_helper &&
-            assignment.size() > (config.parameter_implies_action ? 1 : 0)) {
+        if (use_helper && !assignment.empty()) {
           auto [it, success] =
               dnf_helpers_[action_index].try_emplace(assignment, num_vars_);
           if (success) {
-            if (!config.parameter_implies_action) {
-              universal_clauses_ << Literal{Variable{it->second}, false};
-              universal_clauses_
-                  << Literal{Variable{actions_[action_index]}, true};
-              universal_clauses_ << sat::EndClause;
-              ++clause_count;
-            }
+            universal_clauses_ << Literal{Variable{it->second}, false};
+            universal_clauses_
+                << Literal{Variable{actions_[action_index]}, true};
+            universal_clauses_ << sat::EndClause;
+            ++clause_count;
             for (auto [parameter_index, constant_index] : assignment) {
-              auto index = get_constant_index(constant_index,
-                                              problem_->actions[action_index]
-                                                  .parameters[parameter_index]
-                                                  .get_type());
               universal_clauses_ << Literal{Variable{it->second}, false};
               universal_clauses_ << Literal{
-                  Variable{parameters_[action_index][parameter_index][index]},
-                  true};
+                  Variable{parameters_[parameter_index][constant_index]}, true};
               universal_clauses_ << sat::EndClause;
             }
             ++num_vars_;
@@ -332,17 +261,10 @@ bool ForeachEncoder::frame_axioms() noexcept {
           }
           dnf << Literal{Variable{it->second}, true};
         } else {
-          if (!config.parameter_implies_action || assignment.empty()) {
-            dnf << Literal{Variable{actions_[action_index]}, true};
-          }
+          dnf << Literal{Variable{actions_[action_index]}, true};
           for (auto [parameter_index, constant_index] : assignment) {
-            auto index = get_constant_index(constant_index,
-                                            problem_->actions[action_index]
-                                                .parameters[parameter_index]
-                                                .get_type());
             dnf << Literal{
-                Variable{parameters_[action_index][parameter_index][index]},
-                true};
+                Variable{parameters_[parameter_index][constant_index]}, true};
           }
         }
         dnf << sat::EndClause;
@@ -354,7 +276,7 @@ bool ForeachEncoder::frame_axioms() noexcept {
   return true;
 }
 
-bool ForeachEncoder::assume_goal() noexcept {
+bool SequentialEncoder::assume_goal() noexcept {
   for (const auto &[goal, positive] : problem_->goal) {
     goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;

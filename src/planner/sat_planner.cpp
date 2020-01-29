@@ -3,7 +3,8 @@
 #include "encoder/encoder.hpp"
 /* #include "encoder/exists_encoder.hpp" */
 #include "encoder/foreach_encoder.hpp"
-/* #include "encoder/sequential_encoder.hpp" */
+#include "encoder/lifted_foreach_encoder.hpp"
+#include "encoder/sequential_encoder.hpp"
 #include "model/normalized/model.hpp"
 #include "sat/ipasir_solver.hpp"
 #include "sat/solver.hpp"
@@ -18,11 +19,15 @@ std::unique_ptr<Encoder>
 get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept {
   switch (config.encoding) {
   case Config::Encoding::Sequential:
-    /* return std::make_unique<SequentialEncoder>(problem, config); */
-    return std::make_unique<ForeachEncoder>(problem);
+    return std::make_unique<SequentialEncoder>(problem);
   case Config::Encoding::Foreach:
     return std::make_unique<ForeachEncoder>(problem);
+  case Config::Encoding::LiftedForeach:
+    return std::make_unique<LiftedForeachEncoder>(problem);
   case Config::Encoding::Exists:
+    /* return std::make_unique<ExistsEncoder>(problem, config); */
+    return std::make_unique<ForeachEncoder>(problem);
+  case Config::Encoding::TrueExists:
     /* return std::make_unique<ExistsEncoder>(problem, config); */
     return std::make_unique<ForeachEncoder>(problem);
   }
@@ -99,6 +104,9 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
     case sat::Solver::Status::Error:
       return Status::Error;
     case sat::Solver::Status::Unsolvable:
+      break;
+    case sat::Solver::Status::Skip:
+      LOG_INFO(planner_logger, "Skipped step %u", step);
       break;
     default:
       assert(false);

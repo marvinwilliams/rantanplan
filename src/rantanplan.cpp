@@ -218,6 +218,12 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  if (config.encoding == Config::Encoding::Sequential &&
+      config.parameter_implies_action) {
+    LOG_WARN(main_logger,
+             "Parameter cannot imply actions in the sequential encoding.");
+  }
+
   std::unique_ptr<Engine> engine;
 
   switch (config.planning_mode) {

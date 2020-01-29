@@ -3,6 +3,7 @@
 
 #include "util/combination_iterator.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <type_traits>
 #include <vector>
@@ -39,17 +40,18 @@ template <typename Variable> struct Formula {
   }
 
   void add_formula(const Formula &formula) {
-    clauses.insert(clauses.cend(), formula.clauses.begin(),
+    clauses.insert(clauses.end(), formula.clauses.begin(),
                    formula.clauses.end());
   }
 
-  void add_dnf(const Formula &formula) {
+  uint_fast64_t add_dnf(const Formula &formula) {
     std::vector<size_t> list_sizes;
     list_sizes.reserve(formula.clauses.size());
     for (const auto &clause : formula.clauses) {
       list_sizes.push_back(clause.literals.size());
     }
 
+    uint_fast64_t clause_count = 0;
     for (util::CombinationIterator it{list_sizes};
          it != util::CombinationIterator{}; ++it) {
       const auto &combination = *it;
@@ -57,16 +59,19 @@ template <typename Variable> struct Formula {
         *this << formula.clauses[i].literals[combination[i]];
       }
       *this << EndClause;
+      ++clause_count;
     }
+    return clause_count;
   }
 
-  void at_most_one(std::vector<Variable> group) {
+  uint_fast64_t at_most_one(std::vector<Variable> group) {
     for (size_t i = 0; i + 1 < group.size(); ++i) {
       for (size_t j = i + 1; j < group.size(); ++j) {
         *this << Literal{group[i], false} << Literal{group[j], false}
               << EndClause;
       }
     }
+    return (group.size() * group.size() > 0 ? group.size() - 1 : 0) / 2;
   }
 
   Clause current_clause;

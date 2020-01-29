@@ -11,9 +11,6 @@ extern "C" {
 }
 
 #include <chrono>
-#ifdef PARALLEL
-#include <atomic>
-#endif
 
 extern Config config;
 

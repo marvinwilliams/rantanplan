@@ -38,11 +38,19 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
                              timer.get_elapsed_time()) >= timeout)) {
       return true;
     }
-    if (config.skip_step && config.timeout > 0s &&
-        timer.get_elapsed_time() > 120s &&
-        config.timeout - config.global_timer.get_elapsed_time() > 120s) {
-      skip_step = true;
-      return true;
+    if (config.skip_step) {
+      if (config.timeout > 0s &&
+          timer.get_elapsed_time() > config.timeout / 2 &&
+          config.timeout - config.global_timer.get_elapsed_time() <
+              config.timeout / 5) {
+        skip_step = true;
+        return true;
+      }
+      if (timeout > 0s && timer.get_elapsed_time() > timeout / 2 &&
+          timeout - timer.get_elapsed_time() < timeout / 5) {
+        skip_step = true;
+        return true;
+      }
     }
     return false;
   };
@@ -62,12 +70,13 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
       model_.assignment.push_back(ipasir_val(handle_, index) == index);
     }
     return Status::Solved;
-  } else if (result == 20 || skip_step) {
+  } else if (skip_step) {
+    return Status::Skip;
+  } else if (result == 20) {
     return Status::Unsolvable;
   } else if (result == 0) {
     return Status::Timeout;
   }
   return Status::Error;
 }
-
 } // namespace sat
