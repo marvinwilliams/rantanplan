@@ -296,6 +296,7 @@ bool ExistsEncoder::interference() noexcept {
             universal_clauses_ << Literal{Variable{chain_first->second}, false};
             universal_clauses_ << Literal{Variable{chain_next->second}, true};
             universal_clauses_ << sat::EndClause;
+            ++clause_count;
             break;
           }
         }
@@ -320,6 +321,7 @@ bool ExistsEncoder::interference() noexcept {
               false};
         }
         universal_clauses_ << sat::EndClause;
+        ++clause_count;
       }
       for (const auto &[action_index, assignment] :
            support_.get_support(Support::PredicateId{i}, !positive, true)) {
@@ -342,6 +344,7 @@ bool ExistsEncoder::interference() noexcept {
             }
             universal_clauses_ << Literal{Variable{next_helper->second}, true};
             universal_clauses_ << sat::EndClause;
+            ++clause_count;
             break;
           }
         }
