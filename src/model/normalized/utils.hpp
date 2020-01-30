@@ -378,6 +378,54 @@ inline bool is_instantiatable(const Condition &condition,
   return true;
 }
 
+inline bool is_unifiable(const Condition &first_condition,
+                         const Action &first_action,
+                         const Condition &second_condition,
+                         const Action &second_action,
+                         const Problem &problem) noexcept {
+  assert(first_condition.definition == second_condition.definition);
+  auto first_parameters = first_action.parameters;
+  auto second_parameters = second_action.parameters;
+  for (size_t i = 0; i < first_condition.arguments.size(); ++i) {
+    const auto &first_p = first_condition.arguments[i];
+    const auto &second_p = second_condition.arguments[i];
+    if (first_p.is_constant() && second_p.is_constant()) {
+      if (first_p.get_constant() != second_p.get_constant()) {
+        return false;
+      }
+    } else if (second_p.is_constant()) {
+      auto &action_p =
+          first_parameters[first_condition.arguments[i].get_parameter()];
+      if (action_p.is_constant()) {
+        if (action_p.get_constant() != second_p.get_constant()) {
+          return false;
+        }
+      } else {
+        if (!is_subtype(problem.get(second_p.get_constant()).type,
+                        action_p.get_type(), problem)) {
+          return false;
+        }
+        action_p.set(second_p.get_constant());
+      }
+    } else if (first_p.is_constant()) {
+      auto &action_p =
+          second_parameters[second_condition.arguments[i].get_parameter()];
+      if (action_p.is_constant()) {
+        if (action_p.get_constant() != first_p.get_constant()) {
+          return false;
+        }
+      } else {
+        if (!is_subtype(problem.get(first_p.get_constant()).type,
+                        action_p.get_type(), problem)) {
+          return false;
+        }
+        action_p.set(first_p.get_constant());
+      }
+    }
+  }
+  return true;
+}
+
 } // namespace normalized
 
 #endif /* end of include guard: NORMALIZED_UTILS_HPP */

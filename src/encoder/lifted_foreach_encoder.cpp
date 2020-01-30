@@ -4,6 +4,7 @@
 #include "encoder/support.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
+#include "model/normalized/utils.hpp"
 #include "planner/planner.hpp"
 #include "sat/formula.hpp"
 
@@ -238,9 +239,51 @@ bool LiftedForeachEncoder::parameter_implies_predicate() noexcept {
 }
 
 bool LiftedForeachEncoder::interference() noexcept {
+  auto has_disabling_effect = [this](const auto &first_action,
+                                     const auto &second_action) {
+    for (const auto &[precondition, precondition_positive] :
+         first_action.pre_instantiated) {
+      for (const auto &[effect, effect_positive] :
+           second_action.eff_instantiated) {
+        if (precondition.definition == effect.definition &&
+            precondition_positive != effect_positive &&
+            precondition.arguments == effect.arguments) {
+          return true;
+        }
+      }
+      for (const auto &effect : second_action.effects) {
+        if (precondition.definition == effect.definition &&
+            precondition_positive != effect.positive &&
+            is_instantiatable(effect, precondition.arguments, second_action,
+                              *problem_)) {
+          return true;
+        }
+      }
+    }
+    for (const auto &precondition : first_action.preconditions) {
+      for (const auto &[effect, effect_positive] :
+           second_action.eff_instantiated) {
+        if (precondition.definition == effect.definition &&
+            precondition.positive != effect_positive &&
+            is_instantiatable(precondition, effect.arguments, first_action,
+                              *problem_)) {
+          return true;
+        }
+      }
+      for (const auto &effect : second_action.effects) {
+        if (precondition.definition == effect.definition &&
+            precondition.positive != effect.positive &&
+            is_unifiable(precondition, first_action, effect, second_action,
+                         *problem_)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
-    const auto &first = problem_->actions[i];
     for (size_t j = 0; j < problem_->actions.size(); ++j) {
       if (i == j) {
         continue;
@@ -248,28 +291,7 @@ bool LiftedForeachEncoder::interference() noexcept {
       if (config.check_timeout()) {
         return false;
       }
-      const auto &second = problem_->actions[j];
-      if (std::any_of(first.preconditions.begin(), first.preconditions.end(),
-                      [&second](const auto &precondition) {
-                        return std::any_of(
-                            second.effects.begin(), second.effects.end(),
-                            [&](const auto &effect) {
-                              return precondition.definition ==
-                                         effect.definition &&
-                                     precondition.positive != effect.positive;
-                            });
-                      }) ||
-          std::any_of(
-              first.pre_instantiated.begin(), first.pre_instantiated.end(),
-              [&second](const auto &precondition) {
-                return std::any_of(
-                    second.eff_instantiated.begin(),
-                    second.eff_instantiated.end(), [&](const auto &effect) {
-                      return precondition.first.definition ==
-                                 effect.first.definition &&
-                             precondition.second != effect.second;
-                    });
-              })) {
+      if (has_disabling_effect(problem_->actions[i], problem_->actions[j])) {
         universal_clauses_ << Literal{Variable{actions_[i]}, false}
                            << Literal{Variable{actions_[j]}, false};
         universal_clauses_ << sat::EndClause;

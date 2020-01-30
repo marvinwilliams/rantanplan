@@ -280,7 +280,6 @@ bool ExistsEncoder::interference() noexcept {
     for (bool positive : {true, false}) {
       const auto &helpers = positive ? pos_helpers_ : neg_helpers_;
       auto chain_first = helpers[i].end();
-      auto chain_next = helpers[i].end();
       for (size_t j = 0; j + 1 < action_order.size(); ++j) {
         chain_first = helpers[i].find(action_order[j]);
         if (chain_first != helpers[i].end()) {
