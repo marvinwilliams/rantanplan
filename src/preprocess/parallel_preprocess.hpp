@@ -63,6 +63,12 @@ private:
   select_min_new(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
   select_max_rigid(const normalized::Action &action) const noexcept;
+  normalized::ParameterSelection
+  select_approx_min_new(const normalized::Action &action) const noexcept;
+  normalized::ParameterSelection
+  select_approx_max_rigid(const normalized::Action &action) const noexcept;
+  normalized::ParameterSelection
+  select_one_effect(const normalized::Action &action) const noexcept;
 
   void prune_actions(unsigned int num_threads) noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;

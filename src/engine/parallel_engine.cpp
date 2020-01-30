@@ -60,7 +60,7 @@ Engine::Status ParallelEngine::start_impl() noexcept {
           planner.find_plan(problem, config.max_steps, config.solver_timeout);
           if (planner.get_status() == Planner::Status::Success) {
             if (!found_plan.exchange(true, std::memory_order_acq_rel)) {
-              config.global_stop_flag.store(true, std::memory_order_relaxed);
+              config.global_stop_flag.store(true, std::memory_order_seq_cst);
               LOG_INFO(engine_logger, "Planner %u found a plan", planner_id);
               plan_ = planner.get_plan();
             }

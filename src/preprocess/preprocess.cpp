@@ -86,7 +86,7 @@ Preprocessor::Preprocessor(const std::shared_ptr<Problem> &problem) noexcept
     case Config::PreprocessMode::OneEffect:
       return &Preprocessor::select_one_effect;
     }
-    return &Preprocessor::select_free;
+    return &Preprocessor::select_approx_max_rigid;
   });
 }
 

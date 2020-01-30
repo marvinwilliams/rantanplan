@@ -1,5 +1,4 @@
 #include "preprocess/parallel_preprocess.hpp"
-#include "build_config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
@@ -76,14 +75,20 @@ ParallelPreprocessor::ParallelPreprocessor(
 
   parameter_selector_ = std::invoke([mode = config.preprocess_mode]() {
     switch (mode) {
+    case Config::PreprocessMode::Free:
+      return &ParallelPreprocessor::select_free;
     case Config::PreprocessMode::New:
       return &ParallelPreprocessor::select_min_new;
     case Config::PreprocessMode::Rigid:
       return &ParallelPreprocessor::select_max_rigid;
-    case Config::PreprocessMode::Free:
-      return &ParallelPreprocessor::select_free;
+    case Config::PreprocessMode::ApproxNew:
+      return &ParallelPreprocessor::select_approx_min_new;
+    case Config::PreprocessMode::ApproxRigid:
+      return &ParallelPreprocessor::select_approx_max_rigid;
+    case Config::PreprocessMode::OneEffect:
+      return &ParallelPreprocessor::select_one_effect;
     }
-    return &ParallelPreprocessor::select_free;
+    return &ParallelPreprocessor::select_approx_max_rigid;
   });
 }
 
@@ -111,6 +116,7 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
       status_ = Status::Timeout;
       return;
     }
+    std::atomic_bool is_grounding = false;
     for (auto &action_list : actions_) {
       std::vector<normalized::Action> new_actions;
       std::mutex new_actions_mutex;
@@ -127,6 +133,9 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
             }
             const auto action = action_list[action_index];
             auto selection = std::invoke(parameter_selector_, *this, action);
+            if (!selection.empty()) {
+              is_grounding = true;
+            }
             auto assignment_it =
                 AssignmentIterator{selection, action, *problem_};
             thread_new_actions.reserve(thread_new_actions.size() +
@@ -162,6 +171,9 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
       if (progress_ >= progress) {
         break;
       }
+    }
+    if (!is_grounding) {
+      return;
     }
     prune_actions(num_threads);
   }
@@ -364,25 +376,83 @@ bool ParallelPreprocessor::is_effectless(
 
 ParameterSelection ParallelPreprocessor::select_free(const Action &action) const
     noexcept {
-  auto first_free =
-      std::find_if(action.parameters.begin(), action.parameters.end(),
-                   [](const auto &p) { return !p.is_constant(); });
-
-  if (first_free == action.parameters.end()) {
-    return ParameterSelection{};
+  for (size_t i = 0; i < action.parameters.size(); ++i) {
+    if (!action.parameters[i].is_constant()) {
+      return {ParameterIndex{i}};
+    }
   }
-
-  return ParameterSelection{{first_free - action.parameters.begin()}};
+  return {};
 }
 
 ParameterSelection
 ParallelPreprocessor::select_min_new(const Action &action) const noexcept {
+  if (action.preconditions.empty()) {
+    return select_free(action);
+  }
+  auto min_it = action.preconditions.begin();
+  uint_fast64_t min = get_num_instantiated(
+      get_referenced_parameters(*min_it, action), action, *problem_);
+  std::for_each(ConditionIterator{*min_it, action, *problem_},
+                ConditionIterator{}, [&](const auto p) {
+                  if (is_rigid(p, !min_it->positive)) {
+                    --min;
+                  }
+                });
+  for (auto it = std::next(min_it, 1); it != action.preconditions.end(); ++it) {
+    uint_fast64_t current = get_num_instantiated(
+        get_referenced_parameters(*it, action), action, *problem_);
+    std::for_each(ConditionIterator{*it, action, *problem_},
+                  ConditionIterator{}, [&](const auto p) {
+                    if (is_rigid(p, !it->positive)) {
+                      --current;
+                    }
+                  });
+    if (current < min) {
+      min = current;
+      min_it = it;
+    }
+  }
+  return get_referenced_parameters(*min_it, action);
+}
+
+ParameterSelection
+ParallelPreprocessor::select_max_rigid(const Action &action) const noexcept {
+  if (action.preconditions.empty()) {
+    return select_free(action);
+  }
+  auto max_it = action.preconditions.begin();
+  uint_fast64_t max = 0;
+  std::for_each(ConditionIterator{*max_it, action, *problem_},
+                ConditionIterator{}, [&](const auto p) {
+                  if (is_rigid(p, !max_it->positive)) {
+                    ++max;
+                  }
+                });
+  for (auto it = std::next(max_it, 1); it != action.preconditions.end(); ++it) {
+    uint_fast64_t current = 0;
+    std::for_each(ConditionIterator{*it, action, *problem_},
+                  ConditionIterator{}, [&](const auto p) {
+                    if (is_rigid(p, !it->positive)) {
+                      ++current;
+                    }
+                  });
+    if (current > max) {
+      max = current;
+      max_it = it;
+    }
+  }
+  return get_referenced_parameters(*max_it, action);
+}
+
+ParameterSelection
+ParallelPreprocessor::select_approx_min_new(const Action &action) const
+    noexcept {
   auto min = std::min_element(
       action.preconditions.begin(), action.preconditions.end(),
       [&](const auto &c1, const auto &c2) {
-        return get_num_instantiated(get_referenced_parameters(action, c1),
+        return get_num_instantiated(get_referenced_parameters(c1, action),
                                     action, *problem_) <
-               get_num_instantiated(get_referenced_parameters(action, c2),
+               get_num_instantiated(get_referenced_parameters(c2, action),
                                     action, *problem_);
       });
 
@@ -390,29 +460,51 @@ ParallelPreprocessor::select_min_new(const Action &action) const noexcept {
     return select_free(action);
   }
 
-  return get_referenced_parameters(action, *min);
+  return get_referenced_parameters(*min, action);
 }
 
 ParameterSelection
-ParallelPreprocessor::select_max_rigid(const Action &action) const noexcept {
+ParallelPreprocessor::select_approx_max_rigid(const Action &action) const
+    noexcept {
   auto max = std::max_element(
       action.preconditions.begin(), action.preconditions.end(),
-      [this, &action](const auto &c1, const auto &c2) {
-        return std::count_if(
-                   ConditionIterator{c1, action, *problem_},
-                   ConditionIterator{},
-                   [&](const auto p) { return is_rigid(p, !c1.positive); }) <
-               std::count_if(
-                   ConditionIterator{c2, action, *problem_},
-                   ConditionIterator{},
-                   [&](const auto p) { return is_rigid(p, !c2.positive); });
+      [&](const auto &c1, const auto &c2) {
+        return (c1.positive
+                    ? successful_cache_[c1.definition].neg_rigid.size()
+                    : successful_cache_[c1.definition].pos_rigid.size()) <
+               (c2.positive
+                    ? successful_cache_[c2.definition].neg_rigid.size()
+                    : successful_cache_[c2.definition].pos_rigid.size());
       });
 
   if (max == action.preconditions.end()) {
     return select_free(action);
   }
 
-  return get_referenced_parameters(action, *max);
+  return get_referenced_parameters(*max, action);
+}
+
+ParameterSelection
+ParallelPreprocessor::select_one_effect(const Action &action) const noexcept {
+  std::vector<uint_fast64_t> parameter_occurs(action.parameters.size(), 0);
+  uint_fast64_t max = 0;
+  ParameterIndex max_index{0};
+  for (const auto &effect : action.effects) {
+    auto selection = get_referenced_parameters(effect, action);
+    if (selection.size() > 1) {
+      for (auto p : selection) {
+        ++parameter_occurs[p];
+        if (parameter_occurs[p] > max) {
+          max = parameter_occurs[p];
+          max_index = p;
+        }
+      }
+    }
+  }
+  if (max == 0) {
+    return {};
+  }
+  return {max_index};
 }
 
 void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
