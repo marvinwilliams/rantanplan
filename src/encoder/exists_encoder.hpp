@@ -5,29 +5,45 @@
 #include "encoder/encoder.hpp"
 #include "encoder/support.hpp"
 #include "model/normalized/model.hpp"
+#include "model/normalized/utils.hpp"
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
-class ExistsEncoder final : public Encoder {
+extern Config config;
 
+class ExistsEncoder final : public Encoder {
 public:
-  explicit ExistsEncoder(const normalized::Problem &problem,
-                          const Config &config) noexcept;
+  explicit ExistsEncoder(
+      const std::shared_ptr<normalized::Problem> &problem) noexcept;
+
+  int to_sat_var(Literal l, unsigned int step) const noexcept override;
+  Plan extract_plan(const sat::Model &model, unsigned int num_steps) const
+      noexcept override;
 
 private:
-  void encode_init() noexcept;
-  void encode_actions() noexcept;
-  void parameter_implies_predicate() noexcept;
-  void interference() noexcept;
-  void frame_axioms(unsigned int dnf_threshold) noexcept;
-  void assume_goal() noexcept;
-  void init_sat_vars() noexcept;
+  size_t get_constant_index(normalized::ConstantIndex constant,
+                            normalized::TypeIndex type) const noexcept;
+  bool encode_init() noexcept;
+  bool encode_actions() noexcept;
+  bool parameter_implies_predicate() noexcept;
+  bool interference() noexcept;
+  bool frame_axioms() noexcept;
+  bool assume_goal() noexcept;
+  bool init_sat_vars() noexcept;
 
   uint_fast64_t num_vars_ = 3;
+  std::vector<uint_fast64_t> action_rank_;
   std::vector<uint_fast64_t> predicates_;
   std::vector<uint_fast64_t> actions_;
   std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;
+  std::vector<std::unordered_map<normalized::ActionIndex, uint_fast64_t>>
+      pos_helpers_;
+  std::vector<std::unordered_map<normalized::ActionIndex, uint_fast64_t>>
+      neg_helpers_;
+  std::vector<std::map<normalized::ParameterAssignment, uint_fast64_t>>
+      dnf_helpers_;
 
   Support support_;
 };

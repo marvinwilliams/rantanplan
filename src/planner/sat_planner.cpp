@@ -1,7 +1,7 @@
 #include "planner/sat_planner.hpp"
 #include "config.hpp"
 #include "encoder/encoder.hpp"
-/* #include "encoder/exists_encoder.hpp" */
+#include "encoder/exists_encoder.hpp"
 #include "encoder/foreach_encoder.hpp"
 #include "encoder/lifted_foreach_encoder.hpp"
 #include "encoder/sequential_encoder.hpp"
@@ -25,8 +25,7 @@ get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept {
   case Config::Encoding::LiftedForeach:
     return std::make_unique<LiftedForeachEncoder>(problem);
   case Config::Encoding::Exists:
-    /* return std::make_unique<ExistsEncoder>(problem, config); */
-    return std::make_unique<ForeachEncoder>(problem);
+    return std::make_unique<ExistsEncoder>(problem);
   case Config::Encoding::TrueExists:
     /* return std::make_unique<ExistsEncoder>(problem, config); */
     return std::make_unique<ForeachEncoder>(problem);

@@ -66,6 +66,7 @@ set(COMMON_SOURCES
 "lib/logging/src/logging/logging.cpp"
 "lib/sat/include/sat/ipasir_solver.cpp"
 "lib/sat/include/sat/solver.cpp"
+"src/encoder/exists_encoder.cpp"
 "src/encoder/foreach_encoder.cpp"
 "src/encoder/lifted_foreach_encoder.cpp"
 "src/encoder/sequential_encoder.cpp"
