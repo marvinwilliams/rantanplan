@@ -73,6 +73,7 @@ set(COMMON_SOURCES
 "src/encoder/support.cpp"
 "src/engine/engine.cpp"
 "src/engine/interrupt_engine.cpp"
+"src/engine/fixed_engine.cpp"
 "src/engine/oneshot_engine.cpp"
 "src/model/normalize.cpp"
 "src/model/parsed/model.cpp"
@@ -81,13 +82,13 @@ set(COMMON_SOURCES
 "src/pddl/parser.cpp"
 "src/planner/planner.cpp"
 "src/planner/sat_planner.cpp"
-"src/preprocess/preprocess.cpp"
+"src/grounder/grounder.cpp"
 "src/rantanplan.cpp"
 )
 
 set(PARALLEL_SOURCES
 "src/engine/parallel_engine.cpp"
-"src/preprocess/parallel_preprocess.cpp"
+"src/grounder/parallel_grounder.cpp"
 )
 
 add_executable(rantanplan_glucose ${COMMON_SOURCES} "${CMAKE_CURRENT_BINARY_DIR}/libipasirglucose4.a")
@@ -131,3 +132,9 @@ endif()
 
 install(TARGETS rantanplan_glucose DESTINATION "${PROJECT_SOURCE_DIR}/bin")
 install(TARGETS rantanplan_glucose_parallel DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_lingeling DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_lingeling_parallel DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_minisat DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_minisat_parallel DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_picosat DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+install(TARGETS rantanplan_picosat_parallel DESTINATION "${PROJECT_SOURCE_DIR}/bin")

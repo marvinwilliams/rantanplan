@@ -1,6 +1,7 @@
 #include "build_config.hpp"
 #include "config.hpp"
 #include "engine/engine.hpp"
+#include "engine/fixed_engine.hpp"
 #include "engine/interrupt_engine.hpp"
 #include "engine/oneshot_engine.hpp"
 #include "lexer/lexer.hpp"
@@ -14,9 +15,9 @@
 #include "planner/planner.hpp"
 #ifdef PARALLEL
 #include "engine/parallel_engine.hpp"
-#include "preprocess/parallel_preprocess.hpp"
+#include "grounding/parallel_grounding.hpp"
 #else
-#include "preprocess/preprocess.hpp"
+#include "grounder/grounder.hpp"
 #endif
 #include "rantanplan_options.hpp"
 #include "util/timer.hpp"
@@ -39,12 +40,13 @@ using namespace std::chrono_literals;
 logging::Logger main_logger{"Main"};
 logging::Logger parser_logger{"Parser"};
 logging::Logger normalize_logger{"Normalize"};
-logging::Logger engine_logger{"Engine"};
-logging::Logger planner_logger{"Planner"};
-logging::Logger preprocess_logger{"Preprocess"};
+logging::Logger grounder_logger{"Grounder"};
 logging::Logger encoding_logger{"Encoding"};
+logging::Logger planner_logger{"Planner"};
+logging::Logger engine_logger{"Engine"};
 
 Config config;
+util::Timer global_timer;
 
 void print_memory_usage() {
   if (auto f = std::ifstream{"/proc/self/status"}; f.good()) {
@@ -97,26 +99,11 @@ int main(int argc, char *argv[]) {
   }
 
   try {
-    set_config(options);
+    set_config(options, config);
   } catch (const ConfigException &e) {
     PRINT_ERROR(e.what());
     PRINT_INFO("Try %s --help for further information", argv[0]);
     return 1;
-  }
-
-  if (config.planning_mode == Config::PlanningMode::Interrupt) {
-    if (config.timeout == 0s) {
-      if (config.solver_timeout == 0s) {
-        config.solver_timeout = 120s;
-      }
-    } else {
-      if (config.preprocess_timeout == 0s) {
-        config.preprocess_timeout = (config.timeout / config.num_solvers) / 5;
-      }
-      if (config.solver_timeout == 0s) {
-        config.solver_timeout = (4 * config.timeout / config.num_solvers) / 5;
-      }
-    }
   }
 
   logging::default_appender.set_level(config.log_level);
@@ -124,7 +111,7 @@ int main(int argc, char *argv[]) {
   normalize_logger.add_appender(logging::default_appender);
   engine_logger.add_appender(logging::default_appender);
   planner_logger.add_appender(logging::default_appender);
-  preprocess_logger.add_appender(logging::default_appender);
+  grounder_logger.add_appender(logging::default_appender);
   encoding_logger.add_appender(logging::default_appender);
 
   print_version();
@@ -193,27 +180,29 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  if (config.planning_mode == Config::PlanningMode::Preprocess) {
-    LOG_INFO(main_logger, "Preprocessing to %.1f%%...",
-             config.preprocess_progress * 100);
+  if (config.planning_mode == Config::PlanningMode::Ground) {
+    LOG_INFO(main_logger, "Grounding to %.1f groundness...",
+             config.target_groundness);
 #ifdef PARALLEL
-    ParallelPreprocessor preprocessor{config.num_threads, problem};
-    preprocessor.refine(config.preprocess_progress, config.preprocess_timeout,
-                        config.num_threads);
-    if (preprocessor.get_status() == ParallelPreprocessor::Status::Timeout) {
+    ParallelGrounder grounder{config.num_threads, problem};
+    try {
+      grounder.refine(config.target_groundness, config.timeout,
+                      config.num_threads);
 #else
-    Preprocessor preprocessor{problem};
-    if (!preprocessor.refine(config.preprocess_progress,
-                             config.preprocess_timeout)) {
+    Grounder grounder{problem};
+    try {
+      grounder.refine(config.target_groundness, config.timeout);
 #endif
-      LOG_ERROR(main_logger, "Preprocessing timed out");
+    } catch (const TimeoutException &e) {
+      LOG_ERROR(main_logger, "Grounding timed out");
       return 1;
     }
 
-    LOG_INFO(main_logger, "Preprocessed to %.1f%% resulting in %lu actions",
-             preprocessor.get_progress() * 100, preprocessor.get_num_actions());
-    LOG_DEBUG(main_logger, "Preprocessed problem:\n%s",
-              to_string(*preprocessor.extract_problem()).c_str());
+    LOG_INFO(main_logger,
+             "Grounded to %.1f groundness resulting in %lu actions",
+             grounder.get_groundness(), grounder.get_num_actions());
+    LOG_DEBUG(main_logger, "Grounded problem:\n%s",
+              to_string(*grounder.extract_problem()).c_str());
     LOG_INFO(main_logger, "Finished");
     return 0;
   }
@@ -226,53 +215,34 @@ int main(int argc, char *argv[]) {
 
   std::unique_ptr<Engine> engine;
 
-  switch (config.planning_mode) {
-  case Config::PlanningMode::Oneshot:
+  if (config.planning_mode == Config::PlanningMode::Fixed) {
+    engine = std::make_unique<FixedEngine>(problem);
+  } else if (config.planning_mode == Config::PlanningMode::Oneshot) {
     engine = std::make_unique<OneshotEngine>(problem);
-    break;
-  case Config::PlanningMode::Interrupt:
-    if (config.preprocess_mode == Config::PreprocessMode::OneEffect) {
-      LOG_ERROR(main_logger, "Using effect preprocess mode can only be used "
-                             "with oneshot planning");
-      return 3;
-    }
+  } else if (config.planning_mode == Config::PlanningMode::Interrupt) {
     engine = std::make_unique<InterruptEngine>(problem);
-    break;
-  case Config::PlanningMode::Parallel:
 #ifdef PARALLEL
+  } else if (config.planning_mode == Config::PlanningMode::Parallel) {
     engine = std::make_unique<ParallelEngine>(problem);
-    break;
-#else
-    LOG_ERROR(main_logger, "Please compile with parallel support");
-    return 3;
 #endif
-  default:
-    assert(false);
-    engine = std::make_unique<OneshotEngine>(problem);
   }
+
+  assert(engine);
 
   LOG_INFO(main_logger, "Starting search...");
 
-  engine->start();
-
-  switch (engine->get_status()) {
-  case Engine::Status::Success:
-    LOG_INFO(main_logger, "Found plan of length %lu",
-             engine->get_plan().sequence.size());
-    std::cout << to_string(engine->get_plan()) << std::endl;
+  try {
+    Plan plan = engine->start_planning();
+    LOG_INFO(main_logger, "Found plan of length %lu", plan.sequence.size());
+    std::cout << to_string(plan) << std::endl;
     if (config.plan_file) {
-      std::ofstream{*config.plan_file} << to_string(engine->get_plan());
+      std::ofstream{*config.plan_file} << to_string(plan);
     }
     PRINT_INFO("Finished");
-    return 0;
-  case Engine::Status::Timeout:
+  } catch (const TimeoutException &e) {
     LOG_ERROR(main_logger, "Search timed out");
-    PRINT_INFO("Finished");
     return 1;
-  default:
-    LOG_ERROR(main_logger, "An error occurred during the search");
   }
 
-  PRINT_INFO("Finished");
-  return 2;
+  return 0;
 }

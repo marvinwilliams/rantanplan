@@ -2,11 +2,13 @@
 #define SUPPORT_HPP
 
 #include "config.hpp"
+#include "grounder/grounder.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
 #include "model/to_string.hpp"
 #include "util/index.hpp"
+#include "util/timer.hpp"
 
 #include <numeric>
 #include <unordered_set>
@@ -16,6 +18,7 @@
 
 extern logging::Logger encoding_logger;
 extern Config config;
+extern util::Timer global_timer;
 
 class Support {
 public:
@@ -36,21 +39,19 @@ public:
         neg_effect;
   };
 
-  explicit Support(const normalized::Problem &problem_) noexcept;
+  explicit Support(const normalized::Problem &problem_);
 
   inline const normalized::Problem &get_problem() const noexcept {
     return problem_;
   }
 
-  inline size_t get_num_instantiations() const noexcept {
-    return num_instantations_;
+  inline size_t get_num_ground_atoms() const noexcept {
+    return num_ground_atoms_;
   }
 
-  inline PredicateId
-  get_id(const normalized::PredicateInstantiation &predicate) const noexcept {
-    auto [it, success] =
-        instantiations_.try_emplace(predicate, instantiations_.size());
-    assert(it->second < num_instantations_);
+  inline PredicateId get_id(const normalized::GroundAtom &atom) const noexcept {
+    auto [it, success] = ground_atoms_.try_emplace(atom, ground_atoms_.size());
+    assert(it->second < num_ground_atoms_);
     return it->second;
   }
 
@@ -76,10 +77,6 @@ public:
            is_init(id) == positive;
   }
 
-  bool is_initialized() const noexcept {
-    return initialized_;
-  }
-
 private:
   inline auto &select_support(PredicateId id, bool positive,
                               bool is_effect) noexcept {
@@ -89,13 +86,11 @@ private:
                                 : condition_supports_[id].neg_precondition;
   }
 
-  void set_predicate_support() noexcept;
+  void set_predicate_support();
 
-  bool initialized_ = false;
-  size_t num_instantations_;
+  size_t num_ground_atoms_;
   std::unordered_set<PredicateId> init_;
-  mutable std::unordered_map<normalized::PredicateInstantiation, PredicateId>
-      instantiations_;
+  mutable std::unordered_map<normalized::GroundAtom, PredicateId> ground_atoms_;
   std::vector<ConditionSupport> condition_supports_;
 
   const normalized::Problem &problem_;

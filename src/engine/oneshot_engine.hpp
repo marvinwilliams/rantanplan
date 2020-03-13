@@ -13,7 +13,7 @@ public:
       const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
 private:
-  Status start_impl() noexcept override;
+  Plan start_planning_impl() override;
 };
 
 #endif /* end of include guard: ONESHOT_ENGINE_HPP */

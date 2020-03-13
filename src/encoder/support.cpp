@@ -1,4 +1,5 @@
 #include "encoder/support.hpp"
+#include "grounder/grounder.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
@@ -10,15 +11,14 @@
 #include <variant>
 
 using namespace normalized;
-using namespace std::chrono_literals;
 
-Support::Support(const Problem &problem) noexcept : problem_{problem} {
-  num_instantations_ =
+Support::Support(const Problem &problem) : problem_{problem} {
+  num_ground_atoms_ =
       std::accumulate(problem.predicates.begin(), problem.predicates.end(), 0ul,
                       [&problem](size_t sum, const auto &p) {
                         return sum + get_num_instantiated(p, problem);
                       });
-  instantiations_.reserve(num_instantations_);
+  ground_atoms_.reserve(num_ground_atoms_);
   init_.reserve(problem_.init.size());
   for (const auto &predicate : problem_.init) {
     auto id = get_id(predicate);
@@ -27,25 +27,18 @@ Support::Support(const Problem &problem) noexcept : problem_{problem} {
   set_predicate_support();
 }
 
-void Support::set_predicate_support() noexcept {
-  condition_supports_.resize(num_instantations_);
+void Support::set_predicate_support() {
+  condition_supports_.resize(num_ground_atoms_);
   for (size_t i = 0; i < problem_.actions.size(); ++i) {
     const auto &action = problem_.actions[i];
     for (auto is_effect : {true, false}) {
-      for (const auto &[predicate, positive] :
-           (is_effect ? action.eff_instantiated : action.pre_instantiated)) {
-        auto id = get_id(predicate);
-        select_support(id, positive, is_effect)
-            .emplace_back(ActionIndex{i}, ParameterAssignment{});
-      }
-
       for (const auto &condition :
            is_effect ? action.effects : action.preconditions) {
-        if (config.check_timeout()) {
-          return;
+        if (global_timer.get_elapsed_time() > config.timeout) {
+          throw TimeoutException{};
         }
-        for (ConditionIterator it{condition, action, problem_};
-             it != ConditionIterator{}; ++it) {
+        for (GroundAtomIterator it{condition.atom, action, problem_};
+             it != GroundAtomIterator{}; ++it) {
           auto id = get_id(*it);
           select_support(id, condition.positive, is_effect)
               .emplace_back(ActionIndex{i}, std::move(it.get_assignment()));
@@ -53,5 +46,4 @@ void Support::set_predicate_support() noexcept {
       }
     }
   }
-  initialized_ = true;
 }

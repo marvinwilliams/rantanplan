@@ -14,14 +14,14 @@
 
 namespace normalized {
 
-inline bool is_subtype(TypeIndex subtype, TypeIndex type,
+inline bool is_subtype(Type subtype, Type type,
                        const Problem &problem) noexcept {
-  if (subtype == type) {
+  if (subtype.id == type.id) {
     return true;
   }
-  while (problem.types[subtype].supertype != subtype) {
-    subtype = problem.types[subtype].supertype;
-    if (subtype == type) {
+  while (subtype.supertype != subtype.id) {
+    subtype = problem.types[subtype.supertype];
+    if (subtype.id == type.id) {
       return true;
     }
   }
@@ -35,90 +35,75 @@ struct ParameterMapping {
   std::vector<std::vector<ArgumentIndex>> arguments;
 };
 
-using ParameterAssignment =
-    std::vector<std::pair<ParameterIndex, ConstantIndex>>;
+using ParameterAssignment = std::vector<std::pair<ParameterIndex, Constant>>;
 
-inline PredicateInstantiation instantiate(const Condition &condition) noexcept {
-  std::vector<ConstantIndex> args;
-  args.reserve(condition.arguments.size());
-  for (const auto &arg : condition.arguments) {
-    assert(arg.is_constant());
-    args.push_back(arg.get_constant());
+inline GroundAtom as_ground_atom(const Atom &atom) noexcept {
+  GroundAtom ground_atom;
+  ground_atom.predicate = atom.predicate;
+  ground_atom.arguments.reserve(atom.arguments.size());
+  for (const Argument &a : atom.arguments) {
+    assert(!a.is_parameter());
+    ground_atom.arguments.push_back(a.get_constant());
   }
-  return PredicateInstantiation{condition.definition, std::move(args)};
+  return ground_atom;
 }
 
-inline PredicateInstantiation instantiate(const Condition &predicate,
-                                          const Action &action) noexcept {
-  std::vector<ConstantIndex> args;
-  args.reserve(predicate.arguments.size());
-  for (const auto &arg : predicate.arguments) {
-    if (arg.is_constant()) {
-      args.push_back(arg.get_constant());
+inline GroundAtom as_ground_atom(const Atom &atom,
+                                 const Action &action) noexcept {
+  GroundAtom ground_atom;
+  ground_atom.predicate = atom.predicate;
+  ground_atom.arguments.reserve(atom.arguments.size());
+  for (const Argument &a : atom.arguments) {
+    if (a.is_parameter()) {
+      assert(!action.parameters[a.get_parameter_index()].is_free());
+      ground_atom.arguments.push_back(
+          action.parameters[a.get_parameter_index()].get_constant());
     } else {
-      assert(action.get(arg.get_parameter()).is_constant());
-      args.push_back(action.get(arg.get_parameter()).get_constant());
+      ground_atom.arguments.push_back(a.get_constant());
     }
   }
-  return PredicateInstantiation{predicate.definition, std::move(args)};
+  return ground_atom;
 }
 
 // returns true if every argument is constant
-inline bool update_arguments(Condition &condition, const Action &action) {
-  bool is_grounded = true;
-  for (auto &arg : condition.arguments) {
-    if (!arg.is_constant()) {
-      if (action.parameters[arg.get_parameter()].is_constant()) {
-        arg.set(action.get(arg.get_parameter()).get_constant());
-      } else {
-        is_grounded = false;
-      }
+inline void update_condition(Condition &condition, const Action &action) {
+  for (Argument &a : condition.atom.arguments) {
+    if (a.is_parameter() &&
+        !action.parameters[a.get_parameter_index()].is_free()) {
+      a.set(action.parameters[a.get_parameter_index()].get_constant());
     }
   }
-  return is_grounded;
 }
 
-inline bool is_grounded(const Condition &predicate) noexcept {
-  return std::all_of(predicate.arguments.cbegin(), predicate.arguments.cend(),
-                     [](const auto &arg) { return arg.is_constant(); });
+inline bool is_ground(const Atom &atom) noexcept {
+  return std::all_of(atom.arguments.cbegin(), atom.arguments.cend(),
+                     [](const Argument &a) { return !a.is_parameter(); });
 }
 
-inline Action ground(const ParameterAssignment &assignment,
-                     const Action &action) noexcept {
-  Action new_action;
-  new_action.parameters = action.parameters;
+inline void ground(const ParameterAssignment &assignment,
+                   Action &action) noexcept {
   for (auto [p, c] : assignment) {
-    new_action.parameters[p].set(c);
+    action.parameters[p].set(c);
   }
-  new_action.pre_instantiated = action.pre_instantiated;
-  new_action.eff_instantiated = action.eff_instantiated;
 
-  for (auto pred : action.preconditions) {
-    if (bool is_grounded = update_arguments(pred, new_action); is_grounded) {
-      new_action.pre_instantiated.emplace_back(instantiate(pred),
-                                               pred.positive);
-    } else {
-      new_action.preconditions.push_back(std::move(pred));
-    }
+  for (Condition &c : action.preconditions) {
+    update_condition(c, action);
   }
-  for (auto pred : action.effects) {
-    if (bool is_grounded = update_arguments(pred, new_action); is_grounded) {
-      new_action.eff_instantiated.emplace_back(instantiate(pred),
-                                               pred.positive);
-    } else {
-      new_action.effects.push_back(std::move(pred));
-    }
+
+  for (Condition &c : action.effects) {
+    update_condition(c, action);
   }
-  return new_action;
 }
 
-inline ParameterMapping get_mapping(const Action &action,
-                                    const Condition &predicate) noexcept {
+inline ParameterMapping get_mapping(const Atom &atom,
+                                    const Action &action) noexcept {
   std::vector<std::vector<ArgumentIndex>> parameter_matches(
       action.parameters.size());
-  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (!predicate.arguments[i].is_constant()) {
-      parameter_matches[predicate.arguments[i].get_parameter()].emplace_back(i);
+
+  for (size_t i = 0; i < atom.arguments.size(); ++i) {
+    if (atom.arguments[i].is_parameter()) {
+      parameter_matches[atom.arguments[i].get_parameter_index()].emplace_back(
+          i);
     }
   }
 
@@ -133,12 +118,11 @@ inline ParameterMapping get_mapping(const Action &action,
 }
 
 inline ParameterSelection
-get_referenced_parameters(const Condition &predicate,
-                          const Action &action) noexcept {
+get_referenced_parameters(const Atom &atom, const Action &action) noexcept {
   std::vector<bool> parameter_matches(action.parameters.size(), false);
-  for (size_t i = 0; i < predicate.arguments.size(); ++i) {
-    if (!predicate.arguments[i].is_constant()) {
-      parameter_matches[predicate.arguments[i].get_parameter()] = true;
+  for (size_t i = 0; i < atom.arguments.size(); ++i) {
+    if (atom.arguments[i].is_parameter()) {
+      parameter_matches[atom.arguments[i].get_parameter_index()] = true;
     }
   }
 
@@ -153,7 +137,7 @@ get_referenced_parameters(const Condition &predicate,
 
 inline ParameterAssignment
 get_assignment(const ParameterMapping &mapping,
-               const std::vector<ConstantIndex> &arguments) noexcept {
+               const std::vector<Constant> &arguments) noexcept {
   assert(mapping.parameters.size() == arguments.size());
   ParameterAssignment assignment;
   assignment.reserve(mapping.parameters.size());
@@ -168,8 +152,8 @@ inline size_t get_num_instantiated(const Predicate &predicate,
 
   return std::accumulate(
       predicate.parameter_types.begin(), predicate.parameter_types.end(), 1ul,
-      [&problem](size_t product, TypeIndex type) {
-        return product * problem.constants_by_type[type].size();
+      [&problem](size_t product, Type type) {
+        return product * problem.constants_of_type[type.id].size();
       });
 }
 
@@ -178,25 +162,31 @@ inline size_t get_num_instantiated(const Action &action,
   return std::accumulate(
       action.parameters.begin(), action.parameters.end(), 1ul,
       [&problem](size_t product, const Parameter &p) {
-        if (p.is_constant()) {
+        if (!p.is_free()) {
           return product;
         }
-        return product * problem.constants_by_type[p.get_type()].size();
+        return product * problem.constants_of_type[p.get_type().id].size();
       });
 }
 
 inline size_t get_num_instantiated(const ParameterSelection &selection,
                                    const Action &action,
                                    const Problem &problem) noexcept {
-  return std::accumulate(selection.begin(), selection.end(), 1ul,
-                         [&action, &problem](size_t product, auto index) {
-                           auto type = action.get(index).get_type();
-                           return product *
-                                  problem.constants_by_type[type].size();
-                         });
+  return std::accumulate(
+      selection.begin(), selection.end(), 1ul,
+      [&action, &problem](size_t product, ParameterIndex index) {
+        auto type_index = action.parameters[index].get_type().id;
+        return product * problem.constants_of_type[type_index].size();
+      });
 }
 
 class AssignmentIterator {
+  ParameterAssignment assignment_;
+  util::CombinationIterator combination_iterator_;
+  const ParameterSelection *selection_ = nullptr;
+  const Action *action_ = nullptr;
+  const Problem *problem_ = nullptr;
+
 public:
   using iterator_category = std::forward_iterator_tag;
   using value_type = ParameterAssignment;
@@ -207,14 +197,15 @@ public:
   explicit AssignmentIterator() noexcept = default;
 
   explicit AssignmentIterator(const ParameterSelection &selection,
-                              const Action &action, const Problem &problem)
+                              const Action &action,
+                              const Problem &problem) noexcept
       : selection_{&selection}, action_{&action}, problem_{&problem} {
     std::vector<size_t> argument_size_list;
     argument_size_list.reserve(selection.size());
     for (auto p : selection) {
-      assert(!action.get(p).is_constant());
+      assert(action.parameters[p].is_free());
       argument_size_list.push_back(
-          problem.constants_by_type[action.get(p).get_type()].size());
+          problem.constants_of_type[action.parameters[p].get_type().id].size());
     }
 
     combination_iterator_ = util::CombinationIterator{argument_size_list};
@@ -223,10 +214,11 @@ public:
     if (combination_iterator_ != util::CombinationIterator{}) {
       const auto &combination = *combination_iterator_;
       for (size_t i = 0; i < selection.size(); ++i) {
-        assert(!action.get(selection[i]).is_constant());
-        auto type = action_->get(selection[i]).get_type();
+        assert(action.parameters[selection[i]].is_free());
+        auto type_index = action_->parameters[selection[i]].get_type().id;
         assignment_[i] = std::make_pair(
-            (*selection_)[i], problem.constants_by_type[type][combination[i]]);
+            (*selection_)[i],
+            problem.constants_of_type[type_index][combination[i]]);
       }
     }
   }
@@ -237,11 +229,11 @@ public:
     if (combination_iterator_ != util::CombinationIterator{}) {
       const auto &combination = *combination_iterator_;
       for (size_t i = 0; i < combination.size(); ++i) {
-        assert(!action_->get((*selection_)[i]).is_constant());
-        auto type = action_->get((*selection_)[i]).get_type();
-        assignment_[i] =
-            std::make_pair((*selection_)[i],
-                           problem_->constants_by_type[type][combination[i]]);
+        assert(action_->parameters[(*selection_)[i]].is_free());
+        auto type_index = action_->parameters[(*selection_)[i]].get_type().id;
+        assignment_[i] = std::make_pair(
+            (*selection_)[i],
+            problem_->constants_of_type[type_index][combination[i]]);
       }
     }
     return *this;
@@ -266,63 +258,61 @@ public:
   bool operator==(const AssignmentIterator &) const noexcept {
     return combination_iterator_ == util::CombinationIterator{};
   }
-
-private:
-  ParameterAssignment assignment_;
-  util::CombinationIterator combination_iterator_;
-  const ParameterSelection *selection_ = nullptr;
-  const Action *action_ = nullptr;
-  const Problem *problem_ = nullptr;
 };
 
-class ConditionIterator {
+class GroundAtomIterator {
+  GroundAtom ground_atom_;
+  ParameterMapping mapping_;
+  AssignmentIterator assignment_iterator_;
+
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = PredicateInstantiation;
+  using value_type = GroundAtom;
   using difference_type = std::ptrdiff_t;
   using pointer = const value_type *;
   using reference = const value_type &;
 
-  explicit ConditionIterator() noexcept : predicate_{PredicateIndex{0}, {}} {}
+  explicit GroundAtomIterator() = default;
 
-  explicit ConditionIterator(const Condition &condition, const Action &action,
-                             const Problem &problem)
-      : predicate_{condition.definition,
-                   std::vector<ConstantIndex>(condition.arguments.size())},
-        mapping_{get_mapping(action, condition)}, assignment_iterator_{
-                                                      mapping_.parameters,
-                                                      action, problem} {
+  explicit GroundAtomIterator(const Atom &atom, const Action &action,
+                              const Problem &problem) noexcept
+      : mapping_{get_mapping(atom, action)}, assignment_iterator_{
+                                                 mapping_.parameters, action,
+                                                 problem} {
+    ground_atom_.predicate = atom.predicate;
+    ground_atom_.arguments.resize(atom.arguments.size());
 
-    for (size_t i = 0; i < condition.arguments.size(); ++i) {
-      if (condition.arguments[i].is_constant()) {
-        predicate_.arguments[i] = condition.arguments[i].get_constant();
+    for (size_t i = 0; i < atom.arguments.size(); ++i) {
+      if (!atom.arguments[i].is_parameter()) {
+        ground_atom_.arguments[i] = atom.arguments[i].get_constant();
       }
     }
+
     if (assignment_iterator_ != AssignmentIterator{}) {
       const auto &assignment = *assignment_iterator_;
       for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
         assert(assignment[i].first == mapping_.parameters[i]);
         for (auto a : mapping_.arguments[i]) {
-          predicate_.arguments[a] = assignment[i].second;
+          ground_atom_.arguments[a] = assignment[i].second;
         }
       }
     }
   }
 
-  ConditionIterator &operator++() noexcept {
+  GroundAtomIterator &operator++() noexcept {
     ++assignment_iterator_;
     if (assignment_iterator_ != AssignmentIterator{}) {
       const auto &assignment = *assignment_iterator_;
       for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
         for (auto a : mapping_.arguments[i]) {
-          predicate_.arguments[a] = assignment[i].second;
+          ground_atom_.arguments[a] = assignment[i].second;
         }
       }
     }
     return *this;
   }
 
-  ConditionIterator operator++(int) noexcept {
+  GroundAtomIterator operator++(int) noexcept {
     auto old = *this;
     ++(*this);
     return old;
@@ -332,43 +322,46 @@ public:
     return assignment_iterator_.get_num_instantiations();
   }
 
-  inline reference operator*() const noexcept { return predicate_; }
+  inline reference operator*() const noexcept { return ground_atom_; }
 
   const auto &get_assignment() const noexcept { return *assignment_iterator_; }
 
-  bool operator!=(const ConditionIterator &) const noexcept {
+  bool operator!=(const GroundAtomIterator &) const noexcept {
     return assignment_iterator_ != AssignmentIterator{};
   }
 
-  bool operator==(const ConditionIterator &) const noexcept {
+  bool operator==(const GroundAtomIterator &) const noexcept {
     return assignment_iterator_ == AssignmentIterator{};
   }
-
-private:
-  PredicateInstantiation predicate_;
-  ParameterMapping mapping_;
-  AssignmentIterator assignment_iterator_;
 };
 
-inline bool is_instantiatable(const Condition &condition,
-                              const std::vector<ConstantIndex> &arguments,
+inline bool is_instantiatable(const Atom &atom,
+                              const std::vector<Constant> &arguments,
                               const Action &action,
                               const Problem &problem) noexcept {
+  assert(atom.arguments.size() == arguments.size());
+  if (is_ground(atom)) {
+    for (size_t i = 0; i < atom.arguments.size(); ++i) {
+      if (atom.arguments[i].get_constant().id != arguments[i].id) {
+        return false;
+      }
+    }
+    return true;
+  }
   auto parameters = action.parameters;
-  for (size_t i = 0; i < condition.arguments.size(); ++i) {
-    if (condition.arguments[i].is_constant()) {
-      if (condition.arguments[i].get_constant() != arguments[i]) {
+  for (size_t i = 0; i < atom.arguments.size(); ++i) {
+    if (!atom.arguments[i].is_parameter()) {
+      if (atom.arguments[i].get_constant().id != arguments[i].id) {
         return false;
       }
     } else {
-      auto &p = parameters[condition.arguments[i].get_parameter()];
-      if (p.is_constant()) {
-        if (p.get_constant() != arguments[i]) {
+      auto &p = parameters[atom.arguments[i].get_parameter_index()];
+      if (!p.is_free()) {
+        if (p.get_constant().id != arguments[i].id) {
           return false;
         }
       } else {
-        if (!is_subtype(problem.get(arguments[i]).type, p.get_type(),
-                        problem)) {
+        if (!is_subtype(arguments[i].type, p.get_type(), problem)) {
           return false;
         }
         p.set(arguments[i]);
@@ -378,45 +371,43 @@ inline bool is_instantiatable(const Condition &condition,
   return true;
 }
 
-inline bool is_unifiable(const Condition &first_condition,
-                         const Action &first_action,
-                         const Condition &second_condition,
-                         const Action &second_action,
+inline bool is_unifiable(const Atom &first_atom, const Action &first_action,
+                         const Atom &second_atom, const Action &second_action,
                          const Problem &problem) noexcept {
-  assert(first_condition.definition == second_condition.definition);
+  assert(first_atom.predicate == second_atom.predicate);
   auto first_parameters = first_action.parameters;
   auto second_parameters = second_action.parameters;
-  for (size_t i = 0; i < first_condition.arguments.size(); ++i) {
-    const auto &first_p = first_condition.arguments[i];
-    const auto &second_p = second_condition.arguments[i];
-    if (first_p.is_constant() && second_p.is_constant()) {
-      if (first_p.get_constant() != second_p.get_constant()) {
+  for (size_t i = 0; i < first_atom.arguments.size(); ++i) {
+    const auto &first_p = first_atom.arguments[i];
+    const auto &second_p = second_atom.arguments[i];
+    if (!first_p.is_parameter() && !second_p.is_parameter()) {
+      if (first_p.get_constant().id != second_p.get_constant().id) {
         return false;
       }
-    } else if (second_p.is_constant()) {
+    } else if (!second_p.is_parameter()) {
       auto &action_p =
-          first_parameters[first_condition.arguments[i].get_parameter()];
-      if (action_p.is_constant()) {
-        if (action_p.get_constant() != second_p.get_constant()) {
+          first_parameters[first_atom.arguments[i].get_parameter_index()];
+      if (!action_p.is_free()) {
+        if (action_p.get_constant().id != second_p.get_constant().id) {
           return false;
         }
       } else {
-        if (!is_subtype(problem.get(second_p.get_constant()).type,
-                        action_p.get_type(), problem)) {
+        if (!is_subtype(second_p.get_constant().type, action_p.get_type(),
+                        problem)) {
           return false;
         }
         action_p.set(second_p.get_constant());
       }
-    } else if (first_p.is_constant()) {
+    } else if (!first_p.is_parameter()) {
       auto &action_p =
-          second_parameters[second_condition.arguments[i].get_parameter()];
-      if (action_p.is_constant()) {
-        if (action_p.get_constant() != first_p.get_constant()) {
+          second_parameters[second_atom.arguments[i].get_parameter_index()];
+      if (!action_p.is_free()) {
+        if (action_p.get_constant().id != first_p.get_constant().id) {
           return false;
         }
       } else {
-        if (!is_subtype(problem.get(first_p.get_constant()).type,
-                        action_p.get_type(), problem)) {
+        if (!is_subtype(first_p.get_constant().type, action_p.get_type(),
+                        problem)) {
           return false;
         }
         action_p.set(first_p.get_constant());
@@ -427,5 +418,21 @@ inline bool is_unifiable(const Condition &first_condition,
 }
 
 } // namespace normalized
+
+namespace std {
+
+template <> struct hash<normalized::ParameterAssignment> {
+  size_t operator()(const normalized::ParameterAssignment &assignment) const
+      noexcept {
+    size_t h = hash<size_t>{}(assignment.size());
+    for (const auto &[parameter_index, constant] : assignment) {
+      h ^= hash<normalized::ParameterIndex>{}(parameter_index);
+      h ^= hash<normalized::ConstantIndex>{}(constant.id);
+    }
+    return h;
+  }
+};
+
+} // namespace std
 
 #endif /* end of include guard: NORMALIZED_UTILS_HPP */

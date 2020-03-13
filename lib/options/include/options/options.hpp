@@ -3,7 +3,6 @@
 
 #include "logging/logging.hpp"
 
-#include <unordered_map>
 #include <algorithm>
 #include <exception>
 #include <iostream>
@@ -13,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 namespace options {
@@ -254,7 +254,8 @@ public:
     try {
       return dynamic_cast<const OptionState<T> &>(option.get());
     } catch (const std::bad_cast &) {
-      throw OptionException{"Given type does not match option type"};
+      throw OptionException{"Given type does not match option type for '" +
+                            std::string{name} + "'"};
     }
   }
 

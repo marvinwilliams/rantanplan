@@ -1,4 +1,5 @@
 #include "sat/solver.hpp"
+#include "util/timer.hpp"
 
 #include <cassert>
 
@@ -17,9 +18,9 @@ void Solver::assume(int l) {
   assume_impl(l);
 }
 
-void Solver::solve(std::chrono::seconds timeout) {
+void Solver::solve(util::Seconds timeout, util::Seconds solve_timeout) {
   assert(status_ == Status::Constructing);
-  status_ = solve_impl(timeout);
+  status_ = solve_impl(timeout, solve_timeout);
 }
 
 Solver::Status Solver::get_status() const { return status_; }

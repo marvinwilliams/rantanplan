@@ -375,6 +375,16 @@ private:
 };
 
 class Problem {
+  std::string domain_name_ = "";
+  std::string problem_name_ = "";
+  std::vector<std::string> requirements_;
+  std::vector<std::unique_ptr<Type>> types_;
+  std::vector<std::unique_ptr<Constant>> constants_;
+  std::vector<std::unique_ptr<Predicate>> predicates_;
+  std::vector<std::unique_ptr<Action>> actions_;
+  std::vector<std::shared_ptr<FreePredicate>> init_;
+  std::shared_ptr<GoalCondition> goal_;
+
 public:
   void set_domain_name(std::string name);
   void set_problem_name(std::string name, const std::string &domain_ref);
@@ -426,17 +436,6 @@ public:
   size_t get_index(const Action *action) const noexcept {
     return parsed::get_index(action, actions_);
   }
-
-private:
-  std::string domain_name_ = "";
-  std::string problem_name_ = "";
-  std::vector<std::string> requirements_;
-  std::vector<std::unique_ptr<Type>> types_;
-  std::vector<std::unique_ptr<Constant>> constants_;
-  std::vector<std::unique_ptr<Predicate>> predicates_;
-  std::vector<std::unique_ptr<Action>> actions_;
-  std::vector<std::shared_ptr<FreePredicate>> init_;
-  std::shared_ptr<GoalCondition> goal_;
 };
 
 } // namespace parsed

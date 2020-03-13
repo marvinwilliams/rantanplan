@@ -11,12 +11,10 @@ std::string to_string(const normalized::Constant &constant,
                       const normalized::Problem &problem);
 std::string to_string(const normalized::Predicate &predicate,
                       const normalized::Problem &problem);
-std::string to_string(const normalized::Condition &predicate,
+std::string to_string(const normalized::Condition &condition,
                       const normalized::Action &action,
                       const normalized::Problem &problem);
-std::string to_string(const normalized::Condition &predicate,
-                      const normalized::Problem &problem);
-std::string to_string(const normalized::PredicateInstantiation &predicate,
+std::string to_string(const normalized::GroundAtom &ground_atom,
                       const normalized::Problem &problem);
 std::string to_string(const normalized::Action &,
                       const normalized::Problem &problem);

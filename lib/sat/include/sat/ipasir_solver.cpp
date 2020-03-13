@@ -4,10 +4,7 @@
 
 #include "ipasir.h"
 #include <cassert>
-#include <chrono>
 #include <iostream>
-
-using namespace std::chrono_literals;
 
 namespace sat {
 
@@ -29,37 +26,25 @@ void IpasirSolver::add_impl(int l) noexcept {
 
 void IpasirSolver::assume_impl(int l) noexcept { ipasir_assume(handle_, l); }
 
-Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
+Solver::Status IpasirSolver::solve_impl(util::Seconds timeout,
+                                        util::Seconds solve_timeout) noexcept {
   util::Timer timer;
   bool skip_step = false;
   auto check_timeout = [&]() {
-    if (config.check_timeout() ||
-        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                             timer.get_elapsed_time()) >= timeout)) {
+    if (global_timer.get_elapsed_time() > config.timeout ||
+        (timer.get_elapsed_time() > timeout)) {
       return true;
     }
-    if (config.skip_step) {
-      if (config.timeout > 0s &&
-          timer.get_elapsed_time() > config.timeout / 2 &&
-          config.timeout - config.global_timer.get_elapsed_time() <
-              config.timeout / 5) {
-        skip_step = true;
-        return true;
-      }
-      if (timeout > 0s && timer.get_elapsed_time() > timeout / 2 &&
-          timeout - timer.get_elapsed_time() < timeout / 5) {
-        skip_step = true;
-        return true;
-      }
+    if (timer.get_elapsed_time() > solve_timeout) {
+      skip_step = true;
+      return true;
     }
     return false;
   };
 
   ipasir_set_terminate(handle_, &check_timeout, [](void *terminate_handler) {
-    if ((*static_cast<decltype(check_timeout) *>(terminate_handler))()) {
-      return 1;
-    }
-    return 0;
+    return (*static_cast<decltype(check_timeout) *>(terminate_handler))() ? 1
+                                                                          : 0;
   });
   if (int result = ipasir_solve(handle_); result == 10) {
     model_.assignment.clear();
@@ -77,6 +62,7 @@ Solver::Status IpasirSolver::solve_impl(std::chrono::seconds timeout) noexcept {
   } else if (result == 0) {
     return Status::Timeout;
   }
-  return Status::Error;
+  return Status::Unsolvable;
 }
+
 } // namespace sat

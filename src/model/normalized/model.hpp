@@ -2,6 +2,7 @@
 #define NORMALIZE_MODEL_HPP
 
 #include "util/index.hpp"
+#include "util/tagged_union.hpp"
 
 #include <cassert>
 #include <functional>
@@ -18,165 +19,80 @@ struct Type;
 using TypeIndex = util::Index<Type>;
 
 struct Type {
+  TypeIndex id;
   TypeIndex supertype;
 };
 
-struct Constant {
-  TypeIndex type;
-};
-
+struct Constant;
 using ConstantIndex = util::Index<Constant>;
 
-struct Predicate {
-  std::vector<TypeIndex> parameter_types;
+struct Constant {
+  ConstantIndex id;
+  Type type;
 };
 
+inline bool operator==(const Constant &first, const Constant &second) noexcept {
+  return first.id == second.id;
+}
+
+struct Predicate;
 using PredicateIndex = util::Index<Predicate>;
 
-class Parameter {
-public:
-  explicit Parameter(ConstantIndex c) : is_constant_{true}, constant_idx_{c} {}
-  explicit Parameter(TypeIndex t) : is_constant_{false}, type_idx_{t} {}
-  explicit Parameter(const Parameter &other)
-      : is_constant_{other.is_constant_} {
-    if (other.is_constant_) {
-      constant_idx_ = other.constant_idx_;
-    } else {
-      type_idx_ = other.type_idx_;
-    }
-  }
+struct Predicate {
+  PredicateIndex id;
+  std::vector<Type> parameter_types;
+};
 
-  Parameter &operator=(const Parameter &other) {
-    is_constant_ = other.is_constant_;
-    if (other.is_constant_) {
-      constant_idx_ = other.constant_idx_;
-    } else {
-      type_idx_ = other.type_idx_;
-    }
-    return *this;
-  }
-
-  void set(ConstantIndex c) {
-    is_constant_ = true;
-    constant_idx_ = c;
-  }
-
-  void set(TypeIndex t) {
-    is_constant_ = false;
-    type_idx_ = t;
-  }
-
-  ConstantIndex get_constant() const {
-    assert(is_constant_);
-    return constant_idx_;
-  }
-
-  TypeIndex get_type() const {
-    assert(!is_constant_);
-    return type_idx_;
-  }
-
-  bool is_constant() const { return is_constant_; }
-
-private:
-  bool is_constant_;
-  union {
-    ConstantIndex constant_idx_;
-    TypeIndex type_idx_;
-  };
+struct Parameter : TaggedUnion<Constant, Type> {
+  using TaggedUnion<Constant, Type>::TaggedUnion;
+  inline Constant get_constant() const noexcept { return get_first(); }
+  inline Type get_type() const noexcept { return get_second(); }
+  inline bool is_free() const noexcept { return !holds_t1_; }
 };
 
 using ParameterIndex = util::Index<Parameter>;
 
-class Argument {
-public:
-  explicit Argument(ConstantIndex c) : is_constant_{true}, constant_idx_{c} {}
-  explicit Argument(ParameterIndex p)
-      : is_constant_{false}, parameter_idx_{p} {}
-  explicit Argument(const Argument &other) : is_constant_{other.is_constant_} {
-    if (other.is_constant_) {
-      constant_idx_ = other.constant_idx_;
-    } else {
-      parameter_idx_ = other.parameter_idx_;
-    }
+struct Argument : TaggedUnion<Constant, ParameterIndex> {
+  using TaggedUnion<Constant, ParameterIndex>::TaggedUnion;
+  inline Constant get_constant() const noexcept { return get_first(); }
+  inline ParameterIndex get_parameter_index() const noexcept {
+    return get_second();
   }
-
-  Argument &operator=(const Argument &other) {
-    is_constant_ = other.is_constant_;
-    if (other.is_constant()) {
-      constant_idx_ = other.constant_idx_;
-    } else {
-      parameter_idx_ = other.parameter_idx_;
-    }
-    return *this;
-  }
-
-  void set(ConstantIndex c) {
-    is_constant_ = true;
-    constant_idx_ = c;
-  }
-
-  void set(ParameterIndex p) {
-    is_constant_ = false;
-    parameter_idx_ = p;
-  }
-
-  ConstantIndex get_constant() const {
-    assert(is_constant_);
-    return constant_idx_;
-  }
-
-  ParameterIndex get_parameter() const {
-    assert(!is_constant_);
-    return parameter_idx_;
-  }
-
-  bool is_constant() const { return is_constant_; }
-
-private:
-  bool is_constant_;
-  union {
-    ConstantIndex constant_idx_;
-    ParameterIndex parameter_idx_;
-  };
+  inline bool is_parameter() const noexcept { return !holds_t1_; }
 };
 
 using ArgumentIndex = util::Index<Argument>;
 
-struct Condition {
-  PredicateIndex definition;
+struct Atom {
+  PredicateIndex predicate;
   std::vector<Argument> arguments;
-  bool positive = true;
 };
 
-struct PredicateInstantiation {
-  explicit PredicateInstantiation(PredicateIndex definition,
-                                  std::vector<ConstantIndex> arguments)
-      : definition{definition}, arguments(std::move(arguments)) {}
-
-  PredicateIndex definition;
-  std::vector<ConstantIndex> arguments;
+struct GroundAtom {
+  PredicateIndex predicate;
+  std::vector<Constant> arguments;
 };
 
-inline bool operator==(const PredicateInstantiation &first,
-                       const PredicateInstantiation &second) {
-  return first.definition == second.definition &&
+inline bool operator==(const GroundAtom &first,
+                       const GroundAtom &second) noexcept {
+  return first.predicate == second.predicate &&
          first.arguments == second.arguments;
 }
 
+struct Condition {
+  Atom atom;
+  bool positive = true;
+};
+
+struct Action;
+using ActionIndex = util::Index<Action>;
+
 struct Action {
+  ActionIndex id;
   std::vector<Parameter> parameters;
   std::vector<Condition> preconditions;
   std::vector<Condition> effects;
-  std::vector<std::pair<PredicateInstantiation, bool>> pre_instantiated;
-  std::vector<std::pair<PredicateInstantiation, bool>> eff_instantiated;
-
-  const Parameter &get(ParameterIndex parameter) const noexcept {
-    return parameters[parameter];
-  }
 };
-
-using ActionIndex = util::Index<Action>;
 
 struct Problem {
   std::string domain_name;
@@ -186,24 +102,14 @@ struct Problem {
   std::vector<std::string> type_names;
   std::vector<Constant> constants;
   std::vector<std::string> constant_names;
-  std::vector<std::vector<ConstantIndex>> constants_by_type;
+  std::vector<std::vector<Constant>> constants_of_type;
+  std::vector<std::unordered_map<ConstantIndex, size_t>> constant_type_map;
   std::vector<Predicate> predicates;
   std::vector<std::string> predicate_names;
   std::vector<Action> actions;
   std::vector<std::string> action_names;
-  std::vector<PredicateInstantiation> init;
-  std::vector<std::pair<PredicateInstantiation, bool>> goal;
-
-  const Type &get(TypeIndex type) const noexcept { return types[type]; }
-  const Constant &get(ConstantIndex constant) const noexcept {
-    return constants[constant];
-  }
-  const Predicate &get(PredicateIndex predicate) const noexcept {
-    return predicates[predicate];
-  }
-  const Action &get(ActionIndex action) const noexcept {
-    return actions[action];
-  }
+  std::vector<GroundAtom> init;
+  std::vector<std::pair<GroundAtom, bool>> goal;
 
   TypeIndex get_index(const Type *type) const noexcept {
     return {static_cast<size_t>(std::distance(&types.front(), type))};
@@ -238,20 +144,19 @@ struct Problem {
 } // namespace normalized
 
 struct Plan {
-  std::vector<std::pair<normalized::ActionIndex,
-                        std::vector<normalized::ConstantIndex>>>
+  std::vector<
+      std::pair<normalized::ActionIndex, std::vector<normalized::Constant>>>
       sequence;
   std::shared_ptr<normalized::Problem> problem;
 };
 
 namespace std {
 
-template <> struct hash<normalized::PredicateInstantiation> {
-  size_t operator()(const normalized::PredicateInstantiation &predicate) const
-      noexcept {
-    size_t h = hash<normalized::PredicateIndex>{}(predicate.definition);
-    for (auto c : predicate.arguments) {
-      h ^= hash<normalized::ConstantIndex>{}(c);
+template <> struct hash<normalized::GroundAtom> {
+  size_t operator()(const normalized::GroundAtom &atom) const noexcept {
+    size_t h = hash<normalized::PredicateIndex>{}(atom.predicate);
+    for (auto c : atom.arguments) {
+      h ^= hash<normalized::ConstantIndex>{}(c.id);
     }
     return h;
   }

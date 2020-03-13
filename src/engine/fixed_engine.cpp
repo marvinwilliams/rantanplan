@@ -1,4 +1,4 @@
-#include "engine/oneshot_engine.hpp"
+#include "engine/fixed_engine.hpp"
 #include "engine/engine.hpp"
 #include "model/normalized/model.hpp"
 #include "planner/planner.hpp"
@@ -10,11 +10,11 @@
 
 using namespace std::chrono_literals;
 
-OneshotEngine::OneshotEngine(
+FixedEngine::FixedEngine(
     const std::shared_ptr<normalized::Problem> &problem) noexcept
     : Engine(problem) {}
 
-Plan OneshotEngine::start_planning_impl() {
+Plan FixedEngine::start_planning_impl() {
   LOG_INFO(engine_logger, "Using oneshot engine");
 
   LOG_INFO(engine_logger, "Grounding to %.1f groundness...",

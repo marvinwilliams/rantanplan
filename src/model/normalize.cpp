@@ -12,36 +12,37 @@
 #include <variant>
 #include <vector>
 
-normalized::Condition
-normalize_atomic_condition(const parsed::BaseAtomicCondition &condition,
-                           const parsed::Problem &problem) noexcept {
+normalized::Condition normalize_atomic_condition(
+    const parsed::BaseAtomicCondition &condition,
+    const parsed::Problem &problem,
+    const normalized::Problem &normalized_problem) noexcept {
   normalized::Condition result;
-  result.definition =
+  result.atom.predicate =
       normalized::PredicateIndex{problem.get_index(condition.get_predicate())};
   for (const auto &a : condition.get_arguments()) {
     assert(std::holds_alternative<const parsed::Constant *>(a));
     auto c = std::get<const parsed::Constant *>(a);
-    result.arguments.emplace_back(
-        normalized::ConstantIndex{problem.get_index(c)});
+    result.atom.arguments.emplace_back(
+        normalized_problem.constants[problem.get_index(c)]);
   }
   result.positive = condition.positive();
 
   return result;
 }
 
-normalized::Condition
-normalize_atomic_condition(const parsed::BaseAtomicCondition &condition,
-                           const parsed::Action &action,
-                           const parsed::Problem &problem) noexcept {
+normalized::Condition normalize_atomic_condition(
+    const parsed::BaseAtomicCondition &condition, const parsed::Action &action,
+    const parsed::Problem &problem,
+    const normalized::Problem &normalized_problem) noexcept {
   normalized::Condition result;
-  result.definition =
+  result.atom.predicate =
       normalized::PredicateIndex{problem.get_index(condition.get_predicate())};
   for (const auto &a : condition.get_arguments()) {
     if (auto c = std::get_if<const parsed::Constant *>(&a)) {
-      result.arguments.emplace_back(
-          normalized::ConstantIndex{problem.get_index(*c)});
+      result.atom.arguments.emplace_back(
+          normalized_problem.constants[problem.get_index(*c)]);
     } else if (auto p = std::get_if<const parsed::Parameter *>(&a)) {
-      result.arguments.emplace_back(
+      result.atom.arguments.emplace_back(
           normalized::ParameterIndex{action.get_index(*p)});
     } else {
       assert(false);
@@ -68,8 +69,8 @@ to_list(std::shared_ptr<parsed::Condition> condition) noexcept {
 }
 
 std::vector<normalized::Action>
-normalize_action(const parsed::Action &action,
-                 const parsed::Problem &problem) noexcept {
+normalize_action(const parsed::Action &action, const parsed::Problem &problem,
+                 const normalized::Problem &normalized_problem) noexcept {
   auto precondition =
       std::dynamic_pointer_cast<parsed::Condition>(action.precondition);
 
@@ -101,29 +102,15 @@ normalize_action(const parsed::Action &action,
       auto &new_action = new_actions.back();
       for (const auto &p : action.parameters) {
         new_action.parameters.emplace_back(
-            normalized::TypeIndex{problem.get_index(p->type)});
+            normalized_problem.types[problem.get_index(p->type)]);
       }
       for (const auto &c : to_list(condition)) {
-        auto normalized_condition =
-            normalize_atomic_condition(*c, action, problem);
-        if (is_grounded(normalized_condition)) {
-          new_action.pre_instantiated.emplace_back(
-              normalized::instantiate(normalized_condition),
-              normalized_condition.positive);
-        } else {
-          new_action.preconditions.push_back(std::move(normalized_condition));
-        }
+        new_action.preconditions.push_back(normalize_atomic_condition(
+            *c, action, problem, normalized_problem));
       }
       for (const auto &c : effects) {
-        auto normalized_condition =
-            normalize_atomic_condition(*c, action, problem);
-        if (is_grounded(normalized_condition)) {
-          new_action.eff_instantiated.emplace_back(
-              normalized::instantiate(normalized_condition),
-              normalized_condition.positive);
-        } else {
-          new_action.effects.push_back(std::move(normalized_condition));
-        }
+        new_action.effects.push_back(normalize_atomic_condition(
+            *c, action, problem, normalized_problem));
       }
     }
   } else {
@@ -131,31 +118,18 @@ normalize_action(const parsed::Action &action,
     auto &new_action = new_actions.back();
     for (const auto &p : action.parameters) {
       new_action.parameters.emplace_back(
-          normalized::TypeIndex{problem.get_index(p->type)});
+          normalized_problem.types[problem.get_index(p->type)]);
     }
     for (const auto &c : to_list(precondition)) {
-      auto normalized_condition =
-          normalize_atomic_condition(*c, action, problem);
-      if (is_grounded(normalized_condition)) {
-        new_action.pre_instantiated.emplace_back(
-            normalized::instantiate(normalized_condition),
-            normalized_condition.positive);
-      } else {
-        new_action.preconditions.push_back(std::move(normalized_condition));
-      }
+      new_action.preconditions.push_back(
+          normalize_atomic_condition(*c, action, problem, normalized_problem));
     }
     for (const auto &c : effects) {
-      auto normalized_condition =
-          normalize_atomic_condition(*c, action, problem);
-      if (is_grounded(normalized_condition)) {
-        new_action.eff_instantiated.emplace_back(
-            normalized::instantiate(normalized_condition),
-            normalized_condition.positive);
-      } else {
-        new_action.effects.push_back(std::move(normalized_condition));
-      }
+      new_action.effects.push_back(
+          normalize_atomic_condition(*c, action, problem, normalized_problem));
     }
   }
+
   return new_actions;
 }
 
@@ -168,73 +142,80 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
   normalized_problem->types.reserve(problem.get_types().size());
   normalized_problem->type_names.reserve(problem.get_types().size());
 
-  for (size_t i = 0; i < problem.get_types().size(); ++i) {
-    const auto &type = problem.get_types()[i];
+  for (const auto &t : problem.get_types()) {
     normalized_problem->types.push_back(normalized::Type{
-        normalized::TypeIndex{problem.get_index(type->supertype)}});
-    normalized_problem->type_names.push_back(type->name);
+        normalized::TypeIndex{problem.get_index(t.get())},
+        normalized::TypeIndex{problem.get_index(t->supertype)}});
+    normalized_problem->type_names.push_back(t->name);
   }
 
-  for (const auto &constant : problem.get_constants()) {
+  for (const auto &c : problem.get_constants()) {
     normalized_problem->constants.push_back(normalized::Constant{
-        normalized::TypeIndex{problem.get_index(constant->type)}});
-    normalized_problem->constant_names.push_back(constant->name);
+        normalized::ConstantIndex{problem.get_index(c.get())},
+        normalized_problem->types[problem.get_index(c->type)]});
+    normalized_problem->constant_names.push_back(c->name);
   }
 
-  normalized_problem->constants_by_type.resize(
+  normalized_problem->constants_of_type.resize(
       normalized_problem->types.size());
-  for (size_t i = 0; i < normalized_problem->constants.size(); ++i) {
-    const auto &c = normalized_problem->constants[i];
+  normalized_problem->constant_type_map.resize(
+      normalized_problem->types.size());
+  for (const auto &c : normalized_problem->constants) {
     auto type = c.type;
-    normalized_problem->constants_by_type[type].emplace_back(i);
-    while (normalized_problem->get(type).supertype != type) {
-      type = normalized_problem->get(type).supertype;
-      normalized_problem->constants_by_type[type].emplace_back(i);
+    normalized_problem->constants_of_type[type.id].emplace_back(c);
+    normalized_problem->constant_type_map[type.id][c.id] =
+        normalized_problem->constants_of_type[type.id].size();
+    while (type.supertype != type.id) {
+      type = normalized_problem->types[type.supertype];
+      normalized_problem->constants_of_type[type.id].emplace_back(c);
+      normalized_problem->constant_type_map[type.id][c.id] =
+          normalized_problem->constants_of_type[type.id].size();
     }
   }
 
   for (const auto &predicate : problem.get_predicates()) {
     normalized_problem->predicates.emplace_back();
-    for (const auto &type : predicate->parameter_types) {
-      normalized_problem->predicates.back().parameter_types.emplace_back(
-          problem.get_index(type));
+    normalized_problem->predicates.back().id =
+        normalized::PredicateIndex{problem.get_index(predicate.get())};
+    for (const auto &t : predicate->parameter_types) {
+      normalized_problem->predicates.back().parameter_types.push_back(
+          normalized_problem->types[problem.get_index(t)]);
     }
     normalized_problem->predicate_names.push_back(predicate->name);
   }
 
   LOG_INFO(normalize_logger, "Normalizing init...");
 
-  std::vector<normalized::PredicateInstantiation> negative_init;
-  for (const auto &predicate : problem.get_init()) {
-    auto condition = normalize_atomic_condition(*predicate, problem);
-    auto instantiation = instantiate(condition);
-    if (predicate->positive()) {
+  std::vector<normalized::GroundAtom> negative_init;
+  for (const auto &init : problem.get_init()) {
+    auto ground_atom = as_ground_atom(
+        normalize_atomic_condition(*init, problem, *normalized_problem).atom);
+    if (init->positive()) {
       if (std::find(normalized_problem->init.begin(),
                     normalized_problem->init.end(),
-                    instantiation) == normalized_problem->init.end()) {
-        normalized_problem->init.push_back(instantiation);
+                    ground_atom) == normalized_problem->init.end()) {
+        normalized_problem->init.push_back(ground_atom);
       } else {
-        LOG_WARN(normalize_logger, "Found duplicate init predicate '%s'",
-                 to_string(instantiation, *normalized_problem).c_str());
+        LOG_WARN(normalize_logger, "Found duplicate init atom '%s'",
+                 to_string(ground_atom, *normalized_problem).c_str());
       }
     } else {
-      if (std::find(negative_init.begin(), negative_init.end(),
-                    instantiation) == negative_init.end()) {
-        negative_init.push_back(instantiation);
+      if (std::find(negative_init.begin(), negative_init.end(), ground_atom) ==
+          negative_init.end()) {
+        negative_init.push_back(ground_atom);
       } else {
-        LOG_WARN(normalize_logger,
-                 "Found duplicate negated init predicate '%s'",
-                 to_string(instantiation, *normalized_problem).c_str());
+        LOG_WARN(normalize_logger, "Found duplicate negated init atom '%s'",
+                 to_string(ground_atom, *normalized_problem).c_str());
       }
     }
   }
 
-  for (const auto &predicate : negative_init) {
+  for (const auto &atom : negative_init) {
     if (std::find(normalized_problem->init.begin(),
                   normalized_problem->init.end(),
-                  predicate) != normalized_problem->init.end()) {
-      LOG_ERROR(normalize_logger, "Found conflicting init predicate '%s'",
-                to_string(predicate, *normalized_problem).c_str());
+                  atom) != normalized_problem->init.end()) {
+      LOG_ERROR(normalize_logger, "Found conflicting init atom '%s'",
+                to_string(atom, *normalized_problem).c_str());
       return std::shared_ptr<normalized::Problem>();
     }
   }
@@ -242,47 +223,47 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
   // Reserve space for initial and equality predicates
   normalized_problem->init.reserve(normalized_problem->init.size() +
                                    normalized_problem->constants.size());
-  for (size_t i = 0; i < normalized_problem->constants.size(); ++i) {
-    normalized_problem->init.emplace_back(
-        normalized::PredicateIndex{0},
-        std::vector<normalized::ConstantIndex>{normalized::ConstantIndex{i},
-                                               normalized::ConstantIndex{i}});
+  for (const auto &c : normalized_problem->constants) {
+    normalized_problem->init.push_back(
+        normalized::GroundAtom{normalized::PredicateIndex{0},
+                               std::vector<normalized::Constant>{c, c}});
   }
 
   LOG_INFO(normalize_logger, "Normalizing goal...");
 
-  auto goal = std::dynamic_pointer_cast<parsed::Condition>(problem.get_goal())
-                  ->to_dnf();
-  for (const auto &predicate : to_list(goal)) {
-    auto instantiation =
-        instantiate(normalize_atomic_condition(*predicate, problem));
-    if (auto it = std::find_if(normalized_problem->goal.begin(),
-                               normalized_problem->goal.end(),
-                               [&instantiation](const auto &g) {
-                                 return instantiation == g.first;
-                               });
+  auto goal_condition =
+      std::dynamic_pointer_cast<parsed::Condition>(problem.get_goal())
+          ->to_dnf();
+  for (const auto &goal : to_list(goal_condition)) {
+    auto ground_atom = as_ground_atom(
+        normalize_atomic_condition(*goal, problem, *normalized_problem).atom);
+    if (auto it = std::find_if(
+            normalized_problem->goal.begin(), normalized_problem->goal.end(),
+            [&ground_atom](const auto &g) { return ground_atom == g.first; });
         it != normalized_problem->goal.end()) {
-      if (it->second == predicate->positive()) {
+      if (it->second == goal->positive()) {
         LOG_WARN(normalize_logger, "Found duplicate goal predicate '%s'",
-                 to_string(instantiation, *normalized_problem).c_str());
+                 to_string(ground_atom, *normalized_problem).c_str());
       } else {
         LOG_ERROR(normalize_logger, "Found conflicting goal predicates '%s'",
-                  to_string(instantiation, *normalized_problem).c_str());
+                  to_string(ground_atom, *normalized_problem).c_str());
         return std::shared_ptr<normalized::Problem>();
       }
     }
 
     normalized_problem->goal.push_back(
-        {std::move(instantiation), predicate->positive()});
+        {std::move(ground_atom), goal->positive()});
   }
 
   LOG_INFO(normalize_logger, "Normalizing actions...");
 
   for (const auto &action : problem.get_actions()) {
-    auto new_actions = normalize_action(*action, problem);
+    auto new_actions = normalize_action(*action, problem, *normalized_problem);
     for (const auto &a : new_actions) {
       if (get_num_instantiated(a, *normalized_problem) > 0) {
         normalized_problem->actions.push_back(a);
+        normalized_problem->actions.back().id =
+            normalized_problem->actions.size() - 1;
         normalized_problem->action_names.push_back(action->name);
       }
     }

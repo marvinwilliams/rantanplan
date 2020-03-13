@@ -2,10 +2,12 @@
 #include "config.hpp"
 #include "encoder/encoder.hpp"
 #include "encoder/support.hpp"
+#include "grounder/grounder.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "planner/planner.hpp"
 #include "sat/formula.hpp"
+#include "util/timer.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -14,34 +16,18 @@
 
 using namespace normalized;
 
-SequentialEncoder::SequentialEncoder(
-    const std::shared_ptr<Problem> &problem) noexcept
+SequentialEncoder::SequentialEncoder(const std::shared_ptr<Problem> &problem)
     : Encoder{problem}, support_{*problem} {
-  if (!support_.is_initialized()) {
-    return;
-  }
   LOG_INFO(encoding_logger, "Init sat variables...");
-  if (!init_sat_vars()) {
-    return;
-  }
+  init_sat_vars();
   LOG_INFO(encoding_logger, "Encode problem...");
-  if (!encode_init()) {
-    return;
-  }
-  if (!encode_actions()) {
-    return;
-  }
-  if (!parameter_implies_predicate()) {
-    return;
-  }
-  if (!frame_axioms()) {
-    return;
-  }
-  if (!assume_goal()) {
-    return;
-  }
+  encode_init();
+  encode_actions();
+  parameter_implies_predicate();
+  frame_axioms();
+  assume_goal();
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
-  initialized_ = true;
+
   LOG_INFO(encoding_logger, "Variables per step: %lu", num_vars_);
   LOG_INFO(encoding_logger, "Helper variables to mitigate dnf explosion: %lu",
            std::accumulate(
@@ -76,17 +62,17 @@ Plan SequentialEncoder::extract_plan(const sat::Model &model,
     for (size_t i = 0; i < problem_->actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
         const Action &action = problem_->actions[i];
-        std::vector<ConstantIndex> constants;
+        std::vector<Constant> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
-          auto &parameter = action.parameters[parameter_pos];
-          if (parameter.is_constant()) {
+          const auto &parameter = action.parameters[parameter_pos];
+          if (!parameter.is_free()) {
             constants.push_back(parameter.get_constant());
             continue;
           }
           for (size_t j = 0; j < problem_->constants.size(); ++j) {
             if (model[parameters_[parameter_pos][j] + s * num_vars_]) {
-              constants.push_back(ConstantIndex{j});
+              constants.push_back(problem_->constants[j]);
               break;
             }
           }
@@ -100,13 +86,13 @@ Plan SequentialEncoder::extract_plan(const sat::Model &model,
   return plan;
 }
 
-bool SequentialEncoder::init_sat_vars() noexcept {
+void SequentialEncoder::init_sat_vars() {
   actions_.reserve(problem_->actions.size());
   auto last_parameter = [](const auto &action) {
     return static_cast<size_t>(std::distance(
         action.parameters.begin(),
         std::find_if(action.parameters.rbegin(), action.parameters.rend(),
-                     [](const auto &p) { return !p.is_constant(); })
+                     [](const Parameter &p) { return p.is_free(); })
             .base()));
   };
   parameters_.resize(last_parameter(
@@ -125,8 +111,8 @@ bool SequentialEncoder::init_sat_vars() noexcept {
     actions_.push_back(num_vars_++);
   }
 
-  predicates_.resize(support_.get_num_instantiations());
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+  predicates_.resize(support_.get_num_ground_atoms());
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
     if (support_.is_rigid(Support::PredicateId{i}, true)) {
       predicates_[i] = SAT;
     } else if (support_.is_rigid(Support::PredicateId{i}, false)) {
@@ -135,19 +121,17 @@ bool SequentialEncoder::init_sat_vars() noexcept {
       predicates_[i] = num_vars_++;
     }
   }
-  return true;
 }
 
-bool SequentialEncoder::encode_init() noexcept {
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+void SequentialEncoder::encode_init() {
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
     auto literal = Literal{Variable{predicates_[i]},
                            support_.is_init(Support::PredicateId{i})};
     init_ << literal << sat::EndClause;
   }
-  return true;
 }
 
-bool SequentialEncoder::encode_actions() noexcept {
+void SequentialEncoder::encode_actions() {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < parameters_.size(); ++i) {
     std::vector<Variable> all_arguments;
@@ -165,17 +149,17 @@ bool SequentialEncoder::encode_actions() noexcept {
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.is_constant()) {
+      if (!parameter.is_free()) {
         continue;
       }
       const auto &constants_by_type =
-          problem_->constants_by_type[parameter.get_type()];
+          problem_->constants_of_type[parameter.get_type().id];
       universal_clauses_ << Literal{action_var, false};
       for (size_t constant_index = 0; constant_index < constants_by_type.size();
            ++constant_index) {
         universal_clauses_ << Literal{
-            Variable{
-                parameters_[parameter_pos][constants_by_type[constant_index]]},
+            Variable{parameters_[parameter_pos]
+                                [constants_by_type[constant_index].id]},
             true};
       }
       universal_clauses_ << sat::EndClause;
@@ -185,14 +169,13 @@ bool SequentialEncoder::encode_actions() noexcept {
   }
   clause_count += universal_clauses_.at_most_one(all_actions);
   LOG_INFO(encoding_logger, "Action clauses: %lu", clause_count);
-  return true;
 }
 
-bool SequentialEncoder::parameter_implies_predicate() noexcept {
+void SequentialEncoder::parameter_implies_predicate() {
   uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
+    if (global_timer.get_elapsed_time() > config.timeout) {
+      throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
       for (bool is_effect : {true, false}) {
@@ -200,9 +183,9 @@ bool SequentialEncoder::parameter_implies_predicate() noexcept {
         for (const auto &[action_index, assignment] : support_.get_support(
                  Support::PredicateId{i}, positive, is_effect)) {
           formula << Literal{Variable{actions_[action_index]}, false};
-          for (auto [parameter_index, constant_index] : assignment) {
+          for (auto [parameter_index, constant] : assignment) {
             formula << Literal{
-                Variable{parameters_[parameter_index][constant_index]}, false};
+                Variable{parameters_[parameter_index][constant.id]}, false};
           }
           formula << Literal{Variable{predicates_[i], !is_effect}, positive}
                   << sat::EndClause;
@@ -212,14 +195,13 @@ bool SequentialEncoder::parameter_implies_predicate() noexcept {
     }
   }
   LOG_INFO(encoding_logger, "Implication clauses: %lu", clause_count);
-  return true;
 }
 
-bool SequentialEncoder::frame_axioms() noexcept {
+void SequentialEncoder::frame_axioms() {
   uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
+    if (global_timer.get_elapsed_time() > config.timeout) {
+      throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
       bool use_helper = false;
@@ -250,10 +232,10 @@ bool SequentialEncoder::frame_axioms() noexcept {
                 << Literal{Variable{actions_[action_index]}, true};
             universal_clauses_ << sat::EndClause;
             ++clause_count;
-            for (auto [parameter_index, constant_index] : assignment) {
+            for (auto [parameter_index, constant] : assignment) {
               universal_clauses_ << Literal{Variable{it->second}, false};
               universal_clauses_ << Literal{
-                  Variable{parameters_[parameter_index][constant_index]}, true};
+                  Variable{parameters_[parameter_index][constant.id]}, true};
               universal_clauses_ << sat::EndClause;
             }
             ++num_vars_;
@@ -262,9 +244,9 @@ bool SequentialEncoder::frame_axioms() noexcept {
           dnf << Literal{Variable{it->second}, true};
         } else {
           dnf << Literal{Variable{actions_[action_index]}, true};
-          for (auto [parameter_index, constant_index] : assignment) {
-            dnf << Literal{
-                Variable{parameters_[parameter_index][constant_index]}, true};
+          for (auto [parameter_index, constant] : assignment) {
+            dnf << Literal{Variable{parameters_[parameter_index][constant.id]},
+                           true};
           }
         }
         dnf << sat::EndClause;
@@ -273,13 +255,11 @@ bool SequentialEncoder::frame_axioms() noexcept {
     }
   }
   LOG_INFO(encoding_logger, "Frame axiom clauses: %lu", clause_count);
-  return true;
 }
 
-bool SequentialEncoder::assume_goal() noexcept {
+void SequentialEncoder::assume_goal() {
   for (const auto &[goal, positive] : problem_->goal) {
     goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;
   }
-  return true;
 }

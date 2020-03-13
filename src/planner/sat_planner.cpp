@@ -26,31 +26,23 @@ get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept {
     return std::make_unique<LiftedForeachEncoder>(problem);
   case Config::Encoding::Exists:
     return std::make_unique<ExistsEncoder>(problem);
-  case Config::Encoding::TrueExists:
-    /* return std::make_unique<ExistsEncoder>(problem, config); */
-    return std::make_unique<ForeachEncoder>(problem);
   }
   return std::make_unique<ForeachEncoder>(problem);
 }
 
-Planner::Status
-SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
-                           unsigned int max_steps,
-                           std::chrono::seconds timeout) noexcept {
+Plan SatPlanner::find_plan_impl(
+    const std::shared_ptr<normalized::Problem> &problem,
+    util::Seconds timeout) {
   util::Timer timer;
-  auto check_timeout = [&]() {
-    if (config.check_timeout() ||
-        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                             timer.get_elapsed_time()) >= timeout)) {
-      return true;
-    }
-    return false;
-  };
 
-  auto encoder = get_encoder(problem);
-  if (!encoder->is_initialized()) {
-    return Status::Timeout;
+  std::unique_ptr<Encoder> encoder;
+  try {
+    encoder = get_encoder(problem);
+  } catch (const TimeoutException &e) {
+    LOG_ERROR(planner_logger, "Encoding timed out");
+    throw;
   }
+
   sat::IpasirSolver solver;
   solver << static_cast<int>(Encoder::SAT) << 0;
   solver << -static_cast<int>(Encoder::UNSAT) << 0;
@@ -58,14 +50,12 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
   add_formula(solver, encoder->get_universal_clauses(), 0, *encoder);
 
   unsigned int step = 0;
+  unsigned int skipped_steps = 0;
   float current_step = 1.0f;
   while (true) {
     solver.next_step();
-    if (max_steps > 0 && step >= max_steps) {
-      return Status::MaxStepsExceeded;
-    }
-    if (check_timeout()) {
-      return Status::Timeout;
+    if (timer.get_elapsed_time() > timeout) {
+      break;
     }
     do {
       add_formula(solver, encoder->get_transition_clauses(), step, *encoder);
@@ -75,45 +65,40 @@ SatPlanner::find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
 
     assume_goal(solver, step, *encoder);
 
-    auto searchtime = 0s;
-    if (timeout > 0s) {
-      searchtime = std::max(std::chrono::ceil<std::chrono::seconds>(
-                                timeout - timer.get_elapsed_time()),
-                            1s);
-    }
+    auto solve_timeout = skipped_steps >= config.max_skip_steps
+                             ? util::inf_time
+                             : config.solver_timeout;
 
-    if (searchtime == 0s) {
+    if (solve_timeout == util::inf_time) {
       LOG_INFO(planner_logger, "Trying to solve step %u", step);
     } else {
-      LOG_INFO(planner_logger, "Trying %lu seconsd to solve step %u",
-               searchtime.count(), step);
+      LOG_INFO(planner_logger, "Trying to solve step %u for %.2f seconds", step,
+               solve_timeout.count());
     }
+
     util::Timer step_timer;
-    solver.solve(searchtime);
-    LOG_INFO(
-        planner_logger, "Solving step %u took %.2f seconds", step,
-        std::chrono::duration<float>(step_timer.get_elapsed_time()).count());
+    solver.solve(timeout - timer.get_elapsed_time(), solve_timeout);
+    LOG_INFO(planner_logger, "Solving step %u took %.2f seconds", step,
+             util::Seconds{step_timer.get_elapsed_time()}.count());
 
     switch (solver.get_status()) {
     case sat::Solver::Status::Solved:
-      plan_ = encoder->extract_plan(solver.get_model(), step);
-      return Status::Success;
+      return encoder->extract_plan(solver.get_model(), step);
     case sat::Solver::Status::Timeout:
-      return Status::Timeout;
-    case sat::Solver::Status::Error:
-      return Status::Error;
+      break;
     case sat::Solver::Status::Unsolvable:
+      skipped_steps = 0;
       break;
     case sat::Solver::Status::Skip:
       LOG_INFO(planner_logger, "Skipped step %u", step);
+      ++skipped_steps;
       break;
     default:
       assert(false);
     }
     current_step *= config.step_factor;
   }
-  assert(false);
-  return Status::Error;
+  throw TimeoutException{};
 }
 
 void SatPlanner::add_formula(sat::Solver &solver,

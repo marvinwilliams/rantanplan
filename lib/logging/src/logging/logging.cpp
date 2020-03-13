@@ -1,6 +1,7 @@
 #include "logging/logging.hpp"
 #include "build_config.hpp"
 #include "config.hpp"
+#include "grounder/grounder.hpp"
 #include "util/timer.hpp"
 
 #include <cstdarg>
@@ -12,6 +13,7 @@
 #include <vector>
 
 extern Config config;
+extern util::Timer global_timer;
 
 namespace logging {
 
@@ -86,9 +88,7 @@ void Logger::log(Level level, const char *file, unsigned int line,
   std::time_t time = std::time(nullptr);
   std::strftime(time_buffer.data(), time_buffer.size(), "%F %T",
                 std::localtime(&time));
-  auto uptime =
-      std::chrono::duration<float>(config.global_timer.get_elapsed_time())
-          .count();
+  auto uptime = util::Seconds(global_timer.get_elapsed_time()).count();
   auto format_message = [&](char *buffer, size_t length) {
     if (line == 0) {
       return snprintf(buffer, length, "%s (%.3f) %s [%s]: %s",

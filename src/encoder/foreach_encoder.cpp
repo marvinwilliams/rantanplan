@@ -14,36 +14,20 @@
 
 using namespace normalized;
 
-ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem) noexcept
+ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem)
     : Encoder{problem}, support_{*problem} {
-  if (!support_.is_initialized()) {
-    return;
-  }
   LOG_INFO(encoding_logger, "Init sat variables...");
-  if (!init_sat_vars()) {
-    return;
-  }
+  init_sat_vars();
+
   LOG_INFO(encoding_logger, "Encode problem...");
-  if (!encode_init()) {
-    return;
-  }
-  if (!encode_actions()) {
-    return;
-  }
-  if (!parameter_implies_predicate()) {
-    return;
-  }
-  if (!interference()) {
-    return;
-  }
-  if (!frame_axioms()) {
-    return;
-  }
-  if (!assume_goal()) {
-    return;
-  }
+  encode_init();
+  encode_actions();
+  parameter_implies_predicate();
+  interference();
+  frame_axioms();
+  assume_goal();
   num_vars_ -= 3; // subtract SAT und UNSAT for correct step semantics
-  initialized_ = true;
+
   LOG_INFO(encoding_logger, "Variables per step: %lu", num_vars_);
   LOG_INFO(encoding_logger, "Helper variables to mitigate dnf explosion: %lu",
            std::accumulate(
@@ -78,19 +62,20 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
     for (size_t i = 0; i < problem_->actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
         const Action &action = problem_->actions[i];
-        std::vector<ConstantIndex> constants;
+        std::vector<Constant> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
           auto &parameter = action.parameters[parameter_pos];
-          if (parameter.is_constant()) {
+          if (!parameter.is_free()) {
             constants.push_back(parameter.get_constant());
           } else {
             for (size_t j = 0;
-                 j < problem_->constants_by_type[parameter.get_type()].size();
+                 j <
+                 problem_->constants_of_type[parameter.get_type().id].size();
                  ++j) {
               if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
                 constants.push_back(
-                    problem_->constants_by_type[parameter.get_type()][j]);
+                    problem_->constants_of_type[parameter.get_type().id][j]);
                 break;
               }
             }
@@ -104,7 +89,7 @@ Plan ForeachEncoder::extract_plan(const sat::Model &model,
   return plan;
 }
 
-bool ForeachEncoder::init_sat_vars() noexcept {
+void ForeachEncoder::init_sat_vars() {
   actions_.reserve(problem_->actions.size());
   parameters_.resize(problem_->actions.size());
   dnf_helpers_.resize(problem_->actions.size());
@@ -117,20 +102,21 @@ bool ForeachEncoder::init_sat_vars() noexcept {
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.is_constant()) {
+      if (!parameter.is_free()) {
         continue;
       }
       parameters_[i][parameter_pos].reserve(
-          problem_->constants_by_type[parameter.get_type()].size());
+          problem_->constants_of_type[parameter.get_type().id].size());
       for (size_t j = 0;
-           j < problem_->constants_by_type[parameter.get_type()].size(); ++j) {
+           j < problem_->constants_of_type[parameter.get_type().id].size();
+           ++j) {
         parameters_[i][parameter_pos].push_back(num_vars_++);
       }
     }
   }
 
-  predicates_.resize(support_.get_num_instantiations());
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+  predicates_.resize(support_.get_num_ground_atoms());
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
     if (support_.is_rigid(Support::PredicateId{i}, true)) {
       predicates_[i] = SAT;
     } else if (support_.is_rigid(Support::PredicateId{i}, false)) {
@@ -139,30 +125,24 @@ bool ForeachEncoder::init_sat_vars() noexcept {
       predicates_[i] = num_vars_++;
     }
   }
-  return true;
 }
 
 size_t ForeachEncoder::get_constant_index(ConstantIndex constant,
                                           TypeIndex type) const noexcept {
-  for (size_t i = 0; i < problem_->constants_by_type[type].size(); ++i) {
-    if (problem_->constants_by_type[type][i] == constant) {
-      return i;
-    }
-  }
-  assert(false);
-  return problem_->constants_by_type[type].size();
+  auto it = problem_->constant_type_map[type].find(constant);
+  assert(it != problem_->constant_type_map[type].end());
+  return it->second;
 }
 
-bool ForeachEncoder::encode_init() noexcept {
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
+void ForeachEncoder::encode_init() {
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
     auto literal = Literal{Variable{predicates_[i]},
                            support_.is_init(Support::PredicateId{i})};
     init_ << literal << sat::EndClause;
   }
-  return true;
 }
 
-bool ForeachEncoder::encode_actions() noexcept {
+void ForeachEncoder::encode_actions() {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
     const auto &action = problem_->actions[i];
@@ -170,11 +150,11 @@ bool ForeachEncoder::encode_actions() noexcept {
     for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
          ++parameter_pos) {
       const auto &parameter = action.parameters[parameter_pos];
-      if (parameter.is_constant()) {
+      if (!parameter.is_free()) {
         continue;
       }
       size_t number_arguments =
-          problem_->constants_by_type[parameter.get_type()].size();
+          problem_->constants_of_type[parameter.get_type().id].size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
       universal_clauses_ << Literal{action_var, false};
@@ -198,14 +178,13 @@ bool ForeachEncoder::encode_actions() noexcept {
     }
   }
   LOG_INFO(encoding_logger, "Action clauses: %lu", clause_count);
-  return true;
 }
 
-bool ForeachEncoder::parameter_implies_predicate() noexcept {
+void ForeachEncoder::parameter_implies_predicate() {
   uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
+    if (global_timer.get_elapsed_time() > config.timeout) {
+      throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
       for (bool is_effect : {true, false}) {
@@ -215,11 +194,12 @@ bool ForeachEncoder::parameter_implies_predicate() noexcept {
           if (!config.parameter_implies_action || assignment.empty()) {
             formula << Literal{Variable{actions_[action_index]}, false};
           }
-          for (auto [parameter_index, constant_index] : assignment) {
-            auto index = get_constant_index(constant_index,
-                                            problem_->actions[action_index]
-                                                .parameters[parameter_index]
-                                                .get_type());
+          for (const auto &[parameter_index, constant] : assignment) {
+            auto index =
+                get_constant_index(constant.id, problem_->actions[action_index]
+                                                    .parameters[parameter_index]
+                                                    .get_type()
+                                                    .id);
             formula << Literal{
                 Variable{parameters_[action_index][parameter_index][index]},
                 false};
@@ -232,14 +212,13 @@ bool ForeachEncoder::parameter_implies_predicate() noexcept {
     }
   }
   LOG_INFO(encoding_logger, "Implication clauses: %lu", clause_count);
-  return true;
 }
 
-bool ForeachEncoder::interference() noexcept {
+void ForeachEncoder::interference() {
   uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
+    if (global_timer.get_elapsed_time() > config.timeout) {
+      throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
       const auto &precondition_support =
@@ -258,11 +237,12 @@ bool ForeachEncoder::interference() noexcept {
               universal_clauses_
                   << Literal{Variable{actions_[action_index]}, false};
             }
-            for (auto [parameter_index, constant_index] : assignment) {
-              auto index = get_constant_index(constant_index,
+            for (const auto &[parameter_index, constant] : assignment) {
+              auto index = get_constant_index(constant.id,
                                               problem_->actions[action_index]
                                                   .parameters[parameter_index]
-                                                  .get_type());
+                                                  .get_type()
+                                                  .id);
               universal_clauses_ << Literal{
                   Variable{parameters_[action_index][parameter_index][index]},
                   false};
@@ -275,14 +255,13 @@ bool ForeachEncoder::interference() noexcept {
     }
   }
   LOG_INFO(encoding_logger, "Interference clauses: %lu", clause_count);
-  return true;
 }
 
-bool ForeachEncoder::frame_axioms() noexcept {
+void ForeachEncoder::frame_axioms() {
   uint_fast64_t clause_count = 0;
-  for (size_t i = 0; i < support_.get_num_instantiations(); ++i) {
-    if (config.check_timeout()) {
-      return false;
+  for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
+    if (global_timer.get_elapsed_time() > config.timeout) {
+      throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
       bool use_helper = false;
@@ -316,11 +295,12 @@ bool ForeachEncoder::frame_axioms() noexcept {
               universal_clauses_ << sat::EndClause;
               ++clause_count;
             }
-            for (auto [parameter_index, constant_index] : assignment) {
-              auto index = get_constant_index(constant_index,
+            for (const auto &[parameter_index, constant] : assignment) {
+              auto index = get_constant_index(constant.id,
                                               problem_->actions[action_index]
                                                   .parameters[parameter_index]
-                                                  .get_type());
+                                                  .get_type()
+                                                  .id);
               universal_clauses_ << Literal{Variable{it->second}, false};
               universal_clauses_ << Literal{
                   Variable{parameters_[action_index][parameter_index][index]},
@@ -335,11 +315,12 @@ bool ForeachEncoder::frame_axioms() noexcept {
           if (!config.parameter_implies_action || assignment.empty()) {
             dnf << Literal{Variable{actions_[action_index]}, true};
           }
-          for (auto [parameter_index, constant_index] : assignment) {
-            auto index = get_constant_index(constant_index,
-                                            problem_->actions[action_index]
-                                                .parameters[parameter_index]
-                                                .get_type());
+          for (const auto &[parameter_index, constant] : assignment) {
+            auto index =
+                get_constant_index(constant.id, problem_->actions[action_index]
+                                                    .parameters[parameter_index]
+                                                    .get_type()
+                                                    .id);
             dnf << Literal{
                 Variable{parameters_[action_index][parameter_index][index]},
                 true};
@@ -351,13 +332,11 @@ bool ForeachEncoder::frame_axioms() noexcept {
     }
   }
   LOG_INFO(encoding_logger, "Frame axiom clauses: %lu", clause_count);
-  return true;
 }
 
-bool ForeachEncoder::assume_goal() noexcept {
+void ForeachEncoder::assume_goal() {
   for (const auto &[goal, positive] : problem_->goal) {
     goal_ << Literal{Variable{predicates_[support_.get_id(goal)]}, positive}
           << sat::EndClause;
   }
-  return true;
 }

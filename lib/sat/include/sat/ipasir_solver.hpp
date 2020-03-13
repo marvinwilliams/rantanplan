@@ -2,6 +2,7 @@
 #define IPASIR_SOLVER_HPP
 
 #include "config.hpp"
+#include "grounder/grounder.hpp"
 #include "sat/model.hpp"
 #include "sat/solver.hpp"
 #include "util/timer.hpp"
@@ -10,9 +11,8 @@ extern "C" {
 #include "ipasir.h"
 }
 
-#include <chrono>
-
 extern Config config;
+extern util::Timer global_timer;
 
 namespace sat {
 
@@ -30,7 +30,8 @@ public:
 private:
   void add_impl(int l) noexcept override;
   void assume_impl(int l) noexcept override;
-  Status solve_impl(std::chrono::seconds timeout) noexcept override;
+  Status solve_impl(util::Seconds timeout,
+                    util::Seconds solve_timeout) noexcept override;
 
   void *handle_ = nullptr;
   unsigned int num_vars_ = 0;

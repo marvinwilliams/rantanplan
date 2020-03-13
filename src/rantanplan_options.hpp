@@ -4,59 +4,68 @@
 #include "config.hpp"
 #include "logging/logging.hpp"
 #include "options/options.hpp"
+#include "util/timer.hpp"
 
 #include <string>
 
 extern logging::Logger main_logger;
-extern Config config;
 
 inline options::Options set_options(const std::string &name) {
   options::Options options(name);
+
+  // General
+  options.add_option<bool>({"help", 'h'}, "Display usage information");
   options.add_positional_option<std::string>("domain", "The pddl domain file");
   options.add_positional_option<std::string>("problem",
                                              "The pddl problem file");
   options.add_option<std::string>({"planning-mode", 'm'}, "Planning mode");
-  options.add_option<unsigned int>({"timeout", 't'}, "Timeout");
+  options.add_option<float>({"timeout", 't'},
+                            "Global planner timeout in seconds");
   options.add_option<std::string>({"plan-file", 'o'},
                                   "File to output the plan to");
-  options.add_option<std::string>({"preprocess-mode", 'c'},
+
+  // Grounding
+  options.add_option<std::string>({"parameter-selection", 's'},
                                   "Select preprocess mode");
-  options.add_option<bool>({"parallel-preprocess", 'p'},
-                           "Use parallel preprocessing");
-  options.add_option<float>({"preprocess-progress", 'r'},
-                            "Limit preprocessing progress to this percentage");
+  options.add_option<std::string>({"pruning-mode", 'x'}, "Select pruning mode");
+  options.add_option<std::string>({"operator-priority", 'p'},
+                                  "Select operator priority");
+  options.add_option<std::string>({"cache-policy", 'c'},
+                                  "Select cache priority");
+  options.add_option<std::string>({"pruning-policy", 'l'},
+                                  "Select pruning priority");
+  options.add_option<float>({"target-groundness", 'r'},
+                            "Specify target groundness");
+  options.add_option<unsigned int>({"granularity", 'g'}, "Specify granularity");
+  options.add_option<float>({"grounding-timeout", 'w'},
+                            "Time for grounding before timing out");
+
+  // Encoding
   options.add_option<std::string>({"encoding", 'e'}, "Encoding to use");
-  options.add_option<std::string>({"solver", 's'},
-                                  "Select sat solver interface");
-  options.add_option<float>({"step-factor", 'f'}, "Step factor");
-  options.add_option<unsigned int>({"max-steps", 'l'},
-                                   "Maximum number of steps");
   options.add_option<bool>({"imply-action", 'y'}, "Parameters imply actions");
-  options.add_option<bool>({"skip-step", 'k'}, "Skip steps that take too long");
-  options.add_option<unsigned int>({"num-solvers", 'i'},
-                                   "Maximum number solvers");
-  options.add_option<unsigned int>(
-      {"solver-timeout", 'u'},
-      "Time for individual solvers before getting interrupted");
-  options.add_option<unsigned int>(
-      {"preprocess-timeout", 'w'},
-      "Time for individual preprocessing steps before getting interrupted");
-  options.add_option<unsigned int>({"num-threads", 'j'}, "Number of threads");
   options.add_option<unsigned int>({"dnf-threshold", 'd'}, "DNF threshold");
+
+  // Planning
+  options.add_option<float>({"step-factor", 'f'}, "Step factor");
+  options.add_option<unsigned int>(
+      {"max-skip-steps", 'k'}, "Maximum number of steps to consecutively skip");
+  options.add_option<float>({"step-timeout", 'u'},
+                                   "Time for each step before skipping");
+  options.add_option<float>({"solver-timeout", 'z'},
+                                   "Time for solvers before being aborted");
+
+#ifdef PARALLEL
+  // Parallel
+  options.add_option<unsigned int>({"num-threads", 'j'}, "Number of threads");
+#endif
+
+  // Logging
   options.add_option<bool>({"debug-log", 'v'}, "Enable debug logging");
-  options.add_option<bool>({"log-parser", 'R'},
-                           "Enable debug output for the parser");
-  options.add_option<bool>({"log-preprocess", 'P'},
-                           "Enable debug output for the preprocessing");
-  options.add_option<bool>({"log-normalize", 'N'},
-                           "Enable debug output for normalizing");
-  options.add_option<bool>({"log-encoding", 'E'},
-                           "Enable debug output for the encoder");
-  options.add_option<bool>({"help", 'h'}, "Display usage information");
+
   return options;
 }
 
-inline void set_config(const options::Options &options) {
+inline void set_config(const options::Options &options, Config &config) {
   if (const auto &domain = options.get<std::string>("domain");
       domain.count > 0) {
     config.domain_file = domain.value;
@@ -75,38 +84,72 @@ inline void set_config(const options::Options &options) {
     config.parse_planning_mode(o.value);
   }
 
-  if (const auto &o = options.get<unsigned int>("timeout"); o.count > 0) {
-    config.timeout = std::chrono::seconds{o.value};
+  if (const auto &o = options.get<float>("timeout"); o.count > 0) {
+    if (o.value == 0) {
+      config.timeout = util::inf_time;
+    } else {
+      config.timeout = util::Seconds{o.value};
+    }
   }
 
   if (const auto &o = options.get<std::string>("plan-file"); o.count > 0) {
-    if (o.value == "") {
-      throw ConfigException{"Plan file must not be empty"};
-    }
     config.plan_file = o.value;
   }
 
-  if (const auto &o = options.get<std::string>("preprocess-mode");
+  if (const auto &o = options.get<std::string>("parameter-selection");
       o.count > 0) {
-    config.parse_preprocess_mode(o.value);
+    config.parse_parameter_selection(o.value);
   }
 
-  config.parallel_preprocess =
-      options.get<bool>("parallel-preprocess").count > 0;
+  if (const auto &o = options.get<std::string>("pruning-mode"); o.count > 0) {
+    config.parse_pruning_mode(o.value);
+  }
 
-  if (const auto &o = options.get<float>("preprocess-progress"); o.count > 0) {
+  if (const auto &o = options.get<std::string>("operator-priority");
+      o.count > 0) {
+    config.parse_operator_priority(o.value);
+  }
+
+  if (const auto &o = options.get<std::string>("cache-policy");
+      o.count > 0) {
+    config.parse_cache_policy(o.value);
+  }
+
+  if (const auto &o = options.get<std::string>("pruning-policy");
+      o.count > 0) {
+    config.parse_pruning_policy(o.value);
+  }
+
+  if (const auto &o = options.get<float>("target-groundness"); o.count > 0) {
     if (o.value < 0.0f || o.value > 1.0f) {
-      LOG_WARN(main_logger, "Preprocess progress should be within [0, 1]");
+      LOG_WARN(
+          main_logger,
+          "Target groundness should be within [0, 1]. Value will be clamped");
     }
-    config.preprocess_progress = std::clamp(o.value, 0.0f, 1.0f);
+    config.target_groundness = std::clamp(o.value, 0.0f, 1.0f);
+  }
+
+  if (const auto &o = options.get<unsigned int>("granularity"); o.count > 0) {
+    config.granularity = o.value;
+  }
+
+  if (const auto &o = options.get<float>("grounding-timeout");
+      o.count > 0) {
+    if (o.value == 0) {
+      config.grounding_timeout = util::inf_time;
+    } else {
+      config.grounding_timeout = util::Seconds{o.value};
+    }
   }
 
   if (const auto &o = options.get<std::string>("encoding"); o.count > 0) {
     config.parse_encoding(o.value);
   }
 
-  if (const auto &o = options.get<std::string>("solver"); o.count > 0) {
-    config.parse_solver(o.value);
+  config.parameter_implies_action = options.get<bool>("imply-action").count > 0;
+
+  if (const auto &o = options.get<unsigned int>("dnf-threshold"); o.count > 0) {
+    config.dnf_threshold = o.value;
   }
 
   if (const auto &o = options.get<float>("step-factor"); o.count > 0) {
@@ -116,41 +159,36 @@ inline void set_config(const options::Options &options) {
     config.step_factor = std::max(o.value, 1.0f);
   }
 
-  if (const auto &o = options.get<unsigned int>("max-steps"); o.count > 0) {
-    config.max_steps = o.value;
+  if (const auto &o = options.get<unsigned int>("max-skip-steps");
+      o.count > 0) {
+    config.max_skip_steps = o.value;
   }
 
-  config.parameter_implies_action = options.get<bool>("imply-action").count > 0;
-
-  config.skip_step = options.get<bool>("skip-step").count > 0;
-
-  if (const auto &o = options.get<unsigned int>("num-solvers"); o.count > 0) {
-    if (o.value < 2) {
-      LOG_WARN(main_logger, "Number of solvers should be at least 2");
+  if (const auto &o = options.get<float>("step-timeout"); o.count > 0) {
+    if (o.value == 0) {
+      config.step_timeout = util::inf_time;
+    } else {
+      config.step_timeout = util::Seconds{o.value};
     }
-    config.num_solvers = std::max(o.value, 2u);
   }
 
-  if (const auto &o = options.get<unsigned int>("solver-timeout");
+  if (const auto &o = options.get<float>("solver-timeout");
       o.count > 0) {
-    config.solver_timeout = std::chrono::seconds{o.value};
+    if (o.value == 0) {
+      config.solver_timeout = util::inf_time;
+    } else {
+      config.solver_timeout = util::Seconds{o.value};
+    }
   }
 
-  if (const auto &o = options.get<unsigned int>("preprocess-timeout");
-      o.count > 0) {
-    config.preprocess_timeout = std::chrono::seconds{o.value};
-  }
-
+#ifdef PARALLEL
   if (const auto &o = options.get<unsigned int>("num-threads"); o.count > 0) {
     if (o.value < 1) {
       LOG_WARN(main_logger, "Number of threads should be at least 1");
     }
     config.num_threads = std::max(o.value, 1u);
   }
-
-  if (const auto &o = options.get<unsigned int>("dnf-threshold"); o.count > 0) {
-    config.dnf_threshold = o.value;
-  }
+#endif
 
   if (options.get<bool>("debug-log").count > 0) {
     config.log_level = logging::Level::DEBUG;

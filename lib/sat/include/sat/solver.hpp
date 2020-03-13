@@ -2,6 +2,7 @@
 #define SOLVER_HPP
 
 #include "sat/model.hpp"
+#include "util/timer.hpp"
 
 #include <chrono>
 #include <optional>
@@ -11,12 +12,12 @@ namespace sat {
 
 class Solver {
 public:
-  enum class Status { Constructing, Solved, Unsolvable, Skip, Timeout, Error };
+  enum class Status { Constructing, Solved, Unsolvable, Skip, Timeout };
 
   Solver &add(int l);
   Solver &operator<<(int l);
   void assume(int l);
-  void solve(std::chrono::seconds timeout);
+  void solve(util::Seconds timeout, util::Seconds solve_timeout);
   Status get_status() const;
   const Model &get_model() const;
 
@@ -29,7 +30,8 @@ protected:
 private:
   virtual void add_impl(int l) = 0;
   virtual void assume_impl(int l) = 0;
-  virtual Status solve_impl(std::chrono::seconds timeout) = 0;
+  virtual Status solve_impl(util::Seconds timeout,
+                            util::Seconds solve_timeout) = 0;
 };
 
 } // namespace sat

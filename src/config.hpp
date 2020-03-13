@@ -3,6 +3,7 @@
 
 #include "logging/logging.hpp"
 #include "options/options.hpp"
+#include "util/timer.hpp"
 
 #include <chrono>
 #include <exception>
@@ -26,23 +27,30 @@ struct Config {
   enum class PlanningMode {
     Parse,
     Normalize,
-    Preprocess,
+    Ground,
+    Fixed,
     Oneshot,
-    Interrupt,
+    Interrupt
+#ifdef PARALLEL
+    ,
     Parallel
+#endif
   };
-  enum class PreprocessMode {
-    Free,
-    New,
-    Rigid,
-    ApproxNew,
-    ApproxRigid,
-    OneEffect
+  enum class ParameterSelection {
+    MostFrequent,
+    MinNew,
+    MaxRigid,
+    ApproxMinNew,
+    ApproxMaxRigid,
+    FirstEffect
   };
-  enum class Encoding { Sequential, Foreach, LiftedForeach, Exists, TrueExists };
+  enum class PruningMode { None, Cache, ReferenceCounting };
+  enum class OperatorPriority { PriorityQueue, Iterative };
+  enum class CachePolicy { None, NoUnsuccessful, Unsuccessful };
+  enum class PruningPolicy { Eager, Ground, Trivial };
+  enum class Encoding { Sequential, Foreach, LiftedForeach, Exists };
   enum class Solver { Ipasir };
 
-  const util::Timer global_timer;
 #ifdef PARALLEL
   std::atomic_bool global_stop_flag = false;
 #endif
@@ -51,33 +59,38 @@ struct Config {
   std::string domain_file = "";
   std::string problem_file = "";
   PlanningMode planning_mode = PlanningMode::Oneshot;
-  std::chrono::seconds timeout = std::chrono::seconds::zero();
-  std::optional<std::string> plan_file;
+  util::Seconds timeout = util::inf_time;
+  std::optional<std::string> plan_file = std::nullopt;
 
-  // Preprocess
-  PreprocessMode preprocess_mode = PreprocessMode::ApproxRigid;
-  bool parallel_preprocess = false;
-  float preprocess_progress = 1.0f;
+  // Grounding
+  ParameterSelection parameter_selection = ParameterSelection::MaxRigid;
+  PruningMode pruning_mode = PruningMode::Cache;
+  OperatorPriority operator_priority = OperatorPriority::PriorityQueue;
+  CachePolicy cache_policy = CachePolicy::Unsuccessful;
+  PruningPolicy pruning_policy = PruningPolicy::Ground;
+  float target_groundness = 1.0f;
+  unsigned int granularity = 3;
+  util::Seconds grounding_timeout = util::inf_time;
 
-  // Planning
+  // Encoding
   Encoding encoding = Encoding::Foreach;
-  Solver solver = Solver::Ipasir;
-  float step_factor = 1.4f;
-  unsigned int max_steps = 0; // 0: Infinity
   bool parameter_implies_action = false;
-  bool skip_step = false;
-  // For interrupt planning
-  unsigned int num_solvers = 2;
-  std::chrono::seconds solver_timeout = std::chrono::seconds{0};
-  std::chrono::seconds preprocess_timeout = std::chrono::seconds{0};
-
-  // Parallel
-  unsigned int num_threads = 1;
-
   // Number of dnf clauses with more than 1 literal to be converted to cnf.
   // Above this limit, helper variables are introduced to mitigate a too high
   // clause count.
   unsigned int dnf_threshold = 4;
+
+  // Planning
+  Solver solver = Solver::Ipasir;
+  float step_factor = 1.4f;
+  unsigned int max_skip_steps = 3;
+  util::Seconds step_timeout = util::Seconds{10};
+  util::Seconds solver_timeout = util::Seconds{60};
+
+#ifdef PARALLEL
+  // Parallel
+  unsigned int num_threads = 2;
+#endif
 
   // Logging
   logging::Level log_level = logging::Level::INFO;
@@ -87,14 +100,18 @@ struct Config {
       planning_mode = PlanningMode::Parse;
     } else if (input == "normalize") {
       planning_mode = PlanningMode::Normalize;
-    } else if (input == "preprocess") {
-      planning_mode = PlanningMode::Preprocess;
+    } else if (input == "ground") {
+      planning_mode = PlanningMode::Ground;
+    } else if (input == "fixed") {
+      planning_mode = PlanningMode::Fixed;
     } else if (input == "oneshot") {
       planning_mode = PlanningMode::Oneshot;
     } else if (input == "interrupt") {
       planning_mode = PlanningMode::Interrupt;
+#ifdef PARALLEL
     } else if (input == "parallel") {
       planning_mode = PlanningMode::Parallel;
+#endif
     } else {
       throw ConfigException{"Unknown planning mode \'" + std::string{input} +
                             "\'"};
@@ -110,52 +127,78 @@ struct Config {
       encoding = Encoding::LiftedForeach;
     } else if (input == "e" || input == "exists") {
       encoding = Encoding::Exists;
-    } else if (input == "te" || input == "trueexists") {
-      encoding = Encoding::TrueExists;
     } else {
       throw ConfigException{"Unknown encoding \'" + std::string{input} + "\'"};
     }
   }
 
-  void parse_preprocess_mode(const std::string &input) {
-    if (input == "free") {
-      preprocess_mode = PreprocessMode::Free;
-    } else if (input == "new") {
-      preprocess_mode = PreprocessMode::New;
-    } else if (input == "rigid") {
-      preprocess_mode = PreprocessMode::Rigid;
-    } else if (input == "approxnew") {
-      preprocess_mode = PreprocessMode::ApproxNew;
-    } else if (input == "approxrigid") {
-      preprocess_mode = PreprocessMode::ApproxRigid;
-    } else if (input == "effect") {
-      preprocess_mode = PreprocessMode::OneEffect;
+  void parse_parameter_selection(const std::string &input) {
+    if (input == "mostfrequent") {
+      parameter_selection = ParameterSelection::MostFrequent;
+    } else if (input == "minnew") {
+      parameter_selection = ParameterSelection::MinNew;
+    } else if (input == "maxrigid") {
+      parameter_selection = ParameterSelection::MaxRigid;
+    } else if (input == "approxminnew") {
+      parameter_selection = ParameterSelection::ApproxMinNew;
+    } else if (input == "approxmaxrigid") {
+      parameter_selection = ParameterSelection::ApproxMaxRigid;
+    } else if (input == "firsteffect") {
+      parameter_selection = ParameterSelection::FirstEffect;
     } else {
-      throw ConfigException{"Unknown preprocess mode \'" + std::string{input} +
+      throw ConfigException{"Unknown parameter selection \'" +
+                            std::string{input} + "\'"};
+    }
+  }
+
+  void parse_pruning_mode(const std::string &input) {
+    if (input == "none") {
+      pruning_mode = PruningMode::None;
+    } else if (input == "cache") {
+      pruning_mode = PruningMode::Cache;
+    } else if (input == "referencecounting") {
+      pruning_mode = PruningMode::ReferenceCounting;
+    } else {
+      throw ConfigException{"Unknown pruning mode \'" + std::string{input} +
                             "\'"};
     }
   }
 
-  void parse_solver(const std::string &input) {
-    if (input == "ipasir") {
-      solver = Solver::Ipasir;
+  void parse_operator_priority(const std::string &input) {
+    if (input == "priorityqueue") {
+      operator_priority = OperatorPriority::PriorityQueue;
+    } else if (input == "iterative") {
+      operator_priority = OperatorPriority::Iterative;
     } else {
-      throw ConfigException{"Unknown solver \'" + std::string{input} + "\'"};
+      throw ConfigException{"Unknown operator priority \'" +
+                            std::string{input} + "\'"};
     }
   }
 
-  bool check_timeout() const noexcept {
-    if (timeout > std::chrono::seconds{0} &&
-        std::chrono::ceil<std::chrono::seconds>(
-            global_timer.get_elapsed_time()) >= timeout) {
-      return true;
+  void parse_cache_policy(const std::string &input) {
+    if (input == "none") {
+      cache_policy = CachePolicy::None;
+    } else if (input == "nounsuccessful") {
+      cache_policy = CachePolicy::NoUnsuccessful;
+    } else if (input == "unsuccessful") {
+      cache_policy = CachePolicy::Unsuccessful;
+    } else {
+      throw ConfigException{"Unknown cache policy \'" + std::string{input} +
+                            "\'"};
     }
-#ifdef PARALLEL
-    if (global_stop_flag.load(std::memory_order_acquire)) {
-      return true;
+  }
+
+  void parse_pruning_policy(const std::string &input) {
+    if (input == "eager") {
+      pruning_policy = PruningPolicy::Eager;
+    } else if (input == "ground") {
+      pruning_policy = PruningPolicy::Ground;
+    } else if (input == "trivial") {
+      pruning_policy = PruningPolicy::Trivial;
+    } else {
+      throw ConfigException{"Unknown pruning policy \'" + std::string{input} +
+                            "\'"};
     }
-#endif
-    return false;
   }
 };
 

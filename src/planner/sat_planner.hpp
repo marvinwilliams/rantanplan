@@ -17,9 +17,8 @@ get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
 class SatPlanner final : public Planner {
 private:
-  Status find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
-                        unsigned int max_steps,
-                        std::chrono::seconds timeout) noexcept override;
+  Plan find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
+                      util::Seconds timeout) override;
 
   void add_formula(sat::Solver &solver, const Encoder::Formula &formula,
                    unsigned int step, const Encoder &encoder) const noexcept;

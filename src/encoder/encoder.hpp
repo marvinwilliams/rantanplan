@@ -40,14 +40,9 @@ public:
   }
   const auto &get_goal_clauses() const noexcept { return goal_; }
 
-  bool is_initialized() const noexcept {
-    return initialized_;
-  }
-
   virtual ~Encoder() = default;
 
 protected:
-  bool initialized_ = false;
   Formula init_;
   Formula universal_clauses_;
   Formula transition_clauses_;
