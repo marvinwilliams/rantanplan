@@ -41,22 +41,17 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
   for (const auto &init : problem_->init) {
     init_[init.predicate].push_back(get_id(init));
   }
-  std::for_each(init_.begin(), init_.end(),
-                [](auto &i) { std::sort(i.begin(), i.end()); });
-
-  pos_goal_.resize(problem_->predicates.size());
-  neg_goal_.resize(problem_->predicates.size());
-  for (const auto &[goal, positive] : problem_->goal) {
-    if (positive) {
-      pos_goal_[goal.predicate].push_back(get_id(goal));
-    } else {
-      neg_goal_[goal.predicate].push_back(get_id(goal));
-    }
+  for (auto &i : init_) {
+    std::sort(i.begin(), i.end());
   }
-  std::for_each(pos_goal_.begin(), pos_goal_.end(),
-                [](auto &g) { std::sort(g.begin(), g.end()); });
-  std::for_each(neg_goal_.begin(), neg_goal_.end(),
-                [](auto &g) { std::sort(g.begin(), g.end()); });
+
+  goal_.resize(problem_->predicates.size());
+  for (const auto &[goal, positive] : problem_->goal) {
+    goal_[goal.predicate].push_back(get_id(goal));
+  }
+  for (auto &g : goal_) {
+    std::sort(g.begin(), g.end());
+  }
 
   actions_.reserve(problem_->actions.size());
 
@@ -91,6 +86,34 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
   });
 }
 
+bool Grounder::is_rigid(const GroundAtom &atom, bool positive) const noexcept {
+  switch (config.cache_policy) {
+  case Config::CachePolicy::None:
+    return is_rigid<false, false>(atom, positive);
+  case Config::CachePolicy::NoUnsuccessful:
+    return is_rigid<true, false>(atom, positive);
+  case Config::CachePolicy::Unsuccessful:
+    return is_rigid<true, true>(atom, positive);
+  default:
+    assert(false);
+    return is_rigid<true, true>(atom, positive);
+  }
+}
+
+bool Grounder::is_useless(const GroundAtom &atom) const noexcept {
+  switch (config.cache_policy) {
+  case Config::CachePolicy::None:
+    return is_useless<false, false>(atom);
+  case Config::CachePolicy::NoUnsuccessful:
+    return is_useless<true, false>(atom);
+  case Config::CachePolicy::Unsuccessful:
+    return is_useless<true, true>(atom);
+  default:
+    assert(false);
+    return is_useless<true, true>(atom);
+  }
+}
+
 void Grounder::refine(float groundness, util::Seconds timeout) {
   util::Timer timer;
 
@@ -110,20 +133,18 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
         if (!selection.empty()) {
           is_grounding = true;
         }
-        std::for_each(AssignmentIterator{selection, action, *problem_},
-                      AssignmentIterator{},
-                      [&](const ParameterAssignment &assignment) {
-                        Action new_action = action;
-                        ground(assignment, new_action);
-                        if (is_valid(new_action)) {
-                          simplify(new_action);
-                          new_actions.push_back(std::move(new_action));
-                        } else {
-                          new_pruned_actions +=
-                              get_num_instantiated(new_action, *problem_);
-                        }
-                      });
-      };
+        for (auto it = AssignmentIterator{selection, action, *problem_};
+             it != AssignmentIterator{}; ++it) {
+          Action new_action = action;
+          ground(*it, new_action);
+          if (is_valid(new_action)) {
+            simplify(new_action);
+            new_actions.push_back(std::move(new_action));
+          } else {
+            new_pruned_actions += get_num_instantiated(new_action, *problem_);
+          }
+        }
+      }
       num_pruned_actions_ += new_pruned_actions;
       action_list = std::move(new_actions);
       groundness_ =
@@ -170,10 +191,8 @@ bool Grounder::is_trivially_rigid(const GroundAtom &atom, bool positive) const
 
 bool Grounder::is_trivially_useless(const GroundAtom &atom) const noexcept {
   auto id = get_id(atom);
-  if (std::binary_search(pos_goal_[atom.predicate].begin(),
-                         pos_goal_[atom.predicate].end(), id) ||
-      std::binary_search(neg_goal_[atom.predicate].begin(),
-                         neg_goal_[atom.predicate].end(), id)) {
+  if (std::binary_search(goal_[atom.predicate].begin(),
+                         goal_[atom.predicate].end(), id)) {
     return false;
   }
   return trivially_useless_[atom.predicate];
@@ -219,126 +238,6 @@ bool Grounder::has_precondition(const Action &action,
   return false;
 }
 
-// No action has this predicate as effect and it is not in init_
-bool Grounder::is_rigid(const GroundAtom &atom, bool positive) const noexcept {
-  auto &rigid = (positive ? successful_cache_[atom.predicate].pos_rigid
-                          : successful_cache_[atom.predicate].neg_rigid);
-  auto &not_rigid = (positive ? unsuccessful_cache_[atom.predicate].pos_rigid
-                              : unsuccessful_cache_[atom.predicate].neg_rigid);
-  auto id = get_id(atom);
-
-  if ((config.cache_policy != Config::CachePolicy::None) &&
-      (rigid.find(id) != rigid.end())) {
-    return true;
-  }
-
-  if ((config.cache_policy == Config::CachePolicy::Unsuccessful) &&
-      (not_rigid.find(id) != not_rigid.end())) {
-    return false;
-  }
-
-  if (std::binary_search(init_[atom.predicate].begin(),
-                         init_[atom.predicate].end(), id) != positive) {
-    if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-      not_rigid.insert(id);
-    }
-    return false;
-  }
-
-  if (trivially_rigid_[atom.predicate]) {
-    if (config.cache_policy != Config::CachePolicy::None) {
-      rigid.insert(id);
-    }
-    return true;
-  }
-
-  if (config.pruning_policy == Config::PruningPolicy::Trivial) {
-    if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-      not_rigid.insert(id);
-    }
-    return false;
-  }
-
-  for (size_t i = 0; i < problem_->actions.size(); ++i) {
-    const auto &base_action = problem_->actions[i];
-    if (!has_effect(base_action, atom, !positive)) {
-      continue;
-    }
-    for (const auto &action : actions_[i]) {
-      if (has_effect(action, atom, !positive)) {
-        if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-          not_rigid.insert(id);
-        }
-        return false;
-      }
-    }
-  }
-  if (config.cache_policy != Config::CachePolicy::None) {
-    rigid.insert(id);
-  }
-  return true;
-}
-
-// No action has this predicate as precondition and it is a not a goal
-bool Grounder::is_useless(const GroundAtom &atom) const noexcept {
-  auto id = get_id(atom);
-  auto &useless = successful_cache_[atom.predicate].useless;
-  auto &not_useless = unsuccessful_cache_[atom.predicate].useless;
-
-  if ((config.cache_policy != Config::CachePolicy::None) &&
-      (useless.find(id) != useless.end())) {
-    return true;
-  }
-
-  if ((config.cache_policy == Config::CachePolicy::Unsuccessful) &&
-      (not_useless.find(id) != not_useless.end())) {
-    return false;
-  }
-
-  if (std::binary_search(pos_goal_[atom.predicate].begin(),
-                         pos_goal_[atom.predicate].end(), id) ||
-      std::binary_search(neg_goal_[atom.predicate].begin(),
-                         neg_goal_[atom.predicate].end(), id)) {
-    if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-      not_useless.insert(id);
-    }
-    return false;
-  }
-
-  if (trivially_useless_[atom.predicate]) {
-    if (config.cache_policy != Config::CachePolicy::None) {
-      useless.insert(id);
-    }
-    return true;
-  }
-
-  if (config.pruning_policy == Config::PruningPolicy::Trivial) {
-    if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-      not_useless.insert(id);
-    }
-    return false;
-  }
-
-  for (size_t i = 0; i < problem_->actions.size(); ++i) {
-    const auto &action = problem_->actions[i];
-    if (has_precondition(action, atom)) {
-      for (const auto &action : actions_[i]) {
-        if (has_precondition(action, atom)) {
-          if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-            not_useless.insert(id);
-          }
-          return false;
-        }
-      }
-    }
-  }
-
-  if (config.cache_policy != Config::CachePolicy::None) {
-    useless.insert(id);
-  }
-  return true;
-}
-
 ParameterSelection Grounder::select_most_frequent(const Action &action) const
     noexcept {
   std::vector<unsigned int> frequency(action.parameters.size(), 0);
@@ -381,12 +280,12 @@ ParameterSelection Grounder::select_min_new(const Action &action) const
     }
     uint_fast64_t current = get_num_instantiated(
         get_referenced_parameters(it->atom, action), action, *problem_);
-    std::for_each(GroundAtomIterator{it->atom, action, *problem_},
-                  GroundAtomIterator{}, [&](const auto &p) {
-                    if (is_rigid(p, !it->positive)) {
-                      --current;
-                    }
-                  });
+    for (auto ground_atom_it = GroundAtomIterator{it->atom, action, *problem_};
+         ground_atom_it != GroundAtomIterator{}; ++ground_atom_it) {
+      if (is_rigid(*ground_atom_it, !it->positive)) {
+        --current;
+      }
+    }
     if (current < min) {
       min = current;
       min_it = it;
@@ -413,12 +312,12 @@ ParameterSelection Grounder::select_max_rigid(const Action &action) const
       continue;
     }
     uint_fast64_t current = 1;
-    std::for_each(GroundAtomIterator{it->atom, action, *problem_},
-                  GroundAtomIterator{}, [&](const auto &p) {
-                    if (is_rigid(p, !it->positive)) {
-                      ++current;
-                    }
-                  });
+    for (auto ground_atom_it = GroundAtomIterator{it->atom, action, *problem_};
+         ground_atom_it != GroundAtomIterator{}; ++ground_atom_it) {
+      if (is_rigid(*ground_atom_it, !it->positive)) {
+        ++current;
+      }
+    }
     if (current > max) {
       max = current;
       max_it = it;
@@ -494,28 +393,28 @@ void Grounder::prune_actions() noexcept {
   do {
     changed = false;
     if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
-      std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
-                    [](auto &c) {
-                      c.pos_rigid.clear();
-                      c.neg_rigid.clear();
-                      c.useless.clear();
-                    });
+      for (auto &c : unsuccessful_cache_) {
+        c.pos_rigid.clear();
+        c.neg_rigid.clear();
+        c.useless.clear();
+      }
     }
     for (size_t i = 0; i < actions_.size(); ++i) {
       auto it = std::partition(actions_[i].begin(), actions_[i].end(),
                                [this](const auto &a) { return is_valid(a); });
       if (it != actions_[i].end()) {
-        std::for_each(it, actions_[i].end(), [&](const auto &a) {
-          num_pruned_actions_ += get_num_instantiated(a, *problem_);
-        });
+        num_pruned_actions_ += std::accumulate(
+            it, actions_[i].end(), 0ul, [&](uint_fast64_t sum, const auto &a) {
+              return sum + get_num_instantiated(a, *problem_);
+            });
         actions_[i].erase(it, actions_[i].end());
         changed = true;
       }
-      std::for_each(actions_[i].begin(), actions_[i].end(), [&](auto &a) {
+      for (auto &a : actions_[i]) {
         if (simplify(a)) {
           changed = true;
         }
-      });
+      }
     }
   } while (changed);
 }
@@ -526,10 +425,15 @@ bool Grounder::is_valid(const Action &action) const noexcept {
         !is_ground(precondition.atom)) {
       continue;
     }
-    if (std::all_of(GroundAtomIterator{precondition.atom, action, *problem_},
-                    GroundAtomIterator{}, [&](const auto &p) {
-                      return is_rigid(p, !precondition.positive);
-                    })) {
+    bool rigid = true;
+    for (auto it = GroundAtomIterator{precondition.atom, action, *problem_};
+         it != GroundAtomIterator{}; ++it) {
+      if (!is_rigid(*it, !precondition.positive)) {
+        rigid = false;
+        break;
+      }
+    }
+    if (rigid) {
       return false;
     }
   }
@@ -541,11 +445,13 @@ bool Grounder::is_valid(const Action &action) const noexcept {
   }
   if (std::all_of(
           action.effects.begin(), action.effects.end(), [&](const auto &e) {
-            return std::all_of(GroundAtomIterator{e.atom, action, *problem_},
-                               GroundAtomIterator{}, [&](const auto &p) {
-                                 return is_rigid(p, e.positive) ||
-                                        is_useless(p);
-                               });
+            for (auto it = GroundAtomIterator{e.atom, action, *problem_};
+                 it != GroundAtomIterator{}; ++it) {
+              if (!is_rigid(*it, e.positive) && !is_useless(*it)) {
+                return false;
+              }
+            }
+            return true;
           })) {
     return false;
   }

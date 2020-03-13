@@ -181,7 +181,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (config.planning_mode == Config::PlanningMode::Ground) {
-    LOG_INFO(main_logger, "Grounding to %.1f groundness...",
+    LOG_INFO(main_logger, "Grounding to %.3f groundness...",
              config.target_groundness);
 #ifdef PARALLEL
     ParallelGrounder grounder{config.num_threads, problem};
@@ -199,7 +199,7 @@ int main(int argc, char *argv[]) {
     }
 
     LOG_INFO(main_logger,
-             "Grounded to %.1f groundness resulting in %lu actions",
+             "Grounded to %.3f groundness resulting in %lu actions",
              grounder.get_groundness(), grounder.get_num_actions());
     LOG_DEBUG(main_logger, "Grounded problem:\n%s",
               to_string(*grounder.extract_problem()).c_str());

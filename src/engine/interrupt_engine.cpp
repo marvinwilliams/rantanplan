@@ -28,7 +28,7 @@ Plan InterruptEngine::start_planning_impl() {
       throw TimeoutException{};
     }
     auto next_groundness =
-        (planner_id + 1) / static_cast<float>(config.granularity);
+        static_cast<float>(planner_id + 1) / static_cast<float>(config.granularity);
     if (groundness >= next_groundness) {
       LOG_INFO(engine_logger, "Skipping planner %u", planner_id);
       continue;

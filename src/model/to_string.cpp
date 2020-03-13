@@ -13,6 +13,7 @@ using namespace normalized;
 std::string to_string(const Type &type, const Problem &problem) {
   std::stringstream ss;
   ss << problem.get_name(type.id);
+  ss << "id: " << type.id;
   if (type.supertype != type.id) {
     ss << " - " << problem.get_name(type.supertype);
   }
@@ -22,6 +23,7 @@ std::string to_string(const Type &type, const Problem &problem) {
 std::string to_string(const Constant &constant, const Problem &problem) {
   std::stringstream ss;
   ss << problem.get_name(constant.id);
+  ss << "id: " << constant.id;
   if (constant.type.id != TypeIndex{0}) {
     ss << " - " << problem.get_name(constant.type.id);
   }
@@ -30,7 +32,9 @@ std::string to_string(const Constant &constant, const Problem &problem) {
 
 std::string to_string(const Predicate &predicate, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.get_name(predicate.id) << '(';
+  ss << problem.get_name(predicate.id);
+  ss << "id: " << predicate.id;
+  ss << '(';
   std::transform(predicate.parameter_types.begin(),
                  predicate.parameter_types.end(),
                  std::ostream_iterator<std::string>(ss, ", "),
@@ -46,6 +50,7 @@ std::string to_string(const Condition &condition, const Action &action,
     ss << '!';
   }
   ss << problem.get_name(condition.atom.predicate);
+  ss << "id: " << condition.atom.predicate;
   ss << '(';
   std::transform(
       condition.atom.arguments.begin(), condition.atom.arguments.end(),
@@ -70,6 +75,7 @@ std::string to_string(const Condition &condition, const Action &action,
 std::string to_string(const GroundAtom &atom, const Problem &problem) {
   std::stringstream ss;
   ss << problem.get_name(atom.predicate);
+  ss << "id: " << atom.predicate;
   ss << '(';
   std::transform(atom.arguments.begin(), atom.arguments.end(),
                  std::ostream_iterator<std::string>(ss, ", "),
@@ -80,7 +86,9 @@ std::string to_string(const GroundAtom &atom, const Problem &problem) {
 
 std::string to_string(const Action &action, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.action_names[action.id] << '(';
+  ss << problem.action_names[action.id];
+  ss << "id: " << action.id;
+  ss << '(';
   std::transform(action.parameters.begin(), action.parameters.end(),
                  std::ostream_iterator<std::string>(ss, ", "),
                  [&problem](Parameter p) {

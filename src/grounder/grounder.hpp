@@ -47,11 +47,131 @@ private:
                   const normalized::GroundAtom &predicate) const noexcept;
   bool has_precondition(const normalized::Action &action,
                         const normalized::GroundAtom &predicate) const noexcept;
-  // No action has this predicate as effect and it is not in init
-  bool is_rigid(const normalized::GroundAtom &predicate, bool positive) const
+
+  // No action has this predicate as effect and it is not in init_
+  template <bool cache_success, bool cache_fail>
+  bool is_rigid(const normalized::GroundAtom &atom, bool positive) const
+      noexcept {
+    auto &rigid = (positive ? successful_cache_[atom.predicate].pos_rigid
+                            : successful_cache_[atom.predicate].neg_rigid);
+    auto &not_rigid =
+        (positive ? unsuccessful_cache_[atom.predicate].pos_rigid
+                  : unsuccessful_cache_[atom.predicate].neg_rigid);
+    auto id = get_id(atom);
+
+    if (cache_success && (rigid.find(id) != rigid.end())) {
+      return true;
+    }
+
+    if (cache_fail && (not_rigid.find(id) != not_rigid.end())) {
+      return false;
+    }
+
+    if (std::binary_search(init_[atom.predicate].begin(),
+                           init_[atom.predicate].end(), id) != positive) {
+      if (cache_fail) {
+        not_rigid.insert(id);
+      }
+      return false;
+    }
+
+    if (trivially_rigid_[atom.predicate]) {
+      if (cache_success) {
+        rigid.insert(id);
+      }
+      return true;
+    }
+
+    if (config.pruning_policy == Config::PruningPolicy::Trivial) {
+      if (cache_fail) {
+        not_rigid.insert(id);
+      }
+      return false;
+    }
+
+    for (size_t i = 0; i < problem_->actions.size(); ++i) {
+      const auto &base_action = problem_->actions[i];
+      if (!has_effect(base_action, atom, !positive)) {
+        continue;
+      }
+      for (const auto &action : actions_[i]) {
+        if (has_effect(action, atom, !positive)) {
+          if (cache_fail) {
+            not_rigid.insert(id);
+          }
+          return false;
+        }
+      }
+    }
+    if (cache_success) {
+      rigid.insert(id);
+    }
+    return true;
+  }
+
+  bool is_rigid(const normalized::GroundAtom &atom, bool positive) const
       noexcept;
+
   // No action has this predicate as precondition and it is a not a goal
-  bool is_useless(const normalized::GroundAtom &predicate) const noexcept;
+  template <bool cache_success, bool cache_fail>
+  bool is_useless(const normalized::GroundAtom &atom) const noexcept {
+    auto id = get_id(atom);
+    auto &useless = successful_cache_[atom.predicate].useless;
+    auto &not_useless = unsuccessful_cache_[atom.predicate].useless;
+
+    if (cache_success && (useless.find(id) != useless.end())) {
+      return true;
+    }
+
+    if (cache_fail && (not_useless.find(id) != not_useless.end())) {
+      return false;
+    }
+
+    if (std::binary_search(goal_[atom.predicate].begin(),
+                           goal_[atom.predicate].end(), id)) {
+      if (cache_fail) {
+        not_useless.insert(id);
+      }
+      return false;
+    }
+
+    if (trivially_useless_[atom.predicate]) {
+      if (cache_success) {
+        useless.insert(id);
+      }
+      return true;
+    }
+
+    if (config.pruning_policy == Config::PruningPolicy::Trivial) {
+      if (cache_fail) {
+        not_useless.insert(id);
+      }
+      return false;
+    }
+
+    for (size_t i = 0; i < problem_->actions.size(); ++i) {
+      const auto &action = problem_->actions[i];
+      if (has_precondition(action, atom)) {
+        for (const auto &action : actions_[i]) {
+          if (has_precondition(action, atom)) {
+            if (cache_fail) {
+              not_useless.insert(id);
+            }
+            return false;
+          }
+        }
+      }
+    }
+
+    if (cache_success) {
+      useless.insert(id);
+    }
+    return true;
+  }
+
+  bool is_useless(const normalized::GroundAtom &atom) const
+      noexcept;
+
   normalized::ParameterSelection
   select_most_frequent(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
@@ -76,8 +196,7 @@ private:
   std::vector<bool> trivially_rigid_;
   std::vector<bool> trivially_useless_;
   std::vector<std::vector<PredicateId>> init_;
-  std::vector<std::vector<PredicateId>> pos_goal_;
-  std::vector<std::vector<PredicateId>> neg_goal_;
+  std::vector<std::vector<PredicateId>> goal_;
 
   struct Cache {
     std::unordered_set<PredicateId> pos_rigid;

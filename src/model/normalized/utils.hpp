@@ -181,11 +181,23 @@ inline size_t get_num_instantiated(const ParameterSelection &selection,
 }
 
 class AssignmentIterator {
+  util::CombinationIterator combination_iterator_{};
   ParameterAssignment assignment_;
-  util::CombinationIterator combination_iterator_;
   const ParameterSelection *selection_ = nullptr;
   const Action *action_ = nullptr;
   const Problem *problem_ = nullptr;
+
+  void set_assignment() {
+    assert(combination_iterator_ != util::CombinationIterator{});
+    const auto &combination = *combination_iterator_;
+    for (size_t i = 0; i < combination.size(); ++i) {
+      assert(action_->parameters[(*selection_)[i]].is_free());
+      auto type_index = action_->parameters[(*selection_)[i]].get_type().id;
+      assignment_[i] = std::make_pair(
+          (*selection_)[i],
+          problem_->constants_of_type[type_index][combination[i]]);
+    }
+  }
 
 public:
   using iterator_category = std::forward_iterator_tag;
@@ -212,14 +224,7 @@ public:
     assignment_.resize(selection.size());
 
     if (combination_iterator_ != util::CombinationIterator{}) {
-      const auto &combination = *combination_iterator_;
-      for (size_t i = 0; i < selection.size(); ++i) {
-        assert(action.parameters[selection[i]].is_free());
-        auto type_index = action_->parameters[selection[i]].get_type().id;
-        assignment_[i] = std::make_pair(
-            (*selection_)[i],
-            problem.constants_of_type[type_index][combination[i]]);
-      }
+      set_assignment();
     }
   }
 
@@ -227,14 +232,7 @@ public:
     assert(problem_);
     ++combination_iterator_;
     if (combination_iterator_ != util::CombinationIterator{}) {
-      const auto &combination = *combination_iterator_;
-      for (size_t i = 0; i < combination.size(); ++i) {
-        assert(action_->parameters[(*selection_)[i]].is_free());
-        auto type_index = action_->parameters[(*selection_)[i]].get_type().id;
-        assignment_[i] = std::make_pair(
-            (*selection_)[i],
-            problem_->constants_of_type[type_index][combination[i]]);
-      }
+      set_assignment();
     }
     return *this;
   }
@@ -265,6 +263,16 @@ class GroundAtomIterator {
   ParameterMapping mapping_;
   AssignmentIterator assignment_iterator_;
 
+  void set_ground_atom() {
+    assert(assignment_iterator_ != AssignmentIterator{});
+    const auto &assignment = *assignment_iterator_;
+    for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
+      for (auto a : mapping_.arguments[i]) {
+        ground_atom_.arguments[a] = assignment[i].second;
+      }
+    }
+  }
+
 public:
   using iterator_category = std::forward_iterator_tag;
   using value_type = GroundAtom;
@@ -272,16 +280,16 @@ public:
   using pointer = const value_type *;
   using reference = const value_type &;
 
-  explicit GroundAtomIterator() = default;
+  explicit GroundAtomIterator() noexcept
+      : ground_atom_{PredicateIndex{0}, {}} {}
 
   explicit GroundAtomIterator(const Atom &atom, const Action &action,
                               const Problem &problem) noexcept
-      : mapping_{get_mapping(atom, action)}, assignment_iterator_{
+      : ground_atom_{atom.predicate,
+                     std::vector<Constant>(atom.arguments.size())},
+        mapping_{get_mapping(atom, action)}, assignment_iterator_{
                                                  mapping_.parameters, action,
                                                  problem} {
-    ground_atom_.predicate = atom.predicate;
-    ground_atom_.arguments.resize(atom.arguments.size());
-
     for (size_t i = 0; i < atom.arguments.size(); ++i) {
       if (!atom.arguments[i].is_parameter()) {
         ground_atom_.arguments[i] = atom.arguments[i].get_constant();
@@ -289,25 +297,14 @@ public:
     }
 
     if (assignment_iterator_ != AssignmentIterator{}) {
-      const auto &assignment = *assignment_iterator_;
-      for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
-        assert(assignment[i].first == mapping_.parameters[i]);
-        for (auto a : mapping_.arguments[i]) {
-          ground_atom_.arguments[a] = assignment[i].second;
-        }
-      }
+      set_ground_atom();
     }
   }
 
   GroundAtomIterator &operator++() noexcept {
     ++assignment_iterator_;
     if (assignment_iterator_ != AssignmentIterator{}) {
-      const auto &assignment = *assignment_iterator_;
-      for (size_t i = 0; i < mapping_.parameters.size(); ++i) {
-        for (auto a : mapping_.arguments[i]) {
-          ground_atom_.arguments[a] = assignment[i].second;
-        }
-      }
+      set_ground_atom();
     }
     return *this;
   }

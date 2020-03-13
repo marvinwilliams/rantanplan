@@ -8,6 +8,11 @@
 namespace util {
 
 class CombinationIterator {
+  bool is_end_ = true;
+  size_t number_combinations_ = 0;
+  std::vector<size_t> list_sizes_;
+  std::vector<size_t> current_combination_;
+
 public:
   using iterator_category = std::forward_iterator_tag;
   using value_type = std::vector<size_t>;
@@ -59,12 +64,6 @@ public:
   bool operator==(const CombinationIterator &) const noexcept {
     return is_end_;
   }
-
-private:
-  bool is_end_ = true;
-  size_t number_combinations_;
-  std::vector<size_t> list_sizes_;
-  std::vector<size_t> current_combination_;
 };
 
 } // namespace util
