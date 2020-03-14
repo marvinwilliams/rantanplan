@@ -38,7 +38,7 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
       trivially_rigid_[effect.atom.predicate] = false;
     }
     for (const auto &[effect, positive] : action.ground_effects) {
-      trivially_useless_[effect.predicate] = false;
+      trivially_rigid_[effect.predicate] = false;
     }
   }
 

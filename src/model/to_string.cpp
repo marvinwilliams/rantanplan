@@ -30,8 +30,7 @@ std::string to_string(const ConstantIndex &constant, const Problem &problem) {
 
 std::string to_string(const PredicateIndex &predicate, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.get_name(predicate);
-  ss << '(';
+  ss << problem.get_name(predicate) << '(';
   print_list(ss, problem.predicates[predicate].parameter_types.begin(),
              problem.predicates[predicate].parameter_types.end(), ", ",
              [&problem](TypeIndex type) { return problem.get_name(type); });
@@ -42,12 +41,8 @@ std::string to_string(const PredicateIndex &predicate, const Problem &problem) {
 std::string to_string(const Condition &condition, const Action &action,
                       const Problem &problem) {
   std::stringstream ss;
-  if (!condition.positive) {
-    ss << '!';
-  }
-  ss << problem.get_name(condition.atom.predicate);
-  ss << "id: " << condition.atom.predicate;
-  ss << '(';
+  ss << (condition.positive ? "" : "!")
+     << problem.get_name(condition.atom.predicate) << '(';
   print_list(ss, condition.atom.arguments.begin(),
              condition.atom.arguments.end(), ", ",
              [&problem, &action](Argument a) {
@@ -69,9 +64,7 @@ std::string to_string(const Condition &condition, const Action &action,
 
 std::string to_string(const GroundAtom &atom, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.get_name(atom.predicate);
-  ss << "id: " << atom.predicate;
-  ss << '(';
+  ss << problem.get_name(atom.predicate)<< '(';
   print_list(ss, atom.arguments.begin(), atom.arguments.end(), ", ",
              [&problem](ConstantIndex c) { return problem.get_name(c); });
   ss << ')';
@@ -80,9 +73,7 @@ std::string to_string(const GroundAtom &atom, const Problem &problem) {
 
 std::string to_string(const Action &action, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.action_names[action.id];
-  ss << "id: " << action.id;
-  ss << '(';
+  ss << problem.action_names[action.id]<< '(';
   print_list(ss, action.parameters.begin(), action.parameters.end(), ", ",
              [&problem](Parameter p) {
                if (p.is_free()) {
@@ -93,10 +84,18 @@ std::string to_string(const Action &action, const Problem &problem) {
              });
   ss << ')' << '\n';
   ss << '\t' << "Preconditions:" << '\n';
+  for (const auto &[precondition, positive] : action.ground_preconditions) {
+    ss << '\t' << '\t' << (positive ? "" : "!")
+       << to_string(precondition, problem) << '\n';
+  }
   for (const auto &precondition : action.preconditions) {
     ss << '\t' << '\t' << to_string(precondition, action, problem) << '\n';
   }
   ss << '\t' << "Effects:" << '\n';
+  for (const auto &[effect, positive] : action.ground_effects) {
+    ss << '\t' << '\t' << (positive ? "" : "!") << to_string(effect, problem)
+       << '\n';
+  }
   for (const auto &effect : action.effects) {
     ss << '\t' << '\t' << to_string(effect, action, problem) << '\n';
   }
