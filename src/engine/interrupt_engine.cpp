@@ -36,14 +36,13 @@ Plan InterruptEngine::start_planning_impl() {
 
     auto problem = grounder.extract_problem();
 
-    LOG_INFO(engine_logger, "Starting planner %u with %lu seconds timeout",
-             planner_id, config.solver_timeout);
+    LOG_INFO(engine_logger, "Starting planner %u with %.2f seconds timeout",
+             planner_id, config.solver_timeout.count());
 
     try {
       return planner.find_plan(problem, config.solver_timeout);
     } catch (const TimeoutException &e) {
       LOG_INFO(engine_logger, "Planner %u found no solution", planner_id);
-      throw;
     }
 
     LOG_INFO(engine_logger, "Targeting %.1f groundness", next_groundness);

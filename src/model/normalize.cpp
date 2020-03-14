@@ -182,16 +182,16 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
   normalized_problem->constant_type_map.resize(
       normalized_problem->types.size());
   for (size_t i = 0; i < normalized_problem->constants.size(); ++i) {
+    auto constant_index = normalized::ConstantIndex{i};
     auto type = normalized_problem->constants[i].type;
-    normalized_problem->constants_of_type[type].emplace_back(i);
-    normalized_problem->constant_type_map[type][normalized::ConstantIndex{i}] =
+    normalized_problem->constant_type_map[type][constant_index] =
         normalized_problem->constants_of_type[type].size();
+    normalized_problem->constants_of_type[type].emplace_back(i);
     while (normalized_problem->types[type].supertype != type) {
       type = normalized_problem->types[type].supertype;
-      normalized_problem->constants_of_type[type].emplace_back(i);
-      normalized_problem
-          ->constant_type_map[type][normalized::ConstantIndex{i}] =
+      normalized_problem->constant_type_map[type][constant_index] =
           normalized_problem->constants_of_type[type].size();
+      normalized_problem->constants_of_type[type].emplace_back(i);
     }
   }
 
@@ -208,8 +208,8 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
 
   std::vector<normalized::GroundAtom> negative_init;
   for (const auto &init : problem.get_init()) {
-    auto ground_atom = as_ground_atom(
-        normalize_atomic_condition(*init, problem).atom);
+    auto ground_atom =
+        as_ground_atom(normalize_atomic_condition(*init, problem).atom);
     if (init->positive()) {
       if (std::find(normalized_problem->init.begin(),
                     normalized_problem->init.end(),
@@ -255,8 +255,8 @@ std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem) {
       std::dynamic_pointer_cast<parsed::Condition>(problem.get_goal())
           ->to_dnf();
   for (const auto &goal : to_list(goal_condition)) {
-    auto ground_atom = as_ground_atom(
-        normalize_atomic_condition(*goal, problem).atom);
+    auto ground_atom =
+        as_ground_atom(normalize_atomic_condition(*goal, problem).atom);
     if (auto it = std::find_if(
             normalized_problem->goal.begin(), normalized_problem->goal.end(),
             [&ground_atom](const auto &g) { return ground_atom == g.first; });
