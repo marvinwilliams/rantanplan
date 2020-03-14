@@ -14,7 +14,7 @@
 #include <unordered_set>
 #include <utility>
 
-extern logging::Logger preprocess_logger;
+extern logging::Logger grounder_logger;
 extern Config config;
 extern util::Timer global_timer;
 
@@ -193,6 +193,7 @@ private:
   std::vector<bool> trivially_useless_;
   std::vector<std::vector<PredicateId>> init_;
   std::vector<std::vector<PredicateId>> goal_;
+  std::vector<bool> action_grounded_;
 
   struct Cache {
     std::unordered_set<PredicateId> pos_rigid;

@@ -16,7 +16,6 @@
 #include <vector>
 
 using namespace normalized;
-using namespace std::chrono_literals;
 
 Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
     : problem_{problem} {
@@ -64,6 +63,8 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
   for (const auto &action : problem_->actions) {
     actions_.push_back({action});
   }
+
+  action_grounded_.resize(problem_->actions.size(), false);
 
   successful_cache_.resize(problem_->predicates.size());
   unsuccessful_cache_.resize(problem_->predicates.size());
@@ -130,14 +131,22 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
     if (global_timer.get_elapsed_time() > config.timeout) {
       throw TimeoutException{};
     }
-    bool is_grounding = false;
-    for (auto &action_list : actions_) {
+    LOG_INFO(grounder_logger, "Current groundness: %.3f", groundness_);
+    LOG_INFO(grounder_logger, "Current actions: %lu actions",
+             get_num_actions());
+    bool keep_grounding = false;
+    for (size_t i = 0; i < actions_.size(); ++i) {
+      if (action_grounded_[i]) {
+        continue;
+      }
+      bool action_grounded = true;
+      auto &action_list = actions_[i];
       std::vector<Action> new_actions;
       uint_fast64_t new_pruned_actions = 0;
       for (const auto &action : action_list) {
         auto selection = std::invoke(parameter_selector_, *this, action);
         if (!selection.empty()) {
-          is_grounding = true;
+          action_grounded = false;
         }
         for (auto it = AssignmentIterator{selection, action, *problem_};
              it != AssignmentIterator{}; ++it) {
@@ -149,6 +158,11 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
           }
         }
       }
+      if (action_grounded) {
+        action_grounded_[i] = true;
+      } else {
+        keep_grounding = true;
+      }
       num_pruned_actions_ += new_pruned_actions;
       action_list = std::move(new_actions);
       groundness_ =
@@ -158,7 +172,7 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
         break;
       }
     }
-    if (!is_grounding) {
+    if (!keep_grounding) {
       return;
     }
     prune_actions();
