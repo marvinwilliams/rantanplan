@@ -125,12 +125,6 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
   util::Timer timer;
 
   while (groundness_ < groundness) {
-    if (timer.get_elapsed_time() > timeout) {
-      return;
-    }
-    if (global_timer.get_elapsed_time() > config.timeout) {
-      throw TimeoutException{};
-    }
     LOG_INFO(grounder_logger, "Current groundness: %.3f", groundness_);
     LOG_INFO(grounder_logger, "Current actions: %lu actions",
              get_num_actions());
@@ -140,10 +134,16 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
         continue;
       }
       bool action_grounded = true;
-      auto &action_list = actions_[i];
       std::vector<Action> new_actions;
       uint_fast64_t new_pruned_actions = 0;
-      for (const auto &action : action_list) {
+      for (const auto &action : actions_[i]) {
+        if (timeout != util::inf_time && timer.get_elapsed_time() > timeout) {
+          return;
+        }
+        if (config.timeout != util::inf_time &&
+            global_timer.get_elapsed_time() > config.timeout) {
+          throw TimeoutException{};
+        }
         auto selection = std::invoke(parameter_selector_, *this, action);
         if (!selection.empty()) {
           action_grounded = false;
@@ -164,7 +164,7 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
         keep_grounding = true;
       }
       num_pruned_actions_ += new_pruned_actions;
-      action_list = std::move(new_actions);
+      actions_[i] = std::move(new_actions);
       groundness_ =
           static_cast<float>(get_num_actions() + num_pruned_actions_) /
           static_cast<float>(num_actions_);

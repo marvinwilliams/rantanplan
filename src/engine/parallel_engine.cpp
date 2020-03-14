@@ -35,7 +35,7 @@ Engine::Status ParallelEngine::start_impl() noexcept {
     if (config.check_timeout()) {
       break;
     }
-    LOG_INFO(engine_logger, "Targeting %.1f%% preprocess progress",
+    LOG_INFO(engine_logger, "Targeting %.3f groundness",
              next_progress * 100);
     preprocessor.refine(next_progress, config.preprocess_timeout,
                         config.num_threads - planner_id);
@@ -49,7 +49,7 @@ Engine::Status ParallelEngine::start_impl() noexcept {
 
     progress = preprocessor.get_progress();
 
-    LOG_INFO(engine_logger, "Preprocessed to %.1f%% resulting in %lu actions",
+    LOG_INFO(engine_logger, "Grounded to %.3f groundness resulting in %lu actions",
              progress * 100, preprocessor.get_num_actions());
 
     LOG_INFO(engine_logger, "Starting planner %u", planner_id);

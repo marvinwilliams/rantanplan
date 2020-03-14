@@ -12,12 +12,9 @@
 
 extern Config config;
 
-std::unique_ptr<Encoder>
-get_encoder(const std::shared_ptr<normalized::Problem> &problem,
-            util::Seconds timeout) noexcept;
-
 class SatPlanner final : public Planner {
-private:
+  std::unique_ptr<Encoder> encoder_;
+
   Plan find_plan_impl(const std::shared_ptr<normalized::Problem> &problem,
                       util::Seconds timeout) override;
 
@@ -25,6 +22,13 @@ private:
                    unsigned int step, const Encoder &encoder) const noexcept;
   void assume_goal(sat::Solver &solver, unsigned int step,
                    const Encoder &encoder) const noexcept;
+
+public:
+  void set_encoder(std::unique_ptr<Encoder> encoder) noexcept;
+
+  static std::unique_ptr<Encoder>
+  get_encoder(const std::shared_ptr<normalized::Problem> &problem,
+              util::Seconds timeout) noexcept;
 };
 
 #endif /* end of include guard: SAT_PLANNER_HPP */
