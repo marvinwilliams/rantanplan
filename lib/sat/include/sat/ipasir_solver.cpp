@@ -27,7 +27,7 @@ void IpasirSolver::add_impl(int l) noexcept {
 void IpasirSolver::assume_impl(int l) noexcept { ipasir_assume(handle_, l); }
 
 Solver::Status IpasirSolver::solve_impl(util::Seconds timeout,
-                                        util::Seconds solve_timeout) noexcept {
+                                        util::Seconds skip_timeout) noexcept {
   util::Timer timer;
   bool skip_step = false;
   auto check_timeout = [&]() {
@@ -35,7 +35,7 @@ Solver::Status IpasirSolver::solve_impl(util::Seconds timeout,
         (timer.get_elapsed_time() > timeout)) {
       return true;
     }
-    if (timer.get_elapsed_time() > solve_timeout) {
+    if (timer.get_elapsed_time() > skip_timeout) {
       skip_step = true;
       return true;
     }

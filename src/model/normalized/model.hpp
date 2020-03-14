@@ -19,7 +19,6 @@ struct Type;
 using TypeIndex = util::Index<Type>;
 
 struct Type {
-  TypeIndex id;
   TypeIndex supertype;
 };
 
@@ -27,34 +26,28 @@ struct Constant;
 using ConstantIndex = util::Index<Constant>;
 
 struct Constant {
-  ConstantIndex id;
-  Type type;
+  TypeIndex type;
 };
-
-inline bool operator==(const Constant &first, const Constant &second) noexcept {
-  return first.id == second.id;
-}
 
 struct Predicate;
 using PredicateIndex = util::Index<Predicate>;
 
 struct Predicate {
-  PredicateIndex id;
-  std::vector<Type> parameter_types;
+  std::vector<TypeIndex> parameter_types;
 };
 
-struct Parameter : TaggedUnion<Constant, Type> {
-  using TaggedUnion<Constant, Type>::TaggedUnion;
-  inline Constant get_constant() const noexcept { return get_first(); }
-  inline Type get_type() const noexcept { return get_second(); }
+struct Parameter : TaggedUnion<ConstantIndex, TypeIndex> {
+  using TaggedUnion<ConstantIndex, TypeIndex>::TaggedUnion;
+  inline ConstantIndex get_constant() const noexcept { return get_first(); }
+  inline TypeIndex get_type() const noexcept { return get_second(); }
   inline bool is_free() const noexcept { return !holds_t1_; }
 };
 
 using ParameterIndex = util::Index<Parameter>;
 
-struct Argument : TaggedUnion<Constant, ParameterIndex> {
-  using TaggedUnion<Constant, ParameterIndex>::TaggedUnion;
-  inline Constant get_constant() const noexcept { return get_first(); }
+struct Argument : TaggedUnion<ConstantIndex, ParameterIndex> {
+  using TaggedUnion<ConstantIndex, ParameterIndex>::TaggedUnion;
+  inline ConstantIndex get_constant() const noexcept { return get_first(); }
   inline ParameterIndex get_parameter_index() const noexcept {
     return get_second();
   }
@@ -70,7 +63,7 @@ struct Atom {
 
 struct GroundAtom {
   PredicateIndex predicate;
-  std::vector<Constant> arguments;
+  std::vector<ConstantIndex> arguments;
 };
 
 inline bool operator==(const GroundAtom &first,
@@ -91,7 +84,9 @@ struct Action {
   ActionIndex id;
   std::vector<Parameter> parameters;
   std::vector<Condition> preconditions;
+  std::vector<std::pair<GroundAtom, bool>> ground_preconditions;
   std::vector<Condition> effects;
+  std::vector<std::pair<GroundAtom, bool>> ground_effects;
 };
 
 struct Problem {
@@ -102,7 +97,7 @@ struct Problem {
   std::vector<std::string> type_names;
   std::vector<Constant> constants;
   std::vector<std::string> constant_names;
-  std::vector<std::vector<Constant>> constants_of_type;
+  std::vector<std::vector<ConstantIndex>> constants_of_type;
   std::vector<std::unordered_map<ConstantIndex, size_t>> constant_type_map;
   std::vector<Predicate> predicates;
   std::vector<std::string> predicate_names;
@@ -144,8 +139,8 @@ struct Problem {
 } // namespace normalized
 
 struct Plan {
-  std::vector<
-      std::pair<normalized::ActionIndex, std::vector<normalized::Constant>>>
+  std::vector<std::pair<normalized::ActionIndex,
+                        std::vector<normalized::ConstantIndex>>>
       sequence;
   std::shared_ptr<normalized::Problem> problem;
 };
@@ -156,7 +151,7 @@ template <> struct hash<normalized::GroundAtom> {
   size_t operator()(const normalized::GroundAtom &atom) const noexcept {
     size_t h = hash<normalized::PredicateIndex>{}(atom.predicate);
     for (auto c : atom.arguments) {
-      h ^= hash<normalized::ConstantIndex>{}(c.id);
+      h ^= hash<normalized::ConstantIndex>{}(c);
     }
     return h;
   }

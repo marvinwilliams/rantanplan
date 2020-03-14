@@ -15,7 +15,7 @@ FixedEngine::FixedEngine(
     : Engine(problem) {}
 
 Plan FixedEngine::start_planning_impl() {
-  LOG_INFO(engine_logger, "Using oneshot engine");
+  LOG_INFO(engine_logger, "Using fixed engine");
 
   LOG_INFO(engine_logger, "Grounding to %.1f groundness...",
            config.target_groundness);

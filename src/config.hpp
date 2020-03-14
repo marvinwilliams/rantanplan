@@ -44,8 +44,6 @@ struct Config {
     ApproxMaxRigid,
     FirstEffect
   };
-  enum class PruningMode { None, Cache, ReferenceCounting };
-  enum class OperatorPriority { PriorityQueue, Iterative };
   enum class CachePolicy { None, NoUnsuccessful, Unsuccessful };
   enum class PruningPolicy { Eager, Ground, Trivial };
   enum class Encoding { Sequential, Foreach, LiftedForeach, Exists };
@@ -63,9 +61,7 @@ struct Config {
   std::optional<std::string> plan_file = std::nullopt;
 
   // Grounding
-  ParameterSelection parameter_selection = ParameterSelection::MaxRigid;
-  PruningMode pruning_mode = PruningMode::Cache;
-  OperatorPriority operator_priority = OperatorPriority::PriorityQueue;
+  ParameterSelection parameter_selection = ParameterSelection::ApproxMinNew;
   CachePolicy cache_policy = CachePolicy::Unsuccessful;
   PruningPolicy pruning_policy = PruningPolicy::Ground;
   float target_groundness = 1.0f;
@@ -147,30 +143,6 @@ struct Config {
       parameter_selection = ParameterSelection::FirstEffect;
     } else {
       throw ConfigException{"Unknown parameter selection \'" +
-                            std::string{input} + "\'"};
-    }
-  }
-
-  void parse_pruning_mode(const std::string &input) {
-    if (input == "none") {
-      pruning_mode = PruningMode::None;
-    } else if (input == "cache") {
-      pruning_mode = PruningMode::Cache;
-    } else if (input == "referencecounting") {
-      pruning_mode = PruningMode::ReferenceCounting;
-    } else {
-      throw ConfigException{"Unknown pruning mode \'" + std::string{input} +
-                            "\'"};
-    }
-  }
-
-  void parse_operator_priority(const std::string &input) {
-    if (input == "priorityqueue") {
-      operator_priority = OperatorPriority::PriorityQueue;
-    } else if (input == "iterative") {
-      operator_priority = OperatorPriority::Iterative;
-    } else {
-      throw ConfigException{"Unknown operator priority \'" +
                             std::string{input} + "\'"};
     }
   }

@@ -14,8 +14,9 @@
 
 using namespace normalized;
 
-ExistsEncoder::ExistsEncoder(const std::shared_ptr<Problem> &problem)
-    : Encoder{problem}, support_{*problem} {
+ExistsEncoder::ExistsEncoder(const std::shared_ptr<Problem> &problem,
+                             util::Seconds timeout = util::inf_time)
+    : Encoder{problem, timeout}, support_{*problem, timeout} {
   LOG_INFO(encoding_logger, "Init sat variables...");
   init_sat_vars();
 
@@ -69,7 +70,7 @@ Plan ExistsEncoder::extract_plan(const sat::Model &model,
     for (size_t i = 0; i < problem_->actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
         const Action &action = problem_->actions[i];
-        std::vector<Constant> constants;
+        std::vector<ConstantIndex> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
           auto &parameter = action.parameters[parameter_pos];
@@ -77,12 +78,11 @@ Plan ExistsEncoder::extract_plan(const sat::Model &model,
             constants.push_back(parameter.get_constant());
           } else {
             for (size_t j = 0;
-                 j <
-                 problem_->constants_of_type[parameter.get_type().id].size();
+                 j < problem_->constants_of_type[parameter.get_type()].size();
                  ++j) {
               if (model[parameters_[i][parameter_pos][j] + s * num_vars_]) {
                 constants.push_back(
-                    problem_->constants_of_type[parameter.get_type().id][j]);
+                    problem_->constants_of_type[parameter.get_type()][j]);
                 break;
               }
             }
@@ -121,10 +121,9 @@ void ExistsEncoder::init_sat_vars() {
         continue;
       }
       parameters_[i][parameter_pos].reserve(
-          problem_->constants_of_type[parameter.get_type().id].size());
+          problem_->constants_of_type[parameter.get_type()].size());
       for (size_t j = 0;
-           j < problem_->constants_of_type[parameter.get_type().id].size();
-           ++j) {
+           j < problem_->constants_of_type[parameter.get_type()].size(); ++j) {
         parameters_[i][parameter_pos].push_back(num_vars_++);
       }
     }
@@ -160,10 +159,13 @@ void ExistsEncoder::init_sat_vars() {
 }
 
 size_t ExistsEncoder::get_constant_index(ConstantIndex constant,
-                                         TypeIndex type) const noexcept {
+                                                TypeIndex type) const noexcept {
   auto it = problem_->constant_type_map[type].find(constant);
-  assert(it != problem_->constant_type_map[type].end());
-  return it->second;
+  if (it != problem_->constant_type_map[type].end()) {
+    return it->second;
+  }
+  assert(false);
+  return problem_->constants.size();
 }
 
 void ExistsEncoder::encode_init() {
@@ -186,7 +188,7 @@ void ExistsEncoder::encode_actions() {
         continue;
       }
       size_t number_arguments =
-          problem_->constants_of_type[parameter.get_type().id].size();
+          problem_->constants_of_type[parameter.get_type()].size();
       std::vector<Variable> all_arguments;
       all_arguments.reserve(number_arguments);
       universal_clauses_ << Literal{action_var, false};
@@ -215,7 +217,7 @@ void ExistsEncoder::encode_actions() {
 void ExistsEncoder::parameter_implies_predicate() {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
-    if (global_timer.get_elapsed_time() > config.timeout) {
+    if (check_timeout()) {
       throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
@@ -228,10 +230,9 @@ void ExistsEncoder::parameter_implies_predicate() {
           }
           for (const auto &[parameter_index, constant] : assignment) {
             auto index =
-                get_constant_index(constant.id, problem_->actions[action_index]
-                                                    .parameters[parameter_index]
-                                                    .get_type()
-                                                    .id);
+                get_constant_index(constant, problem_->actions[action_index]
+                                                 .parameters[parameter_index]
+                                                 .get_type());
             formula << Literal{
                 Variable{parameters_[action_index][parameter_index][index]},
                 false};
@@ -253,7 +254,7 @@ void ExistsEncoder::interference() {
     action_order[action_rank_[i]] = ActionIndex{i};
   }
   for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
-    if (global_timer.get_elapsed_time() > config.timeout) {
+    if (check_timeout()) {
       throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
@@ -291,10 +292,9 @@ void ExistsEncoder::interference() {
         }
         for (const auto &[parameter_index, constant] : assignment) {
           auto index =
-              get_constant_index(constant.id, problem_->actions[action_index]
-                                                  .parameters[parameter_index]
-                                                  .get_type()
-                                                  .id);
+              get_constant_index(constant, problem_->actions[action_index]
+                                               .parameters[parameter_index]
+                                               .get_type());
           universal_clauses_ << Literal{
               Variable{parameters_[action_index][parameter_index][index]},
               false};
@@ -313,11 +313,10 @@ void ExistsEncoder::interference() {
                   << Literal{Variable{actions_[action_index]}, false};
             }
             for (const auto &[parameter_index, constant] : assignment) {
-              auto index = get_constant_index(constant.id,
-                                              problem_->actions[action_index]
-                                                  .parameters[parameter_index]
-                                                  .get_type()
-                                                  .id);
+              auto index =
+                  get_constant_index(constant, problem_->actions[action_index]
+                                                   .parameters[parameter_index]
+                                                   .get_type());
               universal_clauses_ << Literal{
                   Variable{parameters_[action_index][parameter_index][index]},
                   false};
@@ -337,7 +336,7 @@ void ExistsEncoder::interference() {
 void ExistsEncoder::frame_axioms() {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
-    if (global_timer.get_elapsed_time() > config.timeout) {
+    if (check_timeout()) {
       throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
@@ -373,11 +372,10 @@ void ExistsEncoder::frame_axioms() {
               ++clause_count;
             }
             for (const auto &[parameter_index, constant] : assignment) {
-              auto index = get_constant_index(constant.id,
-                                              problem_->actions[action_index]
-                                                  .parameters[parameter_index]
-                                                  .get_type()
-                                                  .id);
+              auto index =
+                  get_constant_index(constant, problem_->actions[action_index]
+                                                   .parameters[parameter_index]
+                                                   .get_type());
               universal_clauses_ << Literal{Variable{it->second}, false};
               universal_clauses_ << Literal{
                   Variable{parameters_[action_index][parameter_index][index]},
@@ -394,10 +392,9 @@ void ExistsEncoder::frame_axioms() {
           }
           for (const auto &[parameter_index, constant] : assignment) {
             auto index =
-                get_constant_index(constant.id, problem_->actions[action_index]
-                                                    .parameters[parameter_index]
-                                                    .get_type()
-                                                    .id);
+                get_constant_index(constant, problem_->actions[action_index]
+                                                 .parameters[parameter_index]
+                                                 .get_type());
             dnf << Literal{
                 Variable{parameters_[action_index][parameter_index][index]},
                 true};

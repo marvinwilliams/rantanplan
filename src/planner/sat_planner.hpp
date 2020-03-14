@@ -13,7 +13,8 @@
 extern Config config;
 
 std::unique_ptr<Encoder>
-get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept;
+get_encoder(const std::shared_ptr<normalized::Problem> &problem,
+            util::Seconds timeout) noexcept;
 
 class SatPlanner final : public Planner {
 private:

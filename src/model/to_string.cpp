@@ -10,35 +10,31 @@
 
 using namespace normalized;
 
-std::string to_string(const Type &type, const Problem &problem) {
+std::string to_string(const TypeIndex &type, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.get_name(type.id);
-  ss << "id: " << type.id;
-  if (type.supertype != type.id) {
-    ss << " - " << problem.get_name(type.supertype);
+  ss << problem.get_name(type);
+  if (problem.types[type].supertype != type) {
+    ss << " - " << problem.get_name(problem.types[type].supertype);
   }
   return ss.str();
 }
 
-std::string to_string(const Constant &constant, const Problem &problem) {
+std::string to_string(const ConstantIndex &constant, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.get_name(constant.id);
-  ss << "id: " << constant.id;
-  if (constant.type.id != TypeIndex{0}) {
-    ss << " - " << problem.get_name(constant.type.id);
+  ss << problem.get_name(constant);
+  if (problem.constants[constant].type != TypeIndex{0}) {
+    ss << " - " << problem.get_name(problem.constants[constant].type);
   }
   return ss.str();
 }
 
-std::string to_string(const Predicate &predicate, const Problem &problem) {
+std::string to_string(const PredicateIndex &predicate, const Problem &problem) {
   std::stringstream ss;
-  ss << problem.get_name(predicate.id);
-  ss << "id: " << predicate.id;
+  ss << problem.get_name(predicate);
   ss << '(';
-  std::transform(predicate.parameter_types.begin(),
-                 predicate.parameter_types.end(),
-                 std::ostream_iterator<std::string>(ss, ", "),
-                 [&problem](Type type) { return problem.get_name(type.id); });
+  print_list(ss, problem.predicates[predicate].parameter_types.begin(),
+             problem.predicates[predicate].parameter_types.end(), ", ",
+             [&problem](TypeIndex type) { return problem.get_name(type); });
   ss << ')';
   return ss.str();
 }
@@ -52,22 +48,21 @@ std::string to_string(const Condition &condition, const Action &action,
   ss << problem.get_name(condition.atom.predicate);
   ss << "id: " << condition.atom.predicate;
   ss << '(';
-  std::transform(
-      condition.atom.arguments.begin(), condition.atom.arguments.end(),
-      std::ostream_iterator<std::string>(ss, ", "),
-      [&problem, &action](Argument a) {
-        if (a.is_parameter()) {
-          std::stringstream parameter_ss;
-          parameter_ss << '[';
-          parameter_ss << problem.get_name(
-              action.parameters[a.get_parameter_index()].get_type().id);
-          parameter_ss << "] #";
-          parameter_ss << a.get_parameter_index();
-          return parameter_ss.str();
-        } else {
-          return problem.get_name(a.get_constant().id);
-        }
-      });
+  print_list(ss, condition.atom.arguments.begin(),
+             condition.atom.arguments.end(), ", ",
+             [&problem, &action](Argument a) {
+               if (a.is_parameter()) {
+                 std::stringstream parameter_ss;
+                 parameter_ss << '[';
+                 parameter_ss << problem.get_name(
+                     action.parameters[a.get_parameter_index()].get_type());
+                 parameter_ss << "] #";
+                 parameter_ss << a.get_parameter_index();
+                 return parameter_ss.str();
+               } else {
+                 return problem.get_name(a.get_constant());
+               }
+             });
   ss << ')';
   return ss.str();
 }
@@ -77,9 +72,8 @@ std::string to_string(const GroundAtom &atom, const Problem &problem) {
   ss << problem.get_name(atom.predicate);
   ss << "id: " << atom.predicate;
   ss << '(';
-  std::transform(atom.arguments.begin(), atom.arguments.end(),
-                 std::ostream_iterator<std::string>(ss, ", "),
-                 [&problem](Constant c) { return problem.get_name(c.id); });
+  print_list(ss, atom.arguments.begin(), atom.arguments.end(), ", ",
+             [&problem](ConstantIndex c) { return problem.get_name(c); });
   ss << ')';
   return ss.str();
 }
@@ -89,15 +83,14 @@ std::string to_string(const Action &action, const Problem &problem) {
   ss << problem.action_names[action.id];
   ss << "id: " << action.id;
   ss << '(';
-  std::transform(action.parameters.begin(), action.parameters.end(),
-                 std::ostream_iterator<std::string>(ss, ", "),
-                 [&problem](Parameter p) {
-                   if (p.is_free()) {
-                     return '[' + problem.get_name(p.get_type().id) + ']';
-                   } else {
-                     return problem.get_name(p.get_constant().id);
-                   }
-                 });
+  print_list(ss, action.parameters.begin(), action.parameters.end(), ", ",
+             [&problem](Parameter p) {
+               if (p.is_free()) {
+                 return '[' + problem.get_name(p.get_type()) + ']';
+               } else {
+                 return problem.get_name(p.get_constant());
+               }
+             });
   ss << ')' << '\n';
   ss << '\t' << "Preconditions:" << '\n';
   for (const auto &precondition : action.preconditions) {
@@ -120,16 +113,16 @@ std::string to_string(const Problem &problem) {
   }
   ss << '\n';
   ss << "Types:" << '\n';
-  for (Type t : problem.types) {
-    ss << '\t' << to_string(t, problem) << '\n';
+  for (size_t i = 0; i < problem.types.size(); ++i) {
+    ss << '\t' << to_string(TypeIndex{i}, problem) << '\n';
   }
   ss << "Constants:" << '\n';
-  for (Constant c : problem.constants) {
-    ss << '\t' << to_string(c, problem) << '\n';
+  for (size_t i = 0; i < problem.constants.size(); ++i) {
+    ss << '\t' << to_string(ConstantIndex{i}, problem) << '\n';
   }
   ss << "Predicates:" << '\n';
-  for (const Predicate &p : problem.predicates) {
-    ss << '\t' << to_string(p, problem) << '\n';
+  for (size_t i = 0; i < problem.predicates.size(); ++i) {
+    ss << '\t' << to_string(PredicateIndex{i}, problem) << '\n';
   }
   ss << "Actions:" << '\n';
   for (const Action &a : problem.actions) {
@@ -152,11 +145,11 @@ std::string to_string(const Plan &plan) noexcept {
   std::stringstream ss;
   unsigned int step = 0;
   for (auto [action, arguments] : plan.sequence) {
-    ss << step << ": " << '(' << plan.problem->action_names[action] << ' ';
-    std::transform(
-        arguments.begin(), arguments.end(),
-        std::ostream_iterator<std::string>(ss, ", "),
-        [&plan](Constant c) { return plan.problem->constant_names[c.id]; });
+    ss << step << ": " << '('
+       << plan.problem->action_names[plan.problem->actions[action].id] << ' ';
+    print_list(
+        ss, arguments.begin(), arguments.end(), ", ",
+        [&plan](ConstantIndex c) { return plan.problem->constant_names[c]; });
     ss << ')' << '\n';
     ++step;
   }

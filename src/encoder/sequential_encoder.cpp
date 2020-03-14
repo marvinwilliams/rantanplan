@@ -16,8 +16,9 @@
 
 using namespace normalized;
 
-SequentialEncoder::SequentialEncoder(const std::shared_ptr<Problem> &problem)
-    : Encoder{problem}, support_{*problem} {
+SequentialEncoder::SequentialEncoder(const std::shared_ptr<Problem> &problem,
+                                     util::Seconds timeout = util::inf_time)
+    : Encoder{problem, timeout}, support_{*problem, timeout} {
   LOG_INFO(encoding_logger, "Init sat variables...");
   init_sat_vars();
   LOG_INFO(encoding_logger, "Encode problem...");
@@ -62,7 +63,7 @@ Plan SequentialEncoder::extract_plan(const sat::Model &model,
     for (size_t i = 0; i < problem_->actions.size(); ++i) {
       if (model[actions_[i] + s * num_vars_]) {
         const Action &action = problem_->actions[i];
-        std::vector<Constant> constants;
+        std::vector<ConstantIndex> constants;
         for (size_t parameter_pos = 0; parameter_pos < action.parameters.size();
              ++parameter_pos) {
           const auto &parameter = action.parameters[parameter_pos];
@@ -72,7 +73,7 @@ Plan SequentialEncoder::extract_plan(const sat::Model &model,
           }
           for (size_t j = 0; j < problem_->constants.size(); ++j) {
             if (model[parameters_[parameter_pos][j] + s * num_vars_]) {
-              constants.push_back(problem_->constants[j]);
+              constants.push_back(ConstantIndex{j});
               break;
             }
           }
@@ -153,13 +154,13 @@ void SequentialEncoder::encode_actions() {
         continue;
       }
       const auto &constants_by_type =
-          problem_->constants_of_type[parameter.get_type().id];
+          problem_->constants_of_type[parameter.get_type()];
       universal_clauses_ << Literal{action_var, false};
       for (size_t constant_index = 0; constant_index < constants_by_type.size();
            ++constant_index) {
         universal_clauses_ << Literal{
-            Variable{parameters_[parameter_pos]
-                                [constants_by_type[constant_index].id]},
+            Variable{
+                parameters_[parameter_pos][constants_by_type[constant_index]]},
             true};
       }
       universal_clauses_ << sat::EndClause;
@@ -174,7 +175,7 @@ void SequentialEncoder::encode_actions() {
 void SequentialEncoder::parameter_implies_predicate() {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
-    if (global_timer.get_elapsed_time() > config.timeout) {
+    if (check_timeout()) {
       throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
@@ -184,8 +185,8 @@ void SequentialEncoder::parameter_implies_predicate() {
                  Support::PredicateId{i}, positive, is_effect)) {
           formula << Literal{Variable{actions_[action_index]}, false};
           for (auto [parameter_index, constant] : assignment) {
-            formula << Literal{
-                Variable{parameters_[parameter_index][constant.id]}, false};
+            formula << Literal{Variable{parameters_[parameter_index][constant]},
+                               false};
           }
           formula << Literal{Variable{predicates_[i], !is_effect}, positive}
                   << sat::EndClause;
@@ -200,7 +201,7 @@ void SequentialEncoder::parameter_implies_predicate() {
 void SequentialEncoder::frame_axioms() {
   uint_fast64_t clause_count = 0;
   for (size_t i = 0; i < support_.get_num_ground_atoms(); ++i) {
-    if (global_timer.get_elapsed_time() > config.timeout) {
+    if (check_timeout()) {
       throw TimeoutException{};
     }
     for (bool positive : {true, false}) {
@@ -235,7 +236,7 @@ void SequentialEncoder::frame_axioms() {
             for (auto [parameter_index, constant] : assignment) {
               universal_clauses_ << Literal{Variable{it->second}, false};
               universal_clauses_ << Literal{
-                  Variable{parameters_[parameter_index][constant.id]}, true};
+                  Variable{parameters_[parameter_index][constant]}, true};
               universal_clauses_ << sat::EndClause;
             }
             ++num_vars_;
@@ -245,7 +246,7 @@ void SequentialEncoder::frame_axioms() {
         } else {
           dnf << Literal{Variable{actions_[action_index]}, true};
           for (auto [parameter_index, constant] : assignment) {
-            dnf << Literal{Variable{parameters_[parameter_index][constant.id]},
+            dnf << Literal{Variable{parameters_[parameter_index][constant]},
                            true};
           }
         }

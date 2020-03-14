@@ -37,16 +37,11 @@ private:
                           bool positive) const noexcept;
   bool is_trivially_useless(const normalized::GroundAtom &predicate) const
       noexcept;
+  bool has_precondition(const normalized::Action &action,
+                        const normalized::GroundAtom &predicate) const noexcept;
   bool has_effect(const normalized::Action &action,
                   const normalized::GroundAtom &predicate, bool positive) const
       noexcept;
-  bool has_precondition(const normalized::Action &action,
-                        const normalized::GroundAtom &predicate,
-                        bool positive) const noexcept;
-  bool has_effect(const normalized::Action &action,
-                  const normalized::GroundAtom &predicate) const noexcept;
-  bool has_precondition(const normalized::Action &action,
-                        const normalized::GroundAtom &predicate) const noexcept;
 
   // No action has this predicate as effect and it is not in init_
   template <bool cache_success, bool cache_fail>
@@ -169,8 +164,7 @@ private:
     return true;
   }
 
-  bool is_useless(const normalized::GroundAtom &atom) const
-      noexcept;
+  bool is_useless(const normalized::GroundAtom &atom) const noexcept;
 
   normalized::ParameterSelection
   select_most_frequent(const normalized::Action &action) const noexcept;
@@ -187,6 +181,8 @@ private:
 
   void prune_actions() noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
+  std::pair<normalized::Action, bool> ground(const normalized::Action &action,
+              const normalized::ParameterAssignment &assignment) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
 
   float groundness_;

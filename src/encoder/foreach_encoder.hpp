@@ -6,6 +6,7 @@
 #include "encoder/support.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
+#include "util/timer.hpp"
 
 #include <cstdint>
 #include <map>
@@ -15,7 +16,8 @@ extern Config config;
 
 class ForeachEncoder final : public Encoder {
 public:
-  explicit ForeachEncoder(const std::shared_ptr<normalized::Problem> &problem);
+  explicit ForeachEncoder(const std::shared_ptr<normalized::Problem> &problem,
+                          util::Seconds timeout);
 
   int to_sat_var(Literal l, unsigned int step) const noexcept override;
   Plan extract_plan(const sat::Model &model, unsigned int num_steps) const
@@ -36,7 +38,8 @@ private:
   std::vector<uint_fast64_t> predicates_;
   std::vector<uint_fast64_t> actions_;
   std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;
-  std::vector<std::unordered_map<normalized::ParameterAssignment, uint_fast64_t>>
+  std::vector<
+      std::unordered_map<normalized::ParameterAssignment, uint_fast64_t>>
       dnf_helpers_;
 
   Support support_;

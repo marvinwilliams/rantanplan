@@ -10,23 +10,21 @@
 
 extern logging::Logger normalize_logger;
 
-normalized::Condition normalize_atomic_condition(
-    const parsed::BaseAtomicCondition &condition,
-    const parsed::Problem &problem,
-    const normalized::Problem &normalized_problem) noexcept;
+normalized::Condition
+normalize_atomic_condition(const parsed::BaseAtomicCondition &condition,
+                           const parsed::Problem &problem) noexcept;
 
 normalized::Condition
 normalize_atomic_condition(const parsed::BaseAtomicCondition &condition,
                            const parsed::Action &action,
-                           const parsed::Problem &problemconst,
-                           normalized::Problem &normalized_problem) noexcept;
+                           const parsed::Problem &problem) noexcept;
 
 std::vector<std::shared_ptr<parsed::BaseAtomicCondition>>
 to_list(const parsed::Condition &condition) noexcept;
 
 std::vector<normalized::Action>
-normalize_action(const parsed::Action &action, const parsed::Problem &problem,
-                 const normalized::Problem &normalized_problem) noexcept;
+normalize_action(const parsed::Action &action,
+                 const parsed::Problem &problem) noexcept;
 
 std::shared_ptr<normalized::Problem> normalize(const parsed::Problem &problem);
 

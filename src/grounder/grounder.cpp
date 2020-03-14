@@ -32,8 +32,14 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
     for (const auto &precondition : action.preconditions) {
       trivially_useless_[precondition.atom.predicate] = false;
     }
+    for (const auto &[precondition, positive] : action.ground_preconditions) {
+      trivially_useless_[precondition.predicate] = false;
+    }
     for (const auto &effect : action.effects) {
       trivially_rigid_[effect.atom.predicate] = false;
+    }
+    for (const auto &[effect, positive] : action.ground_effects) {
+      trivially_useless_[effect.predicate] = false;
     }
   }
 
@@ -135,11 +141,9 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
         }
         for (auto it = AssignmentIterator{selection, action, *problem_};
              it != AssignmentIterator{}; ++it) {
-          Action new_action = action;
-          ground(*it, new_action);
-          if (is_valid(new_action)) {
-            simplify(new_action);
-            new_actions.push_back(std::move(new_action));
+          auto [new_action, valid] = ground(action, *it);
+          if (valid) {
+            new_actions.push_back(new_action);
           } else {
             new_pruned_actions += get_num_instantiated(new_action, *problem_);
           }
@@ -174,7 +178,7 @@ float Grounder::get_groundness() const noexcept { return groundness_; }
 Grounder::PredicateId Grounder::get_id(const GroundAtom &atom) const noexcept {
   uint_fast64_t result = 0;
   for (const auto &a : atom.arguments) {
-    result = (result * problem_->constants.size()) + a.id;
+    result = (result * problem_->constants.size()) + a;
   }
   return result;
 }
@@ -198,39 +202,35 @@ bool Grounder::is_trivially_useless(const GroundAtom &atom) const noexcept {
   return trivially_useless_[atom.predicate];
 }
 
-bool Grounder::has_effect(const Action &action, const GroundAtom &atom,
-                          bool positive) const noexcept {
-  for (const auto &effect : action.effects) {
-    if (effect.atom.predicate == atom.predicate &&
-        effect.positive == positive) {
-      if (is_instantiatable(effect.atom, atom.arguments, action, *problem_)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool Grounder::has_precondition(const Action &action, const GroundAtom &atom,
-                                bool positive) const noexcept {
-  for (const auto &precondition : action.preconditions) {
-    if (precondition.atom.predicate == atom.predicate &&
-        precondition.positive == positive) {
-      if (is_instantiatable(precondition.atom, atom.arguments, action,
-                            *problem_)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 bool Grounder::has_precondition(const Action &action,
                                 const GroundAtom &atom) const noexcept {
+  for (const auto &[precondition, _] : action.ground_preconditions) {
+    if (precondition == atom) {
+      return true;
+    }
+  }
   for (const auto &precondition : action.preconditions) {
     if (precondition.atom.predicate == atom.predicate) {
       if (is_instantiatable(precondition.atom, atom.arguments, action,
                             *problem_)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool Grounder::has_effect(const Action &action, const GroundAtom &atom,
+                          bool positive) const noexcept {
+  for (const auto &[effect, effect_positive] : action.ground_effects) {
+    if (effect == atom && effect_positive == positive) {
+      return true;
+    }
+  }
+  for (const auto &effect : action.effects) {
+    if (effect.atom.predicate == atom.predicate &&
+        effect.positive == positive) {
+      if (is_instantiatable(effect.atom, atom.arguments, action, *problem_)) {
         return true;
       }
     }
@@ -275,9 +275,6 @@ ParameterSelection Grounder::select_min_new(const Action &action) const
 
   for (auto it = action.preconditions.begin(); it != action.preconditions.end();
        ++it) {
-    if (is_ground(it->atom)) {
-      continue;
-    }
     uint_fast64_t current = get_num_instantiated(
         get_referenced_parameters(it->atom, action), action, *problem_);
     for (auto ground_atom_it = GroundAtomIterator{it->atom, action, *problem_};
@@ -304,11 +301,9 @@ ParameterSelection Grounder::select_max_rigid(const Action &action) const
 
   for (auto it = action.preconditions.begin(); it != action.preconditions.end();
        ++it) {
-    if (is_ground(it->atom) ||
-        get_num_instantiated(get_referenced_parameters(it->atom, action),
-                             action, *problem_) +
-                1 <=
-            max) {
+    if (1 + get_num_instantiated(get_referenced_parameters(it->atom, action),
+                                 action, *problem_) <=
+        max) {
       continue;
     }
     uint_fast64_t current = 1;
@@ -336,9 +331,6 @@ ParameterSelection Grounder::select_approx_min_new(const Action &action) const
 
   for (auto it = action.preconditions.begin(); it != action.preconditions.end();
        ++it) {
-    if (is_ground(it->atom)) {
-      continue;
-    }
     uint_fast64_t current = get_num_instantiated(
         get_referenced_parameters(it->atom, action), action, *problem_);
     if (current < min) {
@@ -359,9 +351,6 @@ ParameterSelection Grounder::select_approx_max_rigid(const Action &action) const
 
   for (auto it = action.preconditions.begin(); it != action.preconditions.end();
        ++it) {
-    if (is_ground(it->atom)) {
-      continue;
-    }
     uint_fast64_t current =
         1 + (it->positive
                  ? successful_cache_[it->atom.predicate].neg_rigid.size()
@@ -380,12 +369,11 @@ ParameterSelection Grounder::select_approx_max_rigid(const Action &action) const
 
 ParameterSelection Grounder::select_first_effect(const Action &action) const
     noexcept {
-  for (const auto &effect : action.effects) {
-    if (!is_ground(effect.atom)) {
-      return get_referenced_parameters(effect.atom, action);
-    }
+  if (action.effects.empty()) {
+    return select_most_frequent(action);
+  } else {
+    return get_referenced_parameters(action.effects[0].atom, action);
   }
-  return select_most_frequent(action);
 }
 
 void Grounder::prune_actions() noexcept {
@@ -403,10 +391,9 @@ void Grounder::prune_actions() noexcept {
       auto it = std::partition(actions_[i].begin(), actions_[i].end(),
                                [this](const auto &a) { return is_valid(a); });
       if (it != actions_[i].end()) {
-        num_pruned_actions_ += std::accumulate(
-            it, actions_[i].end(), 0ul, [&](uint_fast64_t sum, const auto &a) {
-              return sum + get_num_instantiated(a, *problem_);
-            });
+        std::for_each(it, actions_[i].end(), [&](const auto &a) {
+          num_pruned_actions_ += get_num_instantiated(a, *problem_);
+        });
         actions_[i].erase(it, actions_[i].end());
         changed = true;
       }
@@ -420,71 +407,140 @@ void Grounder::prune_actions() noexcept {
 }
 
 bool Grounder::is_valid(const Action &action) const noexcept {
-  for (const auto &precondition : action.preconditions) {
-    if (config.pruning_policy != Config::PruningPolicy::Eager &&
-        !is_ground(precondition.atom)) {
-      continue;
-    }
-    bool rigid = true;
-    for (auto it = GroundAtomIterator{precondition.atom, action, *problem_};
-         it != GroundAtomIterator{}; ++it) {
-      if (!is_rigid(*it, !precondition.positive)) {
-        rigid = false;
-        break;
-      }
-    }
-    if (rigid) {
-      return false;
-    }
+  if (action.ground_effects.empty() && action.effects.empty()) {
+    return false;
+  }
+  if (std::any_of(action.ground_preconditions.begin(),
+                  action.ground_preconditions.end(), [this](const auto &p) {
+                    return is_rigid(p.first, !p.second);
+                  })) {
+    return false;
+  }
+  if (config.pruning_policy == Config::PruningPolicy::Eager &&
+      std::any_of(action.preconditions.begin(), action.preconditions.end(),
+                  [&](const auto &precondition) {
+                    for (auto it = GroundAtomIterator{precondition.atom, action,
+                                                      *problem_};
+                         it != GroundAtomIterator{}; ++it) {
+                      if (!is_rigid(*it, !precondition.positive)) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  })) {
+    return false;
   }
 
-  if (config.pruning_policy != Config::PruningPolicy::Eager &&
-      std::any_of(action.effects.begin(), action.effects.end(),
-                  [&](const auto &e) { return !is_ground(e.atom); })) {
-    return true;
-  }
-  if (std::all_of(
-          action.effects.begin(), action.effects.end(), [&](const auto &e) {
-            for (auto it = GroundAtomIterator{e.atom, action, *problem_};
-                 it != GroundAtomIterator{}; ++it) {
-              if (!is_rigid(*it, e.positive) && !is_useless(*it)) {
-                return false;
-              }
-            }
-            return true;
-          })) {
+  if (action.effects.empty() &&
+      std::all_of(action.ground_effects.begin(), action.ground_effects.end(),
+                  [this](const auto &e) {
+                    return is_rigid(e.first, e.second) || is_useless(e.first);
+                  })) {
     return false;
   }
   return true;
 }
 
+std::pair<normalized::Action, bool>
+Grounder::ground(const normalized::Action &action,
+                 const normalized::ParameterAssignment &assignment) const
+    noexcept {
+  Action new_action{};
+  new_action.id = action.id;
+  new_action.parameters = action.parameters;
+
+  for (auto [p, c] : assignment) {
+    new_action.parameters[p].set(c);
+  }
+  for (const auto &[precondition, positive] : action.ground_preconditions) {
+    if (is_rigid(precondition, !positive)) {
+      return {new_action, false};
+    } else if (!is_rigid(precondition, positive)) {
+      new_action.ground_preconditions.emplace_back(precondition, positive);
+    }
+  }
+  for (auto precondition : action.preconditions) {
+    if (update_condition(precondition, new_action)) {
+      auto new_precondition = as_ground_atom(precondition.atom);
+      if (is_rigid(new_precondition, !precondition.positive)) {
+        return {new_action, false};
+      } else if (!is_rigid(new_precondition, precondition.positive)) {
+        new_action.ground_preconditions.emplace_back(new_precondition,
+                                                     precondition.positive);
+      }
+    } else {
+      if (config.pruning_policy == Config::PruningPolicy::Eager) {
+        bool unsatisfiable = true;
+        for (auto it = GroundAtomIterator{precondition.atom, action, *problem_};
+             it != GroundAtomIterator{}; ++it) {
+          if (!is_rigid(*it, !precondition.positive)) {
+            unsatisfiable = false;
+            break;
+          }
+        }
+        if (unsatisfiable) {
+          return {new_action, false};
+        }
+        new_action.preconditions.push_back(std::move(precondition));
+      } else {
+        new_action.preconditions.push_back(std::move(precondition));
+      }
+    }
+  }
+  for (const auto &[effect, positive] : action.ground_effects) {
+    if (!is_rigid(effect, positive) && !is_useless(effect)) {
+      new_action.ground_effects.emplace_back(effect, positive);
+    }
+  }
+  for (auto effect : action.effects) {
+    if (update_condition(effect, new_action)) {
+      auto new_effect = as_ground_atom(effect.atom);
+      if (!is_rigid(new_effect, effect.positive) && !is_useless(new_effect)) {
+        new_action.ground_effects.emplace_back(new_effect, effect.positive);
+      }
+    } else {
+      if (config.pruning_policy == Config::PruningPolicy::Eager) {
+        bool keep_effect = false;
+        for (auto it = GroundAtomIterator{effect.atom, action, *problem_};
+             it != GroundAtomIterator{}; ++it) {
+          if (!is_rigid(*it, effect.positive) && !is_useless(*it)) {
+            keep_effect = true;
+            break;
+          }
+        }
+        if (keep_effect) {
+          new_action.effects.push_back(std::move(effect));
+        }
+      } else {
+        new_action.effects.push_back(std::move(effect));
+      }
+    }
+  }
+
+  if (new_action.ground_effects.empty() && new_action.effects.empty()) {
+    return {new_action, false};
+  }
+  return {new_action, true};
+}
+
 bool Grounder::simplify(Action &action) const noexcept {
   bool changed = false;
-  if (auto it = std::remove_if(action.effects.begin(), action.effects.end(),
-                               [this](const auto &p) {
-                                 if (is_ground(p.atom)) {
-                                   auto ground_atom = as_ground_atom(p.atom);
-                                   return is_rigid(ground_atom, p.positive) ||
-                                          is_useless(ground_atom);
-                                 }
-                                 return false;
-                               });
-      it != action.effects.end()) {
-    action.effects.erase(it, action.effects.end());
+  if (auto it = std::remove_if(
+          action.ground_effects.begin(), action.ground_effects.end(),
+          [this](const auto &e) {
+            return is_rigid(e.first, e.second) || is_useless(e.first);
+          });
+      it != action.ground_effects.end()) {
+    action.ground_effects.erase(it, action.ground_effects.end());
     changed = true;
   }
 
-  if (auto it = std::remove_if(action.preconditions.begin(),
-                               action.preconditions.end(),
-                               [this](const auto &p) {
-                                 if (is_ground(p.atom)) {
-                                   auto ground_atom = as_ground_atom(p.atom);
-                                   return is_rigid(ground_atom, p.positive);
-                                 }
-                                 return false;
-                               });
-      it != action.preconditions.end()) {
-    action.preconditions.erase(it, action.preconditions.end());
+  if (auto it = std::remove_if(
+          action.ground_preconditions.begin(),
+          action.ground_preconditions.end(),
+          [this](const auto &p) { return is_rigid(p.first, p.second); });
+      it != action.ground_preconditions.end()) {
+    action.ground_preconditions.erase(it, action.ground_preconditions.end());
     changed = true;
   }
   return changed;

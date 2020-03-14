@@ -39,7 +39,7 @@ public:
         neg_effect;
   };
 
-  explicit Support(const normalized::Problem &problem_);
+  explicit Support(const normalized::Problem &problem, util::Seconds timeout);
 
   inline const normalized::Problem &get_problem() const noexcept {
     return problem_;
@@ -88,6 +88,8 @@ private:
 
   void set_predicate_support();
 
+  util::Timer timer_;
+  util::Seconds timeout_;
   size_t num_ground_atoms_;
   std::unordered_set<PredicateId> init_;
   mutable std::unordered_map<normalized::GroundAtom, PredicateId> ground_atoms_;

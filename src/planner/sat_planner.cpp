@@ -16,18 +16,19 @@
 using namespace std::chrono_literals;
 
 std::unique_ptr<Encoder>
-get_encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept {
+get_encoder(const std::shared_ptr<normalized::Problem> &problem,
+            util::Seconds timeout) noexcept {
   switch (config.encoding) {
   case Config::Encoding::Sequential:
-    return std::make_unique<SequentialEncoder>(problem);
+    return std::make_unique<SequentialEncoder>(problem, timeout);
   case Config::Encoding::Foreach:
-    return std::make_unique<ForeachEncoder>(problem);
+    return std::make_unique<ForeachEncoder>(problem, timeout);
   case Config::Encoding::LiftedForeach:
-    return std::make_unique<LiftedForeachEncoder>(problem);
+    return std::make_unique<LiftedForeachEncoder>(problem, timeout);
   case Config::Encoding::Exists:
-    return std::make_unique<ExistsEncoder>(problem);
+    return std::make_unique<ExistsEncoder>(problem, timeout);
   }
-  return std::make_unique<ForeachEncoder>(problem);
+  return std::make_unique<ForeachEncoder>(problem, timeout);
 }
 
 Plan SatPlanner::find_plan_impl(
@@ -37,7 +38,7 @@ Plan SatPlanner::find_plan_impl(
 
   std::unique_ptr<Encoder> encoder;
   try {
-    encoder = get_encoder(problem);
+    encoder = get_encoder(problem, timeout);
   } catch (const TimeoutException &e) {
     LOG_ERROR(planner_logger, "Encoding timed out");
     throw;
@@ -54,7 +55,8 @@ Plan SatPlanner::find_plan_impl(
   float current_step = 1.0f;
   while (true) {
     solver.next_step();
-    if (timer.get_elapsed_time() > timeout) {
+    if (global_timer.get_elapsed_time() > config.timeout ||
+        timer.get_elapsed_time() > timeout) {
       break;
     }
     do {
@@ -65,19 +67,19 @@ Plan SatPlanner::find_plan_impl(
 
     assume_goal(solver, step, *encoder);
 
-    auto solve_timeout = skipped_steps >= config.max_skip_steps
-                             ? util::inf_time
-                             : config.solver_timeout;
+    auto skip_timeout = skipped_steps >= config.max_skip_steps
+                            ? util::inf_time
+                            : config.step_timeout;
 
-    if (solve_timeout == util::inf_time) {
+    if (skip_timeout == util::inf_time) {
       LOG_INFO(planner_logger, "Trying to solve step %u", step);
     } else {
       LOG_INFO(planner_logger, "Trying to solve step %u for %.2f seconds", step,
-               solve_timeout.count());
+               skip_timeout.count());
     }
 
     util::Timer step_timer;
-    solver.solve(timeout - timer.get_elapsed_time(), solve_timeout);
+    solver.solve(timeout - timer.get_elapsed_time(), skip_timeout);
     LOG_INFO(planner_logger, "Solving step %u took %.2f seconds", step,
              util::Seconds{step_timer.get_elapsed_time()}.count());
 
@@ -85,7 +87,7 @@ Plan SatPlanner::find_plan_impl(
     case sat::Solver::Status::Solved:
       return encoder->extract_plan(solver.get_model(), step);
     case sat::Solver::Status::Timeout:
-      break;
+      throw TimeoutException{};
     case sat::Solver::Status::Unsolvable:
       skipped_steps = 0;
       break;

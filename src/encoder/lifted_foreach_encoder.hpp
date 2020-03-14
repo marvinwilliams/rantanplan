@@ -16,7 +16,7 @@ extern Config config;
 class LiftedForeachEncoder final : public Encoder {
 public:
   explicit LiftedForeachEncoder(
-      const std::shared_ptr<normalized::Problem> &problem);
+      const std::shared_ptr<normalized::Problem> &problem, util::Seconds timeout);
 
   int to_sat_var(Literal l, unsigned int step) const noexcept override;
   Plan extract_plan(const sat::Model &model, unsigned int num_steps) const

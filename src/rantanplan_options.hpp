@@ -27,9 +27,6 @@ inline options::Options set_options(const std::string &name) {
   // Grounding
   options.add_option<std::string>({"parameter-selection", 's'},
                                   "Select preprocess mode");
-  options.add_option<std::string>({"pruning-mode", 'x'}, "Select pruning mode");
-  options.add_option<std::string>({"operator-priority", 'p'},
-                                  "Select operator priority");
   options.add_option<std::string>({"cache-policy", 'c'},
                                   "Select cache priority");
   options.add_option<std::string>({"pruning-policy", 'l'},
@@ -99,15 +96,6 @@ inline void set_config(const options::Options &options, Config &config) {
   if (const auto &o = options.get<std::string>("parameter-selection");
       o.count > 0) {
     config.parse_parameter_selection(o.value);
-  }
-
-  if (const auto &o = options.get<std::string>("pruning-mode"); o.count > 0) {
-    config.parse_pruning_mode(o.value);
-  }
-
-  if (const auto &o = options.get<std::string>("operator-priority");
-      o.count > 0) {
-    config.parse_operator_priority(o.value);
   }
 
   if (const auto &o = options.get<std::string>("cache-policy");

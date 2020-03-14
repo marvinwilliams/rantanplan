@@ -5,6 +5,7 @@
 #include "model/normalized/utils.hpp"
 #include "model/to_string.hpp"
 #include "util/combination_iterator.hpp"
+#include "util/timer.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -12,7 +13,8 @@
 
 using namespace normalized;
 
-Support::Support(const Problem &problem) : problem_{problem} {
+Support::Support(const Problem &problem, util::Seconds timeout = util::inf_time)
+    : timeout_{timeout}, problem_{problem}{
   num_ground_atoms_ =
       std::accumulate(problem.predicates.begin(), problem.predicates.end(), 0ul,
                       [&problem](size_t sum, const auto &p) {
@@ -32,9 +34,16 @@ void Support::set_predicate_support() {
   for (size_t i = 0; i < problem_.actions.size(); ++i) {
     const auto &action = problem_.actions[i];
     for (auto is_effect : {true, false}) {
+      for (const auto &[predicate, positive] :
+           (is_effect ? action.ground_effects : action.ground_preconditions)) {
+        auto id = get_id(predicate);
+        select_support(id, positive, is_effect)
+            .emplace_back(ActionIndex{i}, ParameterAssignment{});
+      }
       for (const auto &condition :
            is_effect ? action.effects : action.preconditions) {
-        if (global_timer.get_elapsed_time() > config.timeout) {
+        if (global_timer.get_elapsed_time() > config.timeout ||
+            timer_.get_elapsed_time() > timeout_) {
           throw TimeoutException{};
         }
         for (GroundAtomIterator it{condition.atom, action, problem_};

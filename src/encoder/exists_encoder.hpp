@@ -15,7 +15,8 @@ extern Config config;
 
 class ExistsEncoder final : public Encoder {
 public:
-  explicit ExistsEncoder(const std::shared_ptr<normalized::Problem> &problem);
+  explicit ExistsEncoder(const std::shared_ptr<normalized::Problem> &problem,
+                         util::Seconds timeout);
 
   int to_sat_var(Literal l, unsigned int step) const noexcept override;
   Plan extract_plan(const sat::Model &model, unsigned int num_steps) const
@@ -41,7 +42,8 @@ private:
       pos_helpers_;
   std::vector<std::unordered_map<normalized::ActionIndex, uint_fast64_t>>
       neg_helpers_;
-  std::vector<std::unordered_map<normalized::ParameterAssignment, uint_fast64_t>>
+  std::vector<
+      std::unordered_map<normalized::ParameterAssignment, uint_fast64_t>>
       dnf_helpers_;
 
   Support support_;

@@ -1,6 +1,7 @@
 #ifndef ENCODER_HPP
 #define ENCODER_HPP
 
+#include "config.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "sat/formula.hpp"
@@ -8,6 +9,8 @@
 
 #include <memory>
 
+extern Config config;
+extern util::Timer global_timer;
 extern logging::Logger encoding_logger;
 
 class Encoder {
@@ -24,8 +27,9 @@ public:
   static constexpr unsigned int SAT = 1;
   static constexpr unsigned int UNSAT = 2;
 
-  explicit Encoder(const std::shared_ptr<normalized::Problem> &problem) noexcept
-      : problem_{problem} {}
+  explicit Encoder(const std::shared_ptr<normalized::Problem> &problem,
+                   util::Seconds timeout = util::inf_time) noexcept
+      : timeout_{timeout}, problem_{problem} {}
 
   virtual int to_sat_var(Literal l, unsigned int step) const = 0;
   virtual Plan extract_plan(const sat::Model &model,
@@ -43,6 +47,13 @@ public:
   virtual ~Encoder() = default;
 
 protected:
+  bool check_timeout() {
+    return (global_timer.get_elapsed_time() > config.timeout ||
+            timer_.get_elapsed_time() > timeout_);
+  }
+
+  util::Timer timer_;
+  util::Seconds timeout_;
   Formula init_;
   Formula universal_clauses_;
   Formula transition_clauses_;
