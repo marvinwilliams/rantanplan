@@ -148,8 +148,6 @@ void Grounder::refine(float groundness, util::Seconds timeout) {
         if (!selection.empty()) {
           action_grounded = false;
         }
-        new_actions.reserve(new_actions.size() +
-                            get_num_instantiated(selection, action, *problem_));
         for (auto it = AssignmentIterator{selection, action, *problem_};
              it != AssignmentIterator{}; ++it) {
           auto [new_action, valid] = ground(action, *it);
