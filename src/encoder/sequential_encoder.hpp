@@ -18,6 +18,8 @@ public:
   explicit SequentialEncoder(
       const std::shared_ptr<normalized::Problem> &problem, util::Seconds timeout);
 
+  void encode() override;
+
   int to_sat_var(Literal l, unsigned int step) const noexcept override;
   Plan extract_plan(const sat::Model &model, unsigned int num_steps) const
       noexcept override;

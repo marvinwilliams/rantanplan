@@ -21,7 +21,9 @@ LiftedForeachEncoder::LiftedForeachEncoder(
     : Encoder{problem, timeout}, support_{*problem, timeout} {
   LOG_INFO(encoding_logger, "Init sat variables...");
   init_sat_vars();
+}
 
+void LiftedForeachEncoder::encode() {
   LOG_INFO(encoding_logger, "Encode problem...");
   encode_init();
   encode_actions();

@@ -28,6 +28,7 @@ Plan SatPlanner::find_plan_impl(
       throw;
     }
   }
+  encoder_->encode();
 
   sat::IpasirSolver solver;
   solver << static_cast<int>(Encoder::SAT) << 0;

@@ -20,6 +20,9 @@ ExistsEncoder::ExistsEncoder(const std::shared_ptr<Problem> &problem,
   LOG_INFO(encoding_logger, "Init sat variables...");
   init_sat_vars();
 
+}
+
+void ExistsEncoder::encode() {
   LOG_INFO(encoding_logger, "Encode problem...");
   encode_init();
   encode_actions();

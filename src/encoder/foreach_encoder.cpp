@@ -19,7 +19,9 @@ ForeachEncoder::ForeachEncoder(const std::shared_ptr<Problem> &problem,
     : Encoder{problem, timeout}, support_{*problem, timeout} {
   LOG_INFO(encoding_logger, "Init sat variables...");
   init_sat_vars();
+}
 
+void ForeachEncoder::encode() {
   LOG_INFO(encoding_logger, "Encode problem...");
   encode_init();
   encode_actions();

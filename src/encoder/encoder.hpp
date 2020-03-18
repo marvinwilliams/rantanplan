@@ -31,6 +31,8 @@ public:
                    util::Seconds timeout = util::inf_time) noexcept
       : timeout_{timeout}, problem_{problem} {}
 
+  virtual void encode() = 0;
+
   virtual int to_sat_var(Literal l, unsigned int step) const = 0;
   virtual Plan extract_plan(const sat::Model &model,
                             unsigned int num_steps) const = 0;
