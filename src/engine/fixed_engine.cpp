@@ -19,7 +19,8 @@ Plan FixedEngine::start_planning_impl() {
 
   grounder.refine(config.target_groundness, config.grounding_timeout);
 
-  LOG_INFO(engine_logger, "Groundness of %.3f resulting in %lu actions",
+  LOG_INFO(engine_logger,
+           "Grounded to %.3f groundness resulting in %lu actions",
            grounder.get_groundness(), grounder.get_num_actions());
 
   auto problem = grounder.extract_problem();

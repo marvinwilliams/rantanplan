@@ -33,7 +33,6 @@ private:
   void assume_goal();
   void init_sat_vars();
 
-  uint_fast64_t num_vars_ = 3;
   std::vector<uint_fast64_t> predicates_;
   std::vector<uint_fast64_t> actions_;
   std::vector<std::vector<std::vector<uint_fast64_t>>> parameters_;

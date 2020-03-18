@@ -35,6 +35,8 @@ public:
   virtual Plan extract_plan(const sat::Model &model,
                             unsigned int num_steps) const = 0;
 
+  auto get_num_vars() const noexcept { return num_vars_;}
+
   const auto &get_init() const noexcept { return init_; }
   const auto &get_universal_clauses() const noexcept {
     return universal_clauses_;
@@ -54,6 +56,7 @@ protected:
 
   util::Timer timer_;
   util::Seconds timeout_;
+  uint_fast64_t num_vars_ = 3;
   Formula init_;
   Formula universal_clauses_;
   Formula transition_clauses_;
