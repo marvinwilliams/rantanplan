@@ -22,7 +22,6 @@ Plan OneshotEngine::start_planning_impl() {
   uint_fast64_t min_encoding_size =
       smallest_encoder->get_universal_clauses().clauses.size() +
       smallest_encoder->get_transition_clauses().clauses.size();
-  min_encoding_size *= smallest_encoder->get_num_vars();
   auto min_grounding = grounder.get_groundness();
   LOG_INFO(engine_logger, "Groundness of %.3f resulting in %lu actions",
            grounder.get_groundness(), grounder.get_num_actions());
@@ -54,7 +53,6 @@ Plan OneshotEngine::start_planning_impl() {
           problem, config.grounding_timeout - timer.get_elapsed_time());
       auto encoding_size = encoder->get_universal_clauses().clauses.size() +
                            encoder->get_transition_clauses().clauses.size();
-      encoding_size *= encoder->get_num_vars();
       LOG_INFO(engine_logger, "Encoding as %lu clauses", encoding_size);
       if (encoding_size < min_encoding_size) {
         min_encoding_size = encoding_size;
