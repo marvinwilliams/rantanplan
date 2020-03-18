@@ -110,7 +110,7 @@ void SatPlanner::assume_goal(sat::Solver &solver, unsigned int step,
 
 std::unique_ptr<Encoder>
 SatPlanner::get_encoder(const std::shared_ptr<normalized::Problem> &problem,
-                        util::Seconds timeout) noexcept {
+                        util::Seconds timeout) {
   switch (config.encoding) {
   case Config::Encoding::Sequential:
     return std::make_unique<SequentialEncoder>(problem, timeout);

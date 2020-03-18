@@ -28,7 +28,7 @@ public:
 
   static std::unique_ptr<Encoder>
   get_encoder(const std::shared_ptr<normalized::Problem> &problem,
-              util::Seconds timeout) noexcept;
+              util::Seconds timeout);
 };
 
 #endif /* end of include guard: SAT_PLANNER_HPP */
