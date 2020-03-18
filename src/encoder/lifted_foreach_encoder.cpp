@@ -230,6 +230,31 @@ void LiftedForeachEncoder::interference() {
           return true;
         }
       }
+      for (const auto &[effect, positive] : second_action.ground_effects) {
+        if (precondition.atom.predicate == effect.predicate &&
+            precondition.positive != positive &&
+            is_instantiatable(precondition.atom, effect.arguments, first_action,
+                              *problem_)) {
+          return true;
+        }
+      }
+    }
+    for (const auto &[precondition, positive] :
+         first_action.ground_preconditions) {
+      for (const auto &effect : second_action.effects) {
+        if (precondition.predicate == effect.atom.predicate &&
+            positive != effect.positive &&
+            is_instantiatable(effect.atom, precondition.arguments,
+                              second_action, *problem_)) {
+          return true;
+        }
+      }
+      for (const auto &[effect, eff_positive] : second_action.ground_effects) {
+        if (precondition.predicate == effect.predicate &&
+            positive != eff_positive && precondition.arguments == effect.arguments) {
+          return true;
+        }
+      }
     }
     return false;
   };
