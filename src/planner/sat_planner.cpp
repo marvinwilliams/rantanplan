@@ -17,18 +17,19 @@ void SatPlanner::set_encoder(std::unique_ptr<Encoder> encoder) noexcept {
 }
 
 Plan SatPlanner::find_plan_impl(
-    const std::shared_ptr<normalized::Problem> &problem, util::Seconds timeout) {
+    const std::shared_ptr<normalized::Problem> &problem,
+    util::Seconds timeout) {
   util::Timer timer;
 
   if (!encoder_) {
     try {
       encoder_ = get_encoder(problem, timeout);
+      encoder_->encode();
     } catch (const TimeoutException &e) {
       LOG_ERROR(planner_logger, "Encoding timed out");
       throw;
     }
   }
-  encoder_->encode();
 
   sat::IpasirSolver solver;
   solver << static_cast<int>(Encoder::SAT) << 0;

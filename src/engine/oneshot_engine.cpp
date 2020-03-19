@@ -31,6 +31,7 @@ Plan OneshotEngine::start_planning_impl() {
         smallest_problem,
         std::min(util::Seconds{10}, util::Seconds{config.grounding_timeout -
                                                   timer.get_elapsed_time()}));
+    encoder->encode();
     auto encoding_size = encoder->get_num_vars();
     LOG_INFO(engine_logger, "Encoding as %lu clauses", encoding_size);
     min_encoding_size = encoding_size;
@@ -69,6 +70,7 @@ Plan OneshotEngine::start_planning_impl() {
           problem,
           std::min(util::Seconds{10}, util::Seconds{config.grounding_timeout -
                                                     timer.get_elapsed_time()}));
+      encoder->encode();
       auto encoding_size = encoder->get_num_vars();
       LOG_INFO(engine_logger, "Encoding as %lu clauses", encoding_size);
       if (encoding_size < min_encoding_size) {
