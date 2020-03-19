@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 extern logging::Logger grounder_logger;
 extern Config config;
@@ -110,9 +111,9 @@ private:
   // No action has this predicate as precondition and it is a not a goal
   template <bool cache_success, bool cache_fail>
   bool is_useless(const normalized::GroundAtom &atom) const noexcept {
-    auto id = get_id(atom);
     auto &useless = successful_cache_[atom.predicate].useless;
     auto &not_useless = unsuccessful_cache_[atom.predicate].useless;
+    auto id = get_id(atom);
 
     if (cache_success && (useless.find(id) != useless.end())) {
       return true;
@@ -181,8 +182,9 @@ private:
 
   void prune_actions() noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
-  std::pair<normalized::Action, bool> ground(const normalized::Action &action,
-              const normalized::ParameterAssignment &assignment) const noexcept;
+  std::pair<normalized::Action, bool>
+  ground(const normalized::Action &action,
+         const normalized::ParameterAssignment &assignment) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
 
   float groundness_;

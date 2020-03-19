@@ -46,6 +46,11 @@ void Support::set_predicate_support() {
             timer_.get_elapsed_time() > timeout_) {
           throw TimeoutException{};
         }
+#ifdef PARALLEL
+        if (config.global_stop_flag.load(std::memory_order_acquire)) {
+          throw TimeoutException{};
+        }
+#endif
         for (GroundAtomIterator it{condition.atom, action, problem_};
              it != GroundAtomIterator{}; ++it) {
           auto id = get_id(*it);

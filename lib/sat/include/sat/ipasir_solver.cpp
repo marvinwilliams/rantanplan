@@ -35,6 +35,11 @@ Solver::Status IpasirSolver::solve_impl(util::Seconds timeout,
         (timer.get_elapsed_time() > timeout)) {
       return true;
     }
+#ifdef PARALLEL
+    if (config.global_stop_flag.load(std::memory_order_acquire)) {
+      return true;
+    }
+#endif
     if (timer.get_elapsed_time() > skip_timeout) {
       skip_step = true;
       return true;

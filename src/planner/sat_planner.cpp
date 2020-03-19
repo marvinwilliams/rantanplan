@@ -46,6 +46,11 @@ Plan SatPlanner::find_plan_impl(
         timer.get_elapsed_time() > timeout) {
       break;
     }
+#ifdef PARALLEL
+    if (config.global_stop_flag.load(std::memory_order_acquire)) {
+      break;
+    }
+#endif
     do {
       add_formula(solver, encoder_->get_transition_clauses(), step, *encoder_);
       ++step;

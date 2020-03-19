@@ -2,11 +2,10 @@
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
-#include "model/to_string.hpp"
 #include "planner/planner.hpp"
 #include "util/timer.hpp"
 
-#include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -18,15 +17,18 @@
 using namespace normalized;
 
 Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
-    : problem_{problem} {
+    : trivially_rigid_(problem->predicates.size(), true),
+      trivially_useless_(problem->predicates.size(), true),
+      init_(problem->predicates.size()), goal_(problem->predicates.size()),
+      action_grounded_(problem->actions.size(), false),
+      successful_cache_(problem->predicates.size()),
+      unsuccessful_cache_(problem->predicates.size()), problem_{problem} {
   num_actions_ =
       std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
                       [this](uint_fast64_t sum, const auto &a) {
                         return sum + get_num_instantiated(a, *problem_);
                       });
 
-  trivially_rigid_.resize(problem_->predicates.size(), true);
-  trivially_useless_.resize(problem_->predicates.size(), true);
   for (const auto &action : problem_->actions) {
     for (const auto &precondition : action.preconditions) {
       trivially_useless_[precondition.atom.predicate] = false;
@@ -42,7 +44,6 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
     }
   }
 
-  init_.resize(problem_->predicates.size());
   for (const auto &init : problem_->init) {
     init_[init.predicate].push_back(get_id(init));
   }
@@ -50,7 +51,6 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
     std::sort(i.begin(), i.end());
   }
 
-  goal_.resize(problem_->predicates.size());
   for (const auto &[goal, positive] : problem_->goal) {
     goal_[goal.predicate].push_back(get_id(goal));
   }
@@ -63,11 +63,6 @@ Grounder::Grounder(const std::shared_ptr<Problem> &problem) noexcept
   for (const auto &action : problem_->actions) {
     actions_.push_back({action});
   }
-
-  action_grounded_.resize(problem_->actions.size(), false);
-
-  successful_cache_.resize(problem_->predicates.size());
-  unsuccessful_cache_.resize(problem_->predicates.size());
 
   prune_actions();
 

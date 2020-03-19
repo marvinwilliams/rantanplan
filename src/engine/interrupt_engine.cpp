@@ -14,7 +14,11 @@ Plan InterruptEngine::start_planning_impl() {
   LOG_INFO(engine_logger, "Using interrupt engine");
 
   Grounder grounder{problem_};
-  SatPlanner planner{};
+
+  LOG_INFO(engine_logger, "Targeting %.3f groundness", 0.f);
+  LOG_INFO(engine_logger,
+           "Grounding to %.3f groundness resulting in %lu actions",
+           grounder.get_groundness(), grounder.get_num_actions());
 
   for (unsigned int planner_id = 0; planner_id < config.granularity;
        ++planner_id) {
@@ -34,6 +38,7 @@ Plan InterruptEngine::start_planning_impl() {
              planner_id, config.solver_timeout.count());
 
     try {
+      SatPlanner planner{};
       return planner.find_plan(problem, config.solver_timeout);
     } catch (const TimeoutException &e) {
       LOG_INFO(engine_logger, "Planner %u found no solution", planner_id);
@@ -53,5 +58,6 @@ Plan InterruptEngine::start_planning_impl() {
   LOG_INFO(engine_logger, "Starting planner %u with no timeout",
            config.granularity);
 
+  SatPlanner planner{};
   return planner.find_plan(problem, util::inf_time);
 }

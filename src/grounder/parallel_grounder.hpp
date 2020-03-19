@@ -11,7 +11,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <unordered_set>
@@ -19,46 +18,187 @@
 
 extern logging::Logger grounder_logger;
 extern Config config;
+extern util::Timer global_timer;
 
 class ParallelGrounder {
 public:
   struct predicate_id_t {};
   using PredicateId = util::Index<predicate_id_t>;
-  enum class Status { Success, Timeout, Interrupt };
 
   explicit ParallelGrounder(
       unsigned int num_threads,
       const std::shared_ptr<normalized::Problem> &problem) noexcept;
 
-  Status get_status() const noexcept;
-  void refine(float progress, std::chrono::seconds timeout,
-              unsigned int num_threads) noexcept;
+  void refine(float groundness, util::Seconds timeout,
+              unsigned int num_threads);
   size_t get_num_actions() const noexcept;
-  float get_progress() const noexcept;
+  float get_groundness() const noexcept;
   std::shared_ptr<normalized::Problem> extract_problem() const noexcept;
 
 private:
-  PredicateId get_id(const normalized::GroundAtom &predicate) const
-      noexcept;
+  PredicateId get_id(const normalized::GroundAtom &predicate) const noexcept;
   bool is_trivially_rigid(const normalized::GroundAtom &predicate,
                           bool positive) const noexcept;
-  bool
-  is_trivially_effectless(const normalized::GroundAtom &predicate,
-                          bool positive) const noexcept;
-  bool has_effect(const normalized::Action &action,
-                  const normalized::GroundAtom &predicate,
-                  bool positive) const noexcept;
+  bool is_trivially_useless(const normalized::GroundAtom &predicate) const
+      noexcept;
   bool has_precondition(const normalized::Action &action,
-                        const normalized::GroundAtom &predicate,
-                        bool positive) const noexcept;
-  // No action has this predicate as effect and it is not in init
-  bool is_rigid(const normalized::GroundAtom &predicate,
-                bool positive) const noexcept;
+                        const normalized::GroundAtom &predicate) const noexcept;
+  bool has_effect(const normalized::Action &action,
+                  const normalized::GroundAtom &predicate, bool positive) const
+      noexcept;
+
+  // No action has this predicate as effect and it is not in init_
+  template <bool cache_success, bool cache_fail>
+  bool is_rigid(const normalized::GroundAtom &atom, bool positive) const
+      noexcept {
+    auto &rigid = (positive ? successful_cache_[atom.predicate].pos_rigid
+                            : successful_cache_[atom.predicate].neg_rigid);
+    auto &rigid_mutex =
+        (positive ? successful_cache_[atom.predicate].pos_rigid_mutex
+                  : successful_cache_[atom.predicate].neg_rigid_mutex);
+    auto &not_rigid =
+        (positive ? unsuccessful_cache_[atom.predicate].pos_rigid
+                  : unsuccessful_cache_[atom.predicate].neg_rigid);
+    auto &not_rigid_mutex =
+        (positive ? unsuccessful_cache_[atom.predicate].pos_rigid_mutex
+                  : unsuccessful_cache_[atom.predicate].neg_rigid_mutex);
+    auto id = get_id(atom);
+
+    if (cache_success) {
+      if (std::lock_guard l{rigid_mutex}; rigid.find(id) != rigid.end()) {
+        return true;
+      }
+    }
+
+    if (cache_fail) {
+      if (std::lock_guard l{not_rigid_mutex};
+          not_rigid.find(id) != not_rigid.end()) {
+        return false;
+      }
+    }
+
+    if (std::binary_search(init_[atom.predicate].begin(),
+                           init_[atom.predicate].end(), id) != positive) {
+      if (cache_fail) {
+        std::lock_guard l{not_rigid_mutex};
+        not_rigid.insert(id);
+      }
+      return false;
+    }
+
+    if (trivially_rigid_[atom.predicate]) {
+      if (cache_success) {
+        std::lock_guard l{rigid_mutex};
+        rigid.insert(id);
+      }
+      return true;
+    }
+
+    if (config.pruning_policy == Config::PruningPolicy::Trivial) {
+      if (cache_fail) {
+        std::lock_guard l{not_rigid_mutex};
+        not_rigid.insert(id);
+      }
+      return false;
+    }
+
+    for (size_t i = 0; i < problem_->actions.size(); ++i) {
+      const auto &base_action = problem_->actions[i];
+      if (!has_effect(base_action, atom, !positive)) {
+        continue;
+      }
+      for (const auto &action : actions_[i]) {
+        if (has_effect(action, atom, !positive)) {
+          if (cache_fail) {
+            std::lock_guard l{not_rigid_mutex};
+            not_rigid.insert(id);
+          }
+          return false;
+        }
+      }
+    }
+    if (cache_success) {
+      std::lock_guard l{rigid_mutex};
+      rigid.insert(id);
+    }
+    return true;
+  }
+
+  bool is_rigid(const normalized::GroundAtom &atom, bool positive) const
+      noexcept;
+
   // No action has this predicate as precondition and it is a not a goal
-  bool is_effectless(const normalized::GroundAtom &predicate,
-                     bool positive) const noexcept;
+  template <bool cache_success, bool cache_fail>
+  bool is_useless(const normalized::GroundAtom &atom) const noexcept {
+    auto &useless = successful_cache_[atom.predicate].useless;
+    auto &useless_mutex = successful_cache_[atom.predicate].useless_mutex;
+    auto &not_useless = unsuccessful_cache_[atom.predicate].useless;
+    auto &not_useless_mutex = unsuccessful_cache_[atom.predicate].useless_mutex;
+    auto id = get_id(atom);
+
+    if (cache_success) {
+      if (std::lock_guard l{useless_mutex}; useless.find(id) != useless.end()) {
+        return true;
+      }
+    }
+
+    if (cache_fail) {
+      if (std::lock_guard l{not_useless_mutex};
+          not_useless.find(id) != not_useless.end()) {
+        return false;
+      }
+    }
+
+    if (std::binary_search(goal_[atom.predicate].begin(),
+                           goal_[atom.predicate].end(), id)) {
+      if (cache_fail) {
+        std::lock_guard l{not_useless_mutex};
+        not_useless.insert(id);
+      }
+      return false;
+    }
+
+    if (trivially_useless_[atom.predicate]) {
+      if (cache_success) {
+        std::lock_guard l{useless_mutex};
+        useless.insert(id);
+      }
+      return true;
+    }
+
+    if (config.pruning_policy == Config::PruningPolicy::Trivial) {
+      if (cache_fail) {
+        std::lock_guard l{not_useless_mutex};
+        not_useless.insert(id);
+      }
+      return false;
+    }
+
+    for (size_t i = 0; i < problem_->actions.size(); ++i) {
+      const auto &action = problem_->actions[i];
+      if (has_precondition(action, atom)) {
+        for (const auto &action : actions_[i]) {
+          if (has_precondition(action, atom)) {
+            if (cache_fail) {
+              std::lock_guard l{not_useless_mutex};
+              not_useless.insert(id);
+            }
+            return false;
+          }
+        }
+      }
+    }
+    if (cache_success) {
+      std::lock_guard l{useless_mutex};
+      useless.insert(id);
+    }
+    return true;
+  }
+
+  bool is_useless(const normalized::GroundAtom &atom) const noexcept;
+
   normalized::ParameterSelection
-  select_free(const normalized::Action &action) const noexcept;
+  select_most_frequent(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
   select_min_new(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
@@ -68,37 +208,38 @@ private:
   normalized::ParameterSelection
   select_approx_max_rigid(const normalized::Action &action) const noexcept;
   normalized::ParameterSelection
-  select_one_effect(const normalized::Action &action) const noexcept;
+  select_first_effect(const normalized::Action &action) const noexcept;
 
   void prune_actions(unsigned int num_threads) noexcept;
   bool is_valid(const normalized::Action &action) const noexcept;
+  std::pair<normalized::Action, bool>
+  ground(const normalized::Action &action,
+         const normalized::ParameterAssignment &assignment) const noexcept;
   bool simplify(normalized::Action &action) const noexcept;
 
-  Status status_ = Status::Success;
-  float progress_;
+  float groundness_;
   uint_fast64_t num_actions_;
-  std::atomic_uint_fast64_t num_pruned_actions_ = 0;
+  uint_fast64_t num_pruned_actions_ = 0;
   std::vector<std::vector<normalized::Action>> actions_;
   std::vector<bool> trivially_rigid_;
-  std::vector<bool> trivially_effectless_;
+  std::vector<bool> trivially_useless_;
   std::vector<std::vector<PredicateId>> init_;
-  std::vector<std::vector<std::pair<PredicateId, bool>>> goal_;
+  std::vector<std::vector<PredicateId>> goal_;
+  std::vector<bool> action_grounded_;
 
   struct Cache {
     std::unordered_set<PredicateId> pos_rigid;
     std::unordered_set<PredicateId> neg_rigid;
-    std::unordered_set<PredicateId> pos_effectless;
-    std::unordered_set<PredicateId> neg_effectless;
+    std::unordered_set<PredicateId> useless;
     std::mutex pos_rigid_mutex;
     std::mutex neg_rigid_mutex;
-    std::mutex pos_effectless_mutex;
-    std::mutex neg_effectless_mutex;
+    std::mutex useless_mutex;
   };
 
   mutable std::vector<Cache> successful_cache_;
   mutable std::vector<Cache> unsuccessful_cache_;
 
-  decltype(&ParallelPreprocessor::select_free) parameter_selector_;
+  decltype(&ParallelGrounder::select_most_frequent) parameter_selector_;
   std::shared_ptr<normalized::Problem> problem_;
 };
 

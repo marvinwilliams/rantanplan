@@ -37,7 +37,7 @@ public:
   virtual Plan extract_plan(const sat::Model &model,
                             unsigned int num_steps) const = 0;
 
-  auto get_num_vars() const noexcept { return num_vars_;}
+  auto get_num_vars() const noexcept { return num_vars_; }
 
   const auto &get_init() const noexcept { return init_; }
   const auto &get_universal_clauses() const noexcept {
@@ -52,8 +52,12 @@ public:
 
 protected:
   bool check_timeout() {
-    return (global_timer.get_elapsed_time() > config.timeout ||
-            timer_.get_elapsed_time() > timeout_);
+    return global_timer.get_elapsed_time() > config.timeout ||
+           timer_.get_elapsed_time() > timeout_
+#ifdef PARALLEL
+           || config.global_stop_flag.load(std::memory_order_acquire)
+#endif
+        ;
   }
 
   util::Timer timer_;

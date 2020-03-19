@@ -1,29 +1,29 @@
-#include "preprocess/parallel_preprocess.hpp"
+#include "grounder/parallel_grounder.hpp"
 #include "logging/logging.hpp"
 #include "model/normalized/model.hpp"
 #include "model/normalized/utils.hpp"
-#include "model/to_string.hpp"
 #include "planner/planner.hpp"
 #include "util/timer.hpp"
 
+#include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <mutex>
-#include <numeric>
 #include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 using namespace normalized;
-using namespace std::chrono_literals;
 
-ParallelPreprocessor::ParallelPreprocessor(
+ParallelGrounder::ParallelGrounder(
     unsigned int num_threads, const std::shared_ptr<Problem> &problem) noexcept
-    : successful_cache_(problem->predicates.size()),
+    : trivially_rigid_(problem->predicates.size(), true),
+      trivially_useless_(problem->predicates.size(), true),
+      init_(problem->predicates.size()), goal_(problem->predicates.size()),
+      action_grounded_(problem->actions.size(), false),
+      successful_cache_(problem->predicates.size()),
       unsuccessful_cache_(problem->predicates.size()), problem_{problem} {
   num_actions_ =
       std::accumulate(problem_->actions.begin(), problem_->actions.end(), 0ul,
@@ -31,36 +31,34 @@ ParallelPreprocessor::ParallelPreprocessor(
                         return sum + get_num_instantiated(a, *problem_);
                       });
 
-  trivially_rigid_.resize(problem_->predicates.size(), true);
-  trivially_effectless_.resize(problem_->predicates.size(), true);
   for (const auto &action : problem_->actions) {
-    for (const auto &[precondition, positive] : action.pre_instantiated) {
-      trivially_effectless_[precondition.definition] = false;
-    }
     for (const auto &precondition : action.preconditions) {
-      trivially_effectless_[precondition.definition] = false;
+      trivially_useless_[precondition.atom.predicate] = false;
     }
-    for (const auto &[effect, positive] : action.eff_instantiated) {
-      trivially_rigid_[effect.definition] = false;
+    for (const auto &[precondition, positive] : action.ground_preconditions) {
+      trivially_useless_[precondition.predicate] = false;
     }
     for (const auto &effect : action.effects) {
-      trivially_rigid_[effect.definition] = false;
+      trivially_rigid_[effect.atom.predicate] = false;
+    }
+    for (const auto &[effect, positive] : action.ground_effects) {
+      trivially_rigid_[effect.predicate] = false;
     }
   }
 
-  init_.resize(problem_->predicates.size());
-  for (const auto &predicate : problem_->init) {
-    init_[predicate.definition].push_back(get_id(predicate));
+  for (const auto &init : problem_->init) {
+    init_[init.predicate].push_back(get_id(init));
   }
-  std::for_each(init_.begin(), init_.end(),
-                [](auto &i) { std::sort(i.begin(), i.end()); });
+  for (auto &i : init_) {
+    std::sort(i.begin(), i.end());
+  }
 
-  goal_.resize(problem_->predicates.size());
-  for (const auto &[predicate, positive] : problem_->goal) {
-    goal_[predicate.definition].emplace_back(get_id(predicate), positive);
+  for (const auto &[goal, positive] : problem_->goal) {
+    goal_[goal.predicate].push_back(get_id(goal));
   }
-  std::for_each(goal_.begin(), goal_.end(),
-                [](auto &g) { std::sort(g.begin(), g.end()); });
+  for (auto &g : goal_) {
+    std::sort(g.begin(), g.end());
+  }
 
   actions_.reserve(problem_->actions.size());
 
@@ -70,56 +68,74 @@ ParallelPreprocessor::ParallelPreprocessor(
 
   prune_actions(num_threads);
 
-  progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
-              static_cast<float>(num_actions_);
+  groundness_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
+                static_cast<float>(num_actions_);
 
-  parameter_selector_ = std::invoke([mode = config.preprocess_mode]() {
-    switch (mode) {
-    case Config::PreprocessMode::Free:
-      return &ParallelPreprocessor::select_free;
-    case Config::PreprocessMode::New:
-      return &ParallelPreprocessor::select_min_new;
-    case Config::PreprocessMode::Rigid:
-      return &ParallelPreprocessor::select_max_rigid;
-    case Config::PreprocessMode::ApproxNew:
-      return &ParallelPreprocessor::select_approx_min_new;
-    case Config::PreprocessMode::ApproxRigid:
-      return &ParallelPreprocessor::select_approx_max_rigid;
-    case Config::PreprocessMode::OneEffect:
-      return &ParallelPreprocessor::select_one_effect;
+  parameter_selector_ = std::invoke([]() {
+    switch (config.parameter_selection) {
+    case Config::ParameterSelection::MostFrequent:
+      return &ParallelGrounder::select_most_frequent;
+    case Config::ParameterSelection::MinNew:
+      return &ParallelGrounder::select_min_new;
+    case Config::ParameterSelection::MaxRigid:
+      return &ParallelGrounder::select_max_rigid;
+    case Config::ParameterSelection::ApproxMinNew:
+      return &ParallelGrounder::select_approx_min_new;
+    case Config::ParameterSelection::ApproxMaxRigid:
+      return &ParallelGrounder::select_approx_max_rigid;
+    case Config::ParameterSelection::FirstEffect:
+      return &ParallelGrounder::select_first_effect;
     }
-    return &ParallelPreprocessor::select_approx_max_rigid;
+    return &ParallelGrounder::select_approx_max_rigid;
   });
 }
 
-ParallelPreprocessor::Status ParallelPreprocessor::get_status() const noexcept {
-  return status_;
+bool ParallelGrounder::is_rigid(const GroundAtom &atom, bool positive) const
+    noexcept {
+  switch (config.cache_policy) {
+  case Config::CachePolicy::None:
+    return is_rigid<false, false>(atom, positive);
+  case Config::CachePolicy::NoUnsuccessful:
+    return is_rigid<true, false>(atom, positive);
+  case Config::CachePolicy::Unsuccessful:
+    return is_rigid<true, true>(atom, positive);
+  default:
+    assert(false);
+    return is_rigid<true, true>(atom, positive);
+  }
 }
 
-void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
-                                  unsigned int num_threads) noexcept {
-  assert(status_ != Status::Interrupt);
-  status_ = Status::Success;
+bool ParallelGrounder::is_useless(const GroundAtom &atom) const noexcept {
+  switch (config.cache_policy) {
+  case Config::CachePolicy::None:
+    return is_useless<false, false>(atom);
+  case Config::CachePolicy::NoUnsuccessful:
+    return is_useless<true, false>(atom);
+  case Config::CachePolicy::Unsuccessful:
+    return is_useless<true, true>(atom);
+  default:
+    assert(false);
+    return is_useless<true, true>(atom);
+  }
+}
+
+void ParallelGrounder::refine(float groundness, util::Seconds timeout,
+                              unsigned int num_threads) {
   util::Timer timer;
 
-  auto check_timeout = [&]() {
-    if (config.check_timeout() ||
-        (timeout > 0s && std::chrono::ceil<std::chrono::seconds>(
-                             timer.get_elapsed_time()) >= timeout)) {
-      return true;
-    }
-    return false;
-  };
-
-  while (progress_ < progress && status_ == Status::Success) {
-    if (check_timeout()) {
-      status_ = Status::Timeout;
-      return;
-    }
-    std::atomic_bool is_grounding = false;
-    for (auto &action_list : actions_) {
-      std::vector<normalized::Action> new_actions;
+  while (groundness_ < groundness) {
+    LOG_INFO(grounder_logger, "Current groundness: %.3f", groundness_);
+    LOG_INFO(grounder_logger, "Current actions: %lu actions",
+             get_num_actions());
+    std::atomic_bool keep_grounding = false;
+    for (size_t i = 0; i < actions_.size(); ++i) {
+      if (action_grounded_[i]) {
+        continue;
+      }
+      std::atomic_bool action_grounded = true;
+      std::vector<Action> new_actions;
       std::mutex new_actions_mutex;
+      std::atomic_uint_fast64_t new_pruned_actions = 0;
       std::vector<std::thread> threads(num_threads);
       std::atomic_uint_fast64_t index_counter = 0;
       std::for_each(threads.begin(), threads.end(), [&](auto &t) {
@@ -127,31 +143,34 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
           std::vector<normalized::Action> thread_new_actions;
           uint_fast64_t action_index;
           while ((action_index = index_counter.fetch_add(
-                      1, std::memory_order_relaxed)) < action_list.size()) {
+                      1, std::memory_order_relaxed)) < actions_[i].size()) {
             if (config.global_stop_flag.load(std::memory_order_acquire)) {
               return;
             }
-            const auto action = action_list[action_index];
+            if (timeout != util::inf_time &&
+                timer.get_elapsed_time() > timeout) {
+              return;
+            }
+            if (config.timeout != util::inf_time &&
+                global_timer.get_elapsed_time() > config.timeout) {
+              throw TimeoutException{};
+            }
+            const auto &action = actions_[i][action_index];
             auto selection = std::invoke(parameter_selector_, *this, action);
             if (!selection.empty()) {
-              is_grounding = true;
+              action_grounded = false;
             }
-            auto assignment_it =
-                AssignmentIterator{selection, action, *problem_};
-            thread_new_actions.reserve(thread_new_actions.size() +
-                                       assignment_it.get_num_instantiations());
-            std::for_each(assignment_it, AssignmentIterator{},
-                          [&](const auto &assignment) {
-                            if (auto new_action = ground(assignment, action);
-                                is_valid(new_action)) {
-                              simplify(new_action);
-                              thread_new_actions.push_back(new_action);
-                            } else {
-                              num_pruned_actions_.fetch_add(
-                                  get_num_instantiated(new_action, *problem_),
-                                  std::memory_order_relaxed);
-                            }
-                          });
+            for (auto it = AssignmentIterator{selection, action, *problem_};
+                 it != AssignmentIterator{}; ++it) {
+              auto [new_action, valid] = ground(action, *it);
+              if (valid) {
+                thread_new_actions.push_back(new_action);
+              } else {
+                new_pruned_actions.fetch_add(
+                    get_num_instantiated(new_action, *problem_),
+                    std::memory_order_relaxed);
+              }
+            };
           }
           std::lock_guard l{new_actions_mutex};
           new_actions.insert(
@@ -162,24 +181,30 @@ void ParallelPreprocessor::refine(float progress, std::chrono::seconds timeout,
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
       if (config.global_stop_flag.load(std::memory_order_acquire)) {
-        status_ = Status::Interrupt;
         return;
       }
-      action_list = std::move(new_actions);
-      progress_ = static_cast<float>(get_num_actions() + num_pruned_actions_) /
-                  static_cast<float>(num_actions_);
-      if (progress_ >= progress) {
+      if (action_grounded) {
+        action_grounded_[i] = true;
+      } else {
+        keep_grounding = true;
+      }
+      num_pruned_actions_ += new_pruned_actions;
+      actions_[i] = std::move(new_actions);
+      groundness_ =
+          static_cast<float>(get_num_actions() + num_pruned_actions_) /
+          static_cast<float>(num_actions_);
+      if (groundness_ >= groundness) {
         break;
       }
     }
-    if (!is_grounding) {
+    if (!keep_grounding) {
       return;
     }
     prune_actions(num_threads);
   }
 }
 
-size_t ParallelPreprocessor::get_num_actions() const noexcept {
+size_t ParallelGrounder::get_num_actions() const noexcept {
   uint_fast64_t sum = 0;
   for (const auto &actions : actions_) {
     sum += actions.size();
@@ -187,69 +212,46 @@ size_t ParallelPreprocessor::get_num_actions() const noexcept {
   return sum;
 }
 
-float ParallelPreprocessor::get_progress() const noexcept { return progress_; }
+float ParallelGrounder::get_groundness() const noexcept { return groundness_; }
 
-ParallelPreprocessor::PredicateId
-ParallelPreprocessor::get_id(const PredicateInstantiation &predicate) const
-    noexcept {
+ParallelGrounder::PredicateId
+ParallelGrounder::get_id(const GroundAtom &atom) const noexcept {
   uint_fast64_t result = 0;
-  for (auto arg : predicate.arguments) {
+  for (auto arg : atom.arguments) {
     result = (result * problem_->constants.size()) + arg;
   }
   return result;
 }
 
-bool ParallelPreprocessor::is_trivially_rigid(
-    const PredicateInstantiation &predicate, bool positive) const noexcept {
-  if (std::binary_search(init_[predicate.definition].begin(),
-                         init_[predicate.definition].end(),
-                         get_id(predicate)) != positive) {
+bool ParallelGrounder::is_trivially_rigid(const GroundAtom &atom,
+                                          bool positive) const noexcept {
+  if (std::binary_search(init_[atom.predicate].begin(),
+                         init_[atom.predicate].end(),
+                         get_id(atom)) != positive) {
     return false;
   }
-  return trivially_rigid_[predicate.definition];
+  return trivially_rigid_[atom.predicate];
 }
 
-bool ParallelPreprocessor::is_trivially_effectless(
-    const PredicateInstantiation &predicate, bool positive) const noexcept {
-  if (std::binary_search(goal_[predicate.definition].begin(),
-                         goal_[predicate.definition].end(),
-                         std::make_pair(get_id(predicate), positive))) {
+bool ParallelGrounder::is_trivially_useless(const GroundAtom &atom) const
+    noexcept {
+  if (std::binary_search(goal_[atom.predicate].begin(),
+                         goal_[atom.predicate].end(), get_id(atom))) {
     return false;
   }
-  return trivially_effectless_[predicate.definition];
+  return trivially_useless_[atom.predicate];
 }
 
-bool ParallelPreprocessor::has_effect(const Action &action,
-                                      const PredicateInstantiation &predicate,
-                                      bool positive) const noexcept {
-  for (const auto &[effect, eff_positive] : action.eff_instantiated) {
-    if (effect == predicate && eff_positive == positive) {
-      return true;
-    }
-  }
-  for (const auto &effect : action.effects) {
-    if (effect.definition == predicate.definition &&
-        effect.positive == positive) {
-      if (is_instantiatable(effect, predicate.arguments, action, *problem_)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool ParallelPreprocessor::has_precondition(
-    const Action &action, const PredicateInstantiation &predicate,
-    bool positive) const noexcept {
-  for (const auto &[precondition, pre_positive] : action.pre_instantiated) {
-    if (precondition == predicate && pre_positive == positive) {
+bool ParallelGrounder::has_precondition(const Action &action,
+                                        const GroundAtom &atom) const noexcept {
+  for (const auto &[precondition, _] : action.ground_preconditions) {
+    if (precondition == atom) {
       return true;
     }
   }
   for (const auto &precondition : action.preconditions) {
-    if (precondition.definition == predicate.definition &&
-        precondition.positive == positive) {
-      if (is_instantiatable(precondition, predicate.arguments, action,
+    if (precondition.atom.predicate == atom.predicate) {
+      if (is_instantiatable(precondition.atom, atom.arguments, action,
                             *problem_)) {
         return true;
       }
@@ -258,353 +260,350 @@ bool ParallelPreprocessor::has_precondition(
   return false;
 }
 
-// No action has this predicate as effect and it is not in init_
-bool ParallelPreprocessor::is_rigid(const PredicateInstantiation &predicate,
-                                    bool positive) const noexcept {
-  auto &rigid = (positive ? successful_cache_[predicate.definition].pos_rigid
-                          : successful_cache_[predicate.definition].neg_rigid);
-  auto &rigid_mutex =
-      (positive ? successful_cache_[predicate.definition].pos_rigid_mutex
-                : successful_cache_[predicate.definition].neg_rigid_mutex);
-  auto &not_rigid =
-      (positive ? unsuccessful_cache_[predicate.definition].pos_rigid
-                : unsuccessful_cache_[predicate.definition].neg_rigid);
-  auto &not_rigid_mutex =
-      (positive ? unsuccessful_cache_[predicate.definition].pos_rigid_mutex
-                : unsuccessful_cache_[predicate.definition].neg_rigid_mutex);
-  auto id = get_id(predicate);
-
-  if (std::lock_guard l{rigid_mutex}; rigid.find(id) != rigid.end()) {
-    return true;
-  }
-
-  if (std::lock_guard l{not_rigid_mutex};
-      not_rigid.find(id) != not_rigid.end()) {
-    return false;
-  }
-
-  if (std::binary_search(init_[predicate.definition].begin(),
-                         init_[predicate.definition].end(), id) != positive) {
-    std::lock_guard l{not_rigid_mutex};
-    not_rigid.insert(id);
-    return false;
-  }
-
-  if (trivially_rigid_[predicate.definition]) {
-    std::lock_guard l{rigid_mutex};
-    rigid.insert(id);
-    return true;
-  }
-
-  for (size_t i = 0; i < problem_->actions.size(); ++i) {
-    const auto &base_action = problem_->actions[i];
-    if (!has_effect(base_action, predicate, !positive)) {
-      continue;
+bool ParallelGrounder::has_effect(const Action &action, const GroundAtom &atom,
+                                  bool positive) const noexcept {
+  for (const auto &[effect, effect_positive] : action.ground_effects) {
+    if (effect == atom && effect_positive == positive) {
+      return true;
     }
-    for (const auto &action : actions_[i]) {
-      if (has_effect(action, predicate, !positive)) {
-        std::lock_guard l{not_rigid_mutex};
-        not_rigid.insert(id);
-        return false;
+  }
+  for (const auto &effect : action.effects) {
+    if (effect.atom.predicate == atom.predicate &&
+        effect.positive == positive) {
+      if (is_instantiatable(effect.atom, atom.arguments, action, *problem_)) {
+        return true;
       }
     }
   }
-  std::lock_guard l{rigid_mutex};
-  rigid.insert(id);
-  return true;
+  return false;
 }
 
-// No action has this predicate as precondition and it is a not a goal
-bool ParallelPreprocessor::is_effectless(
-    const PredicateInstantiation &predicate, bool positive) const noexcept {
-  auto &effectless =
-      (positive ? successful_cache_[predicate.definition].pos_effectless
-                : successful_cache_[predicate.definition].neg_effectless);
-  auto &effectless_mutex =
-      (positive ? successful_cache_[predicate.definition].pos_effectless_mutex
-                : successful_cache_[predicate.definition].neg_effectless_mutex);
-  auto &not_effectless =
-      (positive ? unsuccessful_cache_[predicate.definition].pos_effectless
-                : unsuccessful_cache_[predicate.definition].neg_effectless);
-  auto &not_effectless_mutex =
-      (positive
-           ? unsuccessful_cache_[predicate.definition].pos_effectless_mutex
-           : unsuccessful_cache_[predicate.definition].neg_effectless_mutex);
-  auto id = get_id(predicate);
-
-  if (std::lock_guard l{effectless_mutex};
-      effectless.find(id) != effectless.end()) {
-    return true;
+ParameterSelection
+ParallelGrounder::select_most_frequent(const Action &action) const noexcept {
+  if (action.parameters.empty()) {
+    return {};
   }
 
-  if (std::lock_guard l{not_effectless_mutex};
-      not_effectless.find(id) != not_effectless.end()) {
-    return false;
-  }
+  std::vector<unsigned int> frequency(action.parameters.size(), 0);
 
-  if (std::binary_search(goal_[predicate.definition].begin(),
-                         goal_[predicate.definition].end(),
-                         std::make_pair(id, positive))) {
-    std::lock_guard l{not_effectless_mutex};
-    not_effectless.insert(id);
-    return false;
-  }
-
-  if (trivially_effectless_[predicate.definition]) {
-    std::lock_guard l{effectless_mutex};
-    effectless.insert(id);
-    return true;
-  }
-
-  for (size_t i = 0; i < problem_->actions.size(); ++i) {
-    const auto &action = problem_->actions[i];
-    if (!has_precondition(action, predicate, positive)) {
-      continue;
-    }
-    for (const auto &action : actions_[i]) {
-      if (has_precondition(action, predicate, positive)) {
-        std::lock_guard l{not_effectless_mutex};
-        not_effectless.insert(id);
-        return false;
+  for (const auto &condition : action.preconditions) {
+    for (const auto &a : condition.atom.arguments) {
+      if (a.is_parameter()) {
+        ++frequency[a.get_parameter_index()];
       }
     }
   }
-  std::lock_guard l{effectless_mutex};
-  effectless.insert(id);
-  return true;
-}
-
-ParameterSelection ParallelPreprocessor::select_free(const Action &action) const
-    noexcept {
-  for (size_t i = 0; i < action.parameters.size(); ++i) {
-    if (!action.parameters[i].is_constant()) {
-      return {ParameterIndex{i}};
+  for (const auto &condition : action.effects) {
+    for (const auto &a : condition.atom.arguments) {
+      if (a.is_parameter()) {
+        ++frequency[a.get_parameter_index()];
+      }
     }
+  }
+  size_t max_index = 0;
+  for (size_t i = 1; i < action.parameters.size(); ++i) {
+    if (frequency[i] > frequency[max_index]) {
+      max_index = i;
+    }
+  }
+  if (action.parameters[max_index].is_free()) {
+    return {max_index};
   }
   return {};
 }
 
-ParameterSelection
-ParallelPreprocessor::select_min_new(const Action &action) const noexcept {
-  if (action.preconditions.empty()) {
-    return select_free(action);
-  }
-  auto min_it = action.preconditions.begin();
-  uint_fast64_t min = get_num_instantiated(
-      get_referenced_parameters(*min_it, action), action, *problem_);
-  std::for_each(ConditionIterator{*min_it, action, *problem_},
-                ConditionIterator{}, [&](const auto p) {
-                  if (is_rigid(p, !min_it->positive)) {
-                    --min;
-                  }
-                });
-  for (auto it = std::next(min_it, 1); it != action.preconditions.end(); ++it) {
+ParameterSelection ParallelGrounder::select_min_new(const Action &action) const
+    noexcept {
+  auto min_it = action.preconditions.end();
+  uint_fast64_t min = std::numeric_limits<uint_fast64_t>::max();
+
+  for (auto it = action.preconditions.begin(); it != action.preconditions.end();
+       ++it) {
     uint_fast64_t current = get_num_instantiated(
-        get_referenced_parameters(*it, action), action, *problem_);
-    std::for_each(ConditionIterator{*it, action, *problem_},
-                  ConditionIterator{}, [&](const auto p) {
-                    if (is_rigid(p, !it->positive)) {
-                      --current;
-                    }
-                  });
+        get_referenced_parameters(it->atom, action), action, *problem_);
+    for (auto ground_atom_it = GroundAtomIterator{it->atom, action, *problem_};
+         ground_atom_it != GroundAtomIterator{}; ++ground_atom_it) {
+      if (is_rigid(*ground_atom_it, !it->positive)) {
+        --current;
+      }
+    }
     if (current < min) {
       min = current;
       min_it = it;
     }
   }
-  return get_referenced_parameters(*min_it, action);
+  if (min_it == action.preconditions.end()) {
+    return select_most_frequent(action);
+  }
+  return get_referenced_parameters(min_it->atom, action);
 }
 
 ParameterSelection
-ParallelPreprocessor::select_max_rigid(const Action &action) const noexcept {
-  if (action.preconditions.empty()) {
-    return select_free(action);
-  }
-  auto max_it = action.preconditions.begin();
+ParallelGrounder::select_max_rigid(const Action &action) const noexcept {
+  auto max_it = action.preconditions.end();
   uint_fast64_t max = 0;
-  std::for_each(ConditionIterator{*max_it, action, *problem_},
-                ConditionIterator{}, [&](const auto p) {
-                  if (is_rigid(p, !max_it->positive)) {
-                    ++max;
-                  }
-                });
-  for (auto it = std::next(max_it, 1); it != action.preconditions.end(); ++it) {
-    uint_fast64_t current = 0;
-    std::for_each(ConditionIterator{*it, action, *problem_},
-                  ConditionIterator{}, [&](const auto p) {
-                    if (is_rigid(p, !it->positive)) {
-                      ++current;
-                    }
-                  });
+
+  for (auto it = action.preconditions.begin(); it != action.preconditions.end();
+       ++it) {
+    if (1 + get_num_instantiated(get_referenced_parameters(it->atom, action),
+                                 action, *problem_) <=
+        max) {
+      continue;
+    }
+    uint_fast64_t current = 1;
+    for (auto ground_atom_it = GroundAtomIterator{it->atom, action, *problem_};
+         ground_atom_it != GroundAtomIterator{}; ++ground_atom_it) {
+      if (is_rigid(*ground_atom_it, !it->positive)) {
+        ++current;
+      }
+    }
     if (current > max) {
       max = current;
       max_it = it;
     }
   }
-  return get_referenced_parameters(*max_it, action);
-}
-
-ParameterSelection
-ParallelPreprocessor::select_approx_min_new(const Action &action) const
-    noexcept {
-  auto min = std::min_element(
-      action.preconditions.begin(), action.preconditions.end(),
-      [&](const auto &c1, const auto &c2) {
-        return get_num_instantiated(get_referenced_parameters(c1, action),
-                                    action, *problem_) <
-               get_num_instantiated(get_referenced_parameters(c2, action),
-                                    action, *problem_);
-      });
-
-  if (min == action.preconditions.end()) {
-    return select_free(action);
+  if (max_it == action.preconditions.end()) {
+    return select_most_frequent(action);
   }
-
-  return get_referenced_parameters(*min, action);
+  return get_referenced_parameters(max_it->atom, action);
 }
 
 ParameterSelection
-ParallelPreprocessor::select_approx_max_rigid(const Action &action) const
-    noexcept {
-  auto max = std::max_element(
-      action.preconditions.begin(), action.preconditions.end(),
-      [&](const auto &c1, const auto &c2) {
-        return (c1.positive
-                    ? successful_cache_[c1.definition].neg_rigid.size()
-                    : successful_cache_[c1.definition].pos_rigid.size()) <
-               (c2.positive
-                    ? successful_cache_[c2.definition].neg_rigid.size()
-                    : successful_cache_[c2.definition].pos_rigid.size());
-      });
+ParallelGrounder::select_approx_min_new(const Action &action) const noexcept {
+  auto min_it = action.preconditions.end();
+  uint_fast64_t min = std::numeric_limits<uint_fast64_t>::max();
 
-  if (max == action.preconditions.end()) {
-    return select_free(action);
-  }
-
-  return get_referenced_parameters(*max, action);
-}
-
-ParameterSelection
-ParallelPreprocessor::select_one_effect(const Action &action) const noexcept {
-  std::vector<uint_fast64_t> parameter_occurs(action.parameters.size(), 0);
-  uint_fast64_t max = 0;
-  ParameterIndex max_index{0};
-  for (const auto &effect : action.effects) {
-    auto selection = get_referenced_parameters(effect, action);
-    if (selection.size() > 1) {
-      for (auto p : selection) {
-        ++parameter_occurs[p];
-        if (parameter_occurs[p] > max) {
-          max = parameter_occurs[p];
-          max_index = p;
-        }
-      }
+  for (auto it = action.preconditions.begin(); it != action.preconditions.end();
+       ++it) {
+    uint_fast64_t current = get_num_instantiated(
+        get_referenced_parameters(it->atom, action), action, *problem_);
+    if (current < min) {
+      min = current;
+      min_it = it;
     }
   }
-  if (max == 0) {
-    return {};
+  if (min_it == action.preconditions.end()) {
+    return select_most_frequent(action);
   }
-  return {max_index};
+  return get_referenced_parameters(min_it->atom, action);
 }
 
-void ParallelPreprocessor::prune_actions(unsigned int num_threads) noexcept {
+ParameterSelection
+ParallelGrounder::select_approx_max_rigid(const Action &action) const noexcept {
+  auto max_it = action.preconditions.end();
+  uint_fast64_t max = 0;
+
+  for (auto it = action.preconditions.begin(); it != action.preconditions.end();
+       ++it) {
+    uint_fast64_t current =
+        1 + (it->positive
+                 ? successful_cache_[it->atom.predicate].neg_rigid.size()
+                 : successful_cache_[it->atom.predicate].pos_rigid.size());
+
+    if (current > max) {
+      max = current;
+      max_it = it;
+    }
+  }
+  if (max_it == action.preconditions.end()) {
+    return select_most_frequent(action);
+  }
+  return get_referenced_parameters(max_it->atom, action);
+}
+
+ParameterSelection
+ParallelGrounder::select_first_effect(const Action &action) const noexcept {
+  if (action.effects.empty()) {
+    return select_most_frequent(action);
+  } else {
+    return get_referenced_parameters(action.effects[0].atom, action);
+  }
+}
+
+void ParallelGrounder::prune_actions(unsigned int num_threads) noexcept {
   std::atomic_bool changed;
   do {
     changed = false;
-    std::for_each(unsuccessful_cache_.begin(), unsuccessful_cache_.end(),
-                  [](auto &c) {
-                    c.pos_rigid.clear();
-                    c.neg_rigid.clear();
-                    c.pos_effectless.clear();
-                    c.neg_effectless.clear();
-                  });
-    for (auto &action_list : actions_) {
-      std::vector<std::atomic_bool> remove_action(action_list.size());
-      std::fill(remove_action.begin(), remove_action.end(), false);
+    if (config.cache_policy == Config::CachePolicy::Unsuccessful) {
+      for (auto &c : unsuccessful_cache_) {
+        c.pos_rigid.clear();
+        c.neg_rigid.clear();
+        c.useless.clear();
+      }
+    }
+    for (size_t i = 0; i < actions_.size(); ++i) {
+      std::vector<Action> new_actions;
+      std::mutex new_actions_mutex;
       std::vector<std::thread> threads(num_threads);
+      std::atomic_uint_fast64_t new_pruned_actions = 0;
       std::atomic_uint_fast64_t index_counter = 0;
       std::for_each(threads.begin(), threads.end(), [&](auto &t) {
         t = std::thread{[&]() {
           uint_fast64_t action_index;
           while ((action_index = index_counter.fetch_add(
-                      1, std::memory_order_relaxed)) < action_list.size()) {
-            if (config.global_stop_flag.load(std::memory_order_acquire)) {
-              return;
-            }
-            auto &action = action_list[action_index];
+                      1, std::memory_order_relaxed)) < actions_[i].size()) {
+            const auto &action = actions_[i][action_index];
             if (is_valid(action)) {
-              if (simplify(action)) {
+              auto new_action = action;
+              if (simplify(new_action)) {
                 changed = true;
               }
+              std::lock_guard l{new_actions_mutex};
+              new_actions.push_back(std::move(new_action));
             } else {
-              remove_action[action_index] = true;
-              num_pruned_actions_ += get_num_instantiated(action, *problem_);
+              new_pruned_actions += get_num_instantiated(action, *problem_);
               changed = true;
             }
           }
         }};
       });
       std::for_each(threads.begin(), threads.end(), [](auto &t) { t.join(); });
-      if (config.global_stop_flag.load(std::memory_order_acquire)) {
-        status_ = Status::Interrupt;
-        return;
-      }
-      action_list.erase(
-          std::remove_if(action_list.begin(), action_list.end(),
-                         [&](const auto &a) {
-                           return remove_action[static_cast<size_t>(
-                                                    &a - &*action_list.begin())]
-                               .load();
-                         }),
-          action_list.end());
+      actions_[i] = std::move(new_actions);
+      num_pruned_actions_ += new_pruned_actions;
     }
   } while (changed);
 }
 
-bool ParallelPreprocessor::is_valid(const Action &action) const noexcept {
-  if (std::any_of(
-          action.pre_instantiated.begin(), action.pre_instantiated.end(),
-          [this](const auto &p) { return is_rigid(p.first, !p.second); })) {
+bool ParallelGrounder::is_valid(const Action &action) const noexcept {
+  if (action.ground_effects.empty() && action.effects.empty()) {
+    return false;
+  }
+  if (std::any_of(action.ground_preconditions.begin(),
+                  action.ground_preconditions.end(), [this](const auto &p) {
+                    return is_rigid(p.first, !p.second);
+                  })) {
+    return false;
+  }
+  if (config.pruning_policy == Config::PruningPolicy::Eager &&
+      std::any_of(action.preconditions.begin(), action.preconditions.end(),
+                  [&](const auto &precondition) {
+                    for (auto it = GroundAtomIterator{precondition.atom, action,
+                                                      *problem_};
+                         it != GroundAtomIterator{}; ++it) {
+                      if (!is_rigid(*it, !precondition.positive)) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  })) {
     return false;
   }
 
   if (action.effects.empty() &&
-      std::all_of(action.eff_instantiated.begin(),
-                  action.eff_instantiated.end(), [this](const auto &p) {
-                    return is_rigid(p.first, p.second) ||
-                           is_effectless(p.first, p.second);
+      std::all_of(action.ground_effects.begin(), action.ground_effects.end(),
+                  [this](const auto &e) {
+                    return is_rigid(e.first, e.second) || is_useless(e.first);
                   })) {
     return false;
   }
   return true;
 }
 
-bool ParallelPreprocessor::simplify(Action &action) const noexcept {
+std::pair<normalized::Action, bool> ParallelGrounder::ground(
+    const normalized::Action &action,
+    const normalized::ParameterAssignment &assignment) const noexcept {
+  Action new_action{};
+  new_action.id = action.id;
+  new_action.parameters = action.parameters;
+
+  for (auto [p, c] : assignment) {
+    new_action.parameters[p].set(c);
+  }
+  for (const auto &[precondition, positive] : action.ground_preconditions) {
+    if (is_rigid(precondition, !positive)) {
+      return {new_action, false};
+    } else if (!is_rigid(precondition, positive)) {
+      new_action.ground_preconditions.emplace_back(precondition, positive);
+    }
+  }
+  for (auto precondition : action.preconditions) {
+    if (update_condition(precondition, new_action)) {
+      auto new_precondition = as_ground_atom(precondition.atom);
+      if (is_rigid(new_precondition, !precondition.positive)) {
+        return {new_action, false};
+      } else if (!is_rigid(new_precondition, precondition.positive)) {
+        new_action.ground_preconditions.emplace_back(new_precondition,
+                                                     precondition.positive);
+      }
+    } else {
+      if (config.pruning_policy == Config::PruningPolicy::Eager) {
+        bool unsatisfiable = true;
+        for (auto it = GroundAtomIterator{precondition.atom, action, *problem_};
+             it != GroundAtomIterator{}; ++it) {
+          if (!is_rigid(*it, !precondition.positive)) {
+            unsatisfiable = false;
+            break;
+          }
+        }
+        if (unsatisfiable) {
+          return {new_action, false};
+        }
+        new_action.preconditions.push_back(std::move(precondition));
+      } else {
+        new_action.preconditions.push_back(std::move(precondition));
+      }
+    }
+  }
+  for (const auto &[effect, positive] : action.ground_effects) {
+    if (!is_rigid(effect, positive) && !is_useless(effect)) {
+      new_action.ground_effects.emplace_back(effect, positive);
+    }
+  }
+  for (auto effect : action.effects) {
+    if (update_condition(effect, new_action)) {
+      auto new_effect = as_ground_atom(effect.atom);
+      if (!is_rigid(new_effect, effect.positive) && !is_useless(new_effect)) {
+        new_action.ground_effects.emplace_back(new_effect, effect.positive);
+      }
+    } else {
+      if (config.pruning_policy == Config::PruningPolicy::Eager) {
+        bool keep_effect = false;
+        for (auto it = GroundAtomIterator{effect.atom, action, *problem_};
+             it != GroundAtomIterator{}; ++it) {
+          if (!is_rigid(*it, effect.positive) && !is_useless(*it)) {
+            keep_effect = true;
+            break;
+          }
+        }
+        if (keep_effect) {
+          new_action.effects.push_back(std::move(effect));
+        }
+      } else {
+        new_action.effects.push_back(std::move(effect));
+      }
+    }
+  }
+
+  if (new_action.ground_effects.empty() && new_action.effects.empty()) {
+    return {new_action, false};
+  }
+  return {new_action, true};
+}
+
+bool ParallelGrounder::simplify(Action &action) const noexcept {
   bool changed = false;
-  if (auto it = std::remove_if(action.eff_instantiated.begin(),
-                               action.eff_instantiated.end(),
-                               [this](const auto &p) {
-                                 return is_rigid(p.first, p.second) ||
-                                        (is_effectless(p.first, p.second) &&
-                                         is_effectless(p.first, !p.second));
-                               });
-      it != action.eff_instantiated.end()) {
-    action.eff_instantiated.erase(it, action.eff_instantiated.end());
+  if (auto it = std::remove_if(
+          action.ground_effects.begin(), action.ground_effects.end(),
+          [this](const auto &e) {
+            return is_rigid(e.first, e.second) || is_useless(e.first);
+          });
+      it != action.ground_effects.end()) {
+    action.ground_effects.erase(it, action.ground_effects.end());
     changed = true;
   }
 
   if (auto it = std::remove_if(
-          action.pre_instantiated.begin(), action.pre_instantiated.end(),
+          action.ground_preconditions.begin(),
+          action.ground_preconditions.end(),
           [this](const auto &p) { return is_rigid(p.first, p.second); });
-      it != action.pre_instantiated.end()) {
-    action.pre_instantiated.erase(it, action.pre_instantiated.end());
+      it != action.ground_preconditions.end()) {
+    action.ground_preconditions.erase(it, action.ground_preconditions.end());
     changed = true;
   }
   return changed;
 }
 
-std::shared_ptr<Problem> ParallelPreprocessor::extract_problem() const
-    noexcept {
+std::shared_ptr<Problem> ParallelGrounder::extract_problem() const noexcept {
   auto preprocessed_problem = std::make_shared<Problem>();
   preprocessed_problem->domain_name = problem_->domain_name;
   preprocessed_problem->problem_name = problem_->problem_name;
@@ -613,20 +612,20 @@ std::shared_ptr<Problem> ParallelPreprocessor::extract_problem() const
   preprocessed_problem->type_names = problem_->type_names;
   preprocessed_problem->constants = problem_->constants;
   preprocessed_problem->constant_names = problem_->constant_names;
-  preprocessed_problem->constants_by_type = problem_->constants_by_type;
+  preprocessed_problem->constants_of_type = problem_->constants_of_type;
+  preprocessed_problem->constant_type_map = problem_->constant_type_map;
   preprocessed_problem->predicates = problem_->predicates;
   preprocessed_problem->predicate_names = problem_->predicate_names;
   preprocessed_problem->init = problem_->init;
   std::copy_if(problem_->goal.begin(), problem_->goal.end(),
                std::back_inserter(preprocessed_problem->goal),
                [this](const auto &g) { return !is_rigid(g.first, g.second); });
-
   for (size_t i = 0; i < problem_->actions.size(); ++i) {
     for (auto &action : actions_[i]) {
       preprocessed_problem->actions.push_back(std::move(action));
-      preprocessed_problem->action_names.push_back(problem_->action_names[i]);
     }
   }
+  preprocessed_problem->action_names = problem_->action_names;
 
   return preprocessed_problem;
 }

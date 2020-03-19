@@ -15,7 +15,7 @@
 #include "planner/planner.hpp"
 #ifdef PARALLEL
 #include "engine/parallel_engine.hpp"
-#include "grounding/parallel_grounding.hpp"
+#include "grounder/parallel_grounder.hpp"
 #else
 #include "grounder/grounder.hpp"
 #endif
