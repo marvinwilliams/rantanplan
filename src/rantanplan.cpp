@@ -198,8 +198,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    LOG_INFO(main_logger,
-             "Grounded to %.3f groundness resulting in %lu actions",
+    LOG_INFO(main_logger, "Groundness of %.3f resulting in %lu actions",
              grounder.get_groundness(), grounder.get_num_actions());
     LOG_DEBUG(main_logger, "Grounded problem:\n%s",
               to_string(*grounder.extract_problem()).c_str());

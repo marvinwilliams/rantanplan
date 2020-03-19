@@ -22,7 +22,7 @@ Plan OneshotEngine::start_planning_impl() {
   uint_fast64_t min_encoding_size = std::numeric_limits<uint_fast64_t>::max();
   auto min_grounding = 0.f;
 
-  LOG_INFO(engine_logger, "Targeting 0.000 groundness");
+  LOG_INFO(engine_logger, "Targeting %.3f groundness", 0.f);
   LOG_INFO(engine_logger, "Groundness of %.3f resulting in %lu actions",
            grounder.get_groundness(), grounder.get_num_actions());
 
