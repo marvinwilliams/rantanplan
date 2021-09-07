@@ -2,11 +2,12 @@
 #define SAT_MODEL_HPP
 
 #include <vector>
+#include <cstdint>
 
 namespace sat {
 
 struct Model {
-  bool operator[](size_t i) const noexcept { return assignment[i]; }
+  bool operator[](std::size_t i) const noexcept { return assignment[i]; }
   std::vector<bool> assignment;
 };
 
