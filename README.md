@@ -9,15 +9,18 @@ encode the problem to SAT are provided.
 # Instructions
 ## Build
 To build, type
+
 `cmake -B build -DCMAKE_BUILD_TYPE=Release`
 
 `make -C build rantanplan_glucose`
 
 # Usage
 to use, type
+
 `./build/rantanplan_glucose [Options...] <domain> <problem>`
 
 available options can be obtained with
+
 `./build/rantanplan_glucose --help`
 
 The most interesting are
