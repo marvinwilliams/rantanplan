@@ -10,6 +10,7 @@ encode the problem to SAT are provided.
 ## Build
 To build, type
 `cmake -B build -DCMAKE_BUILD_TYPE=Release`
+
 `make -C build rantanplan_glucose`
 
 # Usage
